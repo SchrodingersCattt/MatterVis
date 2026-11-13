@@ -37,18 +37,30 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import warnings
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 1
 METHODS = ("enumerate", "random")
+# Defaults are conservative *starting points*, not measured phone limits; they
+# were not benchmarked on a device. Each is a keyword argument and may be raised
+# per call up to the hard ceiling (the largest size we are willing to buffer in
+# one synchronous call). Exceeding any bound raises; nothing is truncated.
 MAX_CANDIDATES = 16
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+HARD_MAX_CANDIDATES = 64
+HARD_MAX_SOURCE_BYTES = 64 * 1024 * 1024
+HARD_MAX_PAYLOAD_BYTES = 64 * 1024 * 1024
 MAX_SEED = 2**32 - 1
 _MCK_LOGGER = "molcrys_kit"
 _NOISE_WARNINGS = (DeprecationWarning, PendingDeprecationWarning, FutureWarning)
+# ``warnings.catch_warnings`` swaps process-global state, so concurrent
+# enter/exit pairs can leave a stale "always" filter behind. Calls are
+# serialized around that window only; commit/CIF work runs outside it.
+_CAPTURE_LOCK = threading.RLock()
 
 
 class CandidateRequestError(ValueError):
@@ -60,12 +72,38 @@ class CandidatePayloadError(CandidateRequestError):
 
 
 class _LogCapture(logging.Handler):
-    def __init__(self) -> None:
+    """Collect WARNING+ records emitted by the thread that owns this capture.
+
+    A record from any other thread is not attributed to this request.
+    """
+
+    def __init__(self, thread_id: int) -> None:
         super().__init__(level=logging.WARNING)
+        self.thread_id = thread_id
         self.records: list[logging.LogRecord] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.records.append(record)
+        if record.thread == self.thread_id:
+            self.records.append(record)
+
+
+class _WarningCapture:
+    """Record warnings raised by the owning thread; pass others through.
+
+    Installed as ``warnings.showwarning`` inside ``catch_warnings``. Warnings
+    from other threads go to the previous handler unchanged.
+    """
+
+    def __init__(self, thread_id: int, previous) -> None:
+        self.thread_id = thread_id
+        self.previous = previous
+        self.items: list[warnings.WarningMessage] = []
+
+    def __call__(self, message, category, filename, lineno, file=None, line=None) -> None:
+        if threading.get_ident() == self.thread_id:
+            self.items.append(warnings.WarningMessage(message, category, filename, lineno, file, line))
+        else:
+            self.previous(message, category, filename, lineno, file, line)
 
 
 def generate_disorder_candidates(
@@ -78,6 +116,7 @@ def generate_disorder_candidates(
     independent_assemblies: bool = False,
     max_candidates: int = MAX_CANDIDATES,
     max_payload_bytes: int = MAX_PAYLOAD_BYTES,
+    max_source_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Return up to ``count`` ordered disorder candidates for one CIF.
 
@@ -85,26 +124,50 @@ def generate_disorder_candidates(
     ``count`` as a top-N cap; ``seed`` must be ``None``. ``method="random"``
     is occupancy-weighted sampling and requires an explicit ``seed``; its
     samples may repeat, which is reported through ``duplicate_of`` rather
-    than hidden. MolCrysKit may return fewer candidates than requested; the
-    shortfall is reported as a warning and ``actual_count``, never padded.
+    than hidden. Identity is the *set* of ``kept_indices``: the same atoms in
+    a different order are the same candidate, while ``kept_indices`` itself,
+    candidate order and ids are reported exactly as MolCrysKit returned them.
+    MolCrysKit may return fewer candidates than requested; the shortfall is
+    reported as a warning and ``actual_count``, never padded.
 
     ``independent_assemblies`` defaults to ``False`` (MolCrysKit's legacy
     semantics): separate assemblies are *not* assumed independent. Pass
     ``True`` only when the source confirms it. ``coupled`` is forwarded
-    unchanged. Invalid input, more than ``max_candidates`` requested, or a
-    result larger than ``max_payload_bytes`` raises
-    :class:`CandidateRequestError`; the result is never truncated.
+    unchanged.
+
+    Bounds (never truncating; each violation raises
+    :class:`CandidateRequestError`): ``max_candidates`` (default 16, up to
+    64), ``max_source_bytes`` (default 2 MiB, up to 64 MiB) and
+    ``max_payload_bytes`` (default 8 MiB, up to 64 MiB). The defaults are
+    conservative and have not been measured on a phone; raise them per call
+    when the device can take it. The payload bound is checked after each
+    candidate is built, so an oversized request stops early.
 
     The source file is read-only here and every candidate is committed from a
     fresh session registered from the original source, so candidates are
-    siblings, not a chain. Not thread-safe while MolCrysKit logging is being
-    captured.
+    siblings, not a chain.
+
+    Concurrency: calls may run from several threads. MolCrysKit log records
+    and Python warnings are captured only from the calling thread, and all
+    captured state is restored on error. Because ``warnings.catch_warnings``
+    mutates process-global state, the MolCrysKit generation step is
+    serialized between concurrent calls (commit and CIF writing are not).
+    Limitation: other threads that emit warnings during that window see the
+    ``always`` filter and are delivered to the previous handler, not
+    swallowed; Python cannot isolate warning filters per thread before 3.14.
     """
-    method, count, seed, coupled, independent_assemblies = _validate(
-        method, count, seed, coupled, independent_assemblies, max_candidates, max_payload_bytes
+    method, count, seed, coupled, independent_assemblies, max_source_bytes = _validate(
+        method,
+        count,
+        seed,
+        coupled,
+        independent_assemblies,
+        max_candidates,
+        max_payload_bytes,
+        max_source_bytes,
     )
     source_path = Path(path)
-    source_info, before = _fingerprint_source(source_path)
+    source_info, before = _fingerprint_source(source_path, max_source_bytes)
 
     from molcrys_kit.analysis.disorder.process import (
         generate_ordered_replicas_from_disordered_sites,
@@ -113,24 +176,29 @@ def generate_disorder_candidates(
     from mat_viewer.phone.snapshot import _read
 
     captured: list[dict[str, str]] = []
-    handler = _LogCapture()
+    thread_id = threading.get_ident()
+    handler = _LogCapture(thread_id)
     logger = logging.getLogger(_MCK_LOGGER)
-    logger.addHandler(handler)
-    try:
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            source = _read(source_path)
-            replicas = generate_ordered_replicas_from_disordered_sites(
-                str(source_path),
-                method=method,
-                generate_count=count,
-                random_seed=seed,
-                return_kept_indices=True,
-                coupled=coupled,
-                independent_assemblies=independent_assemblies,
-            )
-    finally:
-        logger.removeHandler(handler)
+    with _CAPTURE_LOCK:
+        logger.addHandler(handler)
+        try:
+            with warnings.catch_warnings():
+                recorder = _WarningCapture(thread_id, warnings.showwarning)
+                warnings.showwarning = recorder
+                warnings.simplefilter("always")
+                source = _read(source_path)
+                replicas = generate_ordered_replicas_from_disordered_sites(
+                    str(source_path),
+                    method=method,
+                    generate_count=count,
+                    random_seed=seed,
+                    return_kept_indices=True,
+                    coupled=coupled,
+                    independent_assemblies=independent_assemblies,
+                )
+        finally:
+            logger.removeHandler(handler)
+    caught = recorder.items
     captured.extend(
         {"source": "molcrys_kit", "category": record.levelname, "message": record.getMessage()}
         for record in handler.records
@@ -149,27 +217,35 @@ def generate_disorder_candidates(
         )
 
     candidates: list[dict[str, Any]] = []
-    first_seen: dict[tuple[int, ...], str] = {}
+    first_seen: dict[frozenset[int], str] = {}
+    running_bytes = 0
     for index, (replica, kept) in enumerate(replicas):
-        kept_indices = [int(item) for item in kept]
+        kept_indices = [int(item) for item in kept]  # provenance: exact MCK order
         candidate_id = f"candidate-{index + 1:03d}"
-        key = tuple(kept_indices)
+        key = frozenset(kept_indices)  # identity: the set of source atoms kept
         duplicate_of = first_seen.get(key)
         first_seen.setdefault(key, candidate_id)
         snapshot, cif, fingerprint = _commit_candidate(
             source, replica, kept_indices, source_path, method, seed, index
         )
-        candidates.append(
-            {
-                "candidate_id": candidate_id,
-                "index": index,
-                "kept_indices": kept_indices,
-                "duplicate_of": duplicate_of,
-                "fingerprint": fingerprint,
-                "snapshot": snapshot,
-                "cif": cif,
-            }
-        )
+        candidate = {
+            "candidate_id": candidate_id,
+            "index": index,
+            "kept_indices": kept_indices,
+            "duplicate_of": duplicate_of,
+            "fingerprint": fingerprint,
+            "snapshot": snapshot,
+            "cif": cif,
+        }
+        # Lower bound of the final payload; fail as soon as it is exceeded.
+        running_bytes += len(json.dumps(candidate, ensure_ascii=False).encode("utf-8")) + 2
+        if running_bytes > max_payload_bytes:
+            raise CandidatePayloadError(
+                f"candidate payload exceeds the {max_payload_bytes} byte limit after "
+                f"{index + 1} of {len(replicas)} candidates; request fewer candidates or "
+                "raise max_payload_bytes"
+            )
+        candidates.append(candidate)
 
     warnings_out = _dedupe(captured)
     if len(candidates) < count:
@@ -196,7 +272,7 @@ def generate_disorder_candidates(
             }
         )
 
-    after = _fingerprint_source(source_path)[1]
+    after = _fingerprint_source(source_path, max_source_bytes)[1]
     if after != before:
         raise CandidateRequestError("source file changed while candidates were generated")
 
@@ -222,19 +298,31 @@ def generate_disorder_candidates(
     return result
 
 
-def _validate(method, count, seed, coupled, independent_assemblies, max_candidates, max_payload_bytes):
+def _validate(
+    method, count, seed, coupled, independent_assemblies, max_candidates, max_payload_bytes,
+    max_source_bytes=None,
+):
     if not isinstance(method, str) or method not in METHODS:
         hint = " (use operate_commit_major for the single optimal candidate)" if method == "optimal" else ""
         raise CandidateRequestError(f"method must be one of {list(METHODS)}, got {method!r}{hint}")
-    if not _is_int(max_candidates) or max_candidates < 1 or max_candidates > MAX_CANDIDATES:
-        raise CandidateRequestError(f"max_candidates must be an integer in 1..{MAX_CANDIDATES}")
-    if not _is_int(max_payload_bytes) or not 0 < max_payload_bytes <= MAX_PAYLOAD_BYTES:
-        raise CandidateRequestError(f"max_payload_bytes must be an integer in 1..{MAX_PAYLOAD_BYTES}")
+    if not _is_int(max_candidates) or not 1 <= max_candidates <= HARD_MAX_CANDIDATES:
+        raise CandidateRequestError(f"max_candidates must be an integer in 1..{HARD_MAX_CANDIDATES}")
+    if not _is_int(max_payload_bytes) or not 0 < max_payload_bytes <= HARD_MAX_PAYLOAD_BYTES:
+        raise CandidateRequestError(
+            f"max_payload_bytes must be an integer in 1..{HARD_MAX_PAYLOAD_BYTES}"
+        )
+    if max_source_bytes is None:
+        max_source_bytes = MAX_SOURCE_BYTES
+    if not _is_int(max_source_bytes) or not 0 < max_source_bytes <= HARD_MAX_SOURCE_BYTES:
+        raise CandidateRequestError(
+            f"max_source_bytes must be an integer in 1..{HARD_MAX_SOURCE_BYTES}"
+        )
     if not _is_int(count) or count < 1:
         raise CandidateRequestError(f"count must be a positive integer, got {count!r}")
     if count > max_candidates:
         raise CandidateRequestError(
-            f"count {count} exceeds the phone limit of {max_candidates} candidates"
+            f"count {count} exceeds the phone limit of {max_candidates} candidates "
+            f"(raise max_candidates, at most {HARD_MAX_CANDIDATES})"
         )
     if method == "random":
         if seed is None:
@@ -246,24 +334,32 @@ def _validate(method, count, seed, coupled, independent_assemblies, max_candidat
     for name, value in (("coupled", coupled), ("independent_assemblies", independent_assemblies)):
         if not isinstance(value, bool):
             raise CandidateRequestError(f"{name} must be a bool, got {value!r}")
-    return method, count, seed, coupled, independent_assemblies
+    return method, count, seed, coupled, independent_assemblies, max_source_bytes
 
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _fingerprint_source(path: Path) -> tuple[dict[str, Any], str]:
+def _fingerprint_source(path: Path, max_bytes: int) -> tuple[dict[str, Any], str]:
     try:
         size = path.stat().st_size
+        if size > max_bytes:
+            raise CandidateRequestError(
+                f"source CIF is {size} bytes, above the {max_bytes} byte phone limit "
+                f"(raise max_source_bytes, at most {HARD_MAX_SOURCE_BYTES})"
+            )
+        with path.open("rb") as handle:
+            data = handle.read(max_bytes + 1)  # bounded: a file that grew is still caught
     except OSError as exc:
         raise CandidateRequestError(f"cannot read source CIF: {exc}") from exc
-    if size > MAX_SOURCE_BYTES:
+    if len(data) > max_bytes:
         raise CandidateRequestError(
-            f"source CIF is {size} bytes, above the {MAX_SOURCE_BYTES} byte phone limit"
+            f"source CIF is above the {max_bytes} byte phone limit "
+            f"(raise max_source_bytes, at most {HARD_MAX_SOURCE_BYTES})"
         )
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    return {"path": str(path), "sha256": digest, "bytes": size}, digest
+    digest = hashlib.sha256(data).hexdigest()
+    return {"path": str(path), "sha256": digest, "bytes": len(data)}, digest
 
 
 def _commit_candidate(source, replica, kept_indices, path, method, seed, index):

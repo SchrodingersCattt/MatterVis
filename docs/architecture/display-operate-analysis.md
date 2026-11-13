@@ -147,7 +147,7 @@ and the phone-like test in `tests/test_phone_snapshot.py` enforces it.
 
 `generate_disorder_candidates(path, *, method="enumerate", count, seed=None,
 coupled=False, independent_assemblies=False, max_candidates=16,
-max_payload_bytes=8 MiB)` (in `mat_viewer/phone/candidates.py`) is additive;
+max_payload_bytes=8 MiB, max_source_bytes=None -> 2 MiB)` (in `mat_viewer/phone/candidates.py`) is additive;
 the four functions above are unchanged. It calls MolCrysKit's
 `generate_ordered_replicas_from_disordered_sites` exactly once and commits
 each returned replica through its own `EffectSession` registered from the
@@ -183,13 +183,39 @@ Result (JSON-serializable, `schema_version` 1):
   the source confirms independent assemblies. `coupled` is forwarded as is.
   Deprecation/Future warnings from libraries are not included.
 - Invalid `method` (including `"optimal"`; use `operate_commit_major`),
-  `count`, `seed`, flags, a `count` above `max_candidates` (hard cap 16), a
-  source above 2 MiB, or a serialized result above `max_payload_bytes` raise
-  `CandidateRequestError` (`ValueError`; `CandidatePayloadError` for payload
-  size). Results are never truncated.
+  `count`, `seed`, flags, or any bound below raise `CandidateRequestError`
+  (`ValueError`; `CandidatePayloadError` for payload size). Results are never
+  truncated. Bounds are keyword arguments with conservative defaults that
+  were **not measured on a phone**; raise them per call when the device can
+  take it, up to hard ceilings (the largest size buffered in one synchronous
+  call; the Dash upload path is not reused here):
+
+  | kwarg | default | ceiling |
+  |---|---|---|
+  | `max_candidates` | 16 | 64 |
+  | `max_source_bytes` | 2 MiB | 64 MiB |
+  | `max_payload_bytes` | 8 MiB | 64 MiB |
+
+  The payload bound is checked after each candidate is built (a lower bound
+  of the final size), so an oversized request stops early; the exact final
+  size is checked again. Errors name the kwarg to raise.
+- Duplicate identity is the **set** of `kept_indices`: the same atoms in a
+  different order are the same candidate. `kept_indices`, `candidate_id`,
+  `index` and order are reported exactly as MolCrysKit returned them, so a
+  duplicate's `cif` may list sites in a different order than its original.
 
 Android can preview any candidate's `snapshot`, export its `cif`, or zip all
 `cif` strings; the ZIP is built in the Android layer from this payload.
 Limitation: the payload carries full P1 CIF plus snapshot per candidate, so it
-is roughly linear in count and structure size. The call is synchronous and
-not thread-safe while MolCrysKit log records are captured.
+is roughly linear in count and structure size. The call is synchronous.
+
+Concurrency: calls are safe from several threads. MolCrysKit log records and
+Python warnings are attributed only to the calling thread, handlers and
+warning filters are restored on error, and the MolCrysKit generation step
+(inside `warnings.catch_warnings`, which mutates process-global state) is
+serialized between concurrent calls with a lock; commits and CIF writing are
+not. Limitation: warning filters cannot be isolated per thread before
+Python 3.14, so another thread that emits a warning during that window sees
+the `always` filter; its warning is passed to the previous handler, not
+recorded or swallowed, and unrelated code that mutates `warnings` itself is
+not protected.

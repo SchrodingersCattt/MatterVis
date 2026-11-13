@@ -362,3 +362,196 @@ print(json.dumps({"n": result["actual_count"], "loaded": loaded, "json": json.du
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
     assert payload == {"n": 3, "loaded": [], "json": True}
+
+
+
+# --- identity: the set of kept source indices -------------------------------
+
+
+def _patch_generate(monkeypatch, transform):
+    """Run the real MolCrysKit solver once, then reshape its (replica, kept) list."""
+    import molcrys_kit.analysis.disorder.process as process
+
+    real = process.generate_ordered_replicas_from_disordered_sites
+
+    def generate(*args, **kwargs):
+        return transform(real(*args, **kwargs))
+
+    monkeypatch.setattr(process, "generate_ordered_replicas_from_disordered_sites", generate)
+
+
+def test_duplicate_identity_ignores_index_order_but_keeps_provenance(cif, monkeypatch):
+    def reshape(replicas):
+        (r0, k0), (r1, k1) = replicas[0], replicas[1]
+        return [
+            (r0, list(k0)),
+            (r1, list(k1)),
+            (r0, list(reversed(k0))),  # same set, different order -> duplicate of 001
+            (r1, [k1[1], k1[0], *k1[2:]]),  # same set, swapped -> duplicate of 002
+            (r0, list(reversed(k0))),  # exact repeat of 003 -> still duplicate of 001
+        ]
+
+    _patch_generate(monkeypatch, reshape)
+    result = _gen(cif, count=5)
+    kept = _kept(result)
+    assert kept == [[0, 1, 2], [0, 3, 4], [2, 1, 0], [3, 0, 4], [2, 1, 0]]  # order untouched
+    assert [c["candidate_id"] for c in result["candidates"]] == [
+        f"candidate-{i:03d}" for i in range(1, 6)
+    ]
+    assert [c["index"] for c in result["candidates"]] == [0, 1, 2, 3, 4]
+    assert [c["duplicate_of"] for c in result["candidates"]] == [
+        None, None, "candidate-001", "candidate-002", "candidate-001",
+    ]
+    assert result["actual_count"] == 5 and result["unique_count"] == 2
+    assert any("3 of 5 candidates repeat" in m for m in _messages(result))
+
+
+def test_duplicate_identity_random_repeated_samples(cif, monkeypatch):
+    import random
+
+    rng = random.Random(20260113)
+    pools = [[0, 1, 2], [0, 3, 4], [0, 2, 3], [0, 1, 4]]
+
+    def reshape(replicas):
+        replica = replicas[0][0]
+        out = []
+        for _ in range(16):
+            kept = list(rng.choice(pools))
+            rng.shuffle(kept)  # same set may arrive in any order
+            out.append((replica, kept))
+        return out
+
+    _patch_generate(monkeypatch, reshape)
+    result = _gen(cif, method="random", count=16, seed=1)
+    first: dict[frozenset, str] = {}
+    for candidate in result["candidates"]:
+        key = frozenset(candidate["kept_indices"])
+        assert candidate["duplicate_of"] == first.get(key)
+        first.setdefault(key, candidate["candidate_id"])
+    assert result["unique_count"] == len(first) <= 4 < result["actual_count"] == 16
+    assert len(result["candidates"]) == 16  # nothing dropped
+    # Provenance lists are the sampled orders, not sorted copies.
+    assert any(c["kept_indices"] != sorted(c["kept_indices"]) for c in result["candidates"])
+
+
+def test_real_random_samples_use_set_identity(cif):
+    result = _gen(cif, method="random", count=16, seed=7)
+    seen = {}
+    for candidate in result["candidates"]:
+        key = frozenset(candidate["kept_indices"])
+        assert candidate["duplicate_of"] == seen.get(key)
+        seen.setdefault(key, candidate["candidate_id"])
+    assert result["unique_count"] == len(seen)
+
+
+# --- concurrency / isolation ------------------------------------------------
+
+
+def _global_state():
+    import logging
+
+    return (
+        list(warnings.filters),
+        warnings.showwarning,
+        list(logging.getLogger("molcrys_kit").handlers),
+        logging.getLogger("molcrys_kit").level,
+    )
+
+
+def test_concurrent_calls_are_isolated_and_restore_global_state(cif):
+    from concurrent.futures import ThreadPoolExecutor
+
+    jobs = [
+        {"method": "enumerate", "count": 4, "independent_assemblies": True},
+        {"method": "enumerate", "count": 5},  # emits MCK's assembly warning
+        {"method": "random", "count": 6, "seed": 3},
+        {"method": "random", "count": 6, "seed": 4, "coupled": True},
+    ] * 3
+    expected = [_gen(cif, **job) for job in jobs]  # serial reference
+    before = _global_state()
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        got = list(pool.map(lambda job: generate_disorder_candidates(cif, **job), jobs))
+    assert got == expected  # no cross-request warnings, ids, or kept lists
+    assert _global_state() == before  # no leaked "always" filter or handler
+
+
+def test_only_calling_thread_records_are_attributed(cif, monkeypatch):
+    import logging
+    import threading
+
+    log = logging.getLogger("molcrys_kit")
+
+    def reshape(replicas):
+        def foreign():
+            log.warning("FOREIGN log")
+            warnings.warn("FOREIGN warning", UserWarning)
+
+        worker = threading.Thread(target=foreign)
+        worker.start()
+        worker.join()
+        log.warning("OWN log")
+        warnings.warn("OWN warning", UserWarning)
+        return replicas
+
+    _patch_generate(monkeypatch, reshape)
+    before = _global_state()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # keep the foreign warning off the test output
+        result = generate_disorder_candidates(cif, count=2)
+    messages = _messages(result)
+    assert "OWN log" in messages and "OWN warning" in messages
+    assert not any("FOREIGN" in m for m in messages)
+    assert before[2:] == _global_state()[2:]
+
+
+def test_capture_state_is_restored_when_generation_fails(cif, monkeypatch):
+    def boom(replicas):
+        warnings.warn("before failure", UserWarning)
+        raise RuntimeError("solver exploded")
+
+    _patch_generate(monkeypatch, boom)
+    before = _global_state()
+    with pytest.raises(RuntimeError, match="solver exploded"):
+        generate_disorder_candidates(cif, count=2)
+    assert _global_state() == before
+    # A failed call must not leave the lock held for the next one.
+    monkeypatch.undo()
+    assert _gen(cif, count=2)["actual_count"] == 2
+
+
+# --- configurable bounds, never truncating ------------------------------------
+
+
+def test_bounds_are_explicit_configurable_and_never_truncate(cif, tmp_path: Path):
+    import mat_viewer.phone.candidates as module
+
+    size = cif.stat().st_size
+    with pytest.raises(CandidateRequestError, match="max_source_bytes"):
+        _gen(cif, count=1, max_source_bytes=size - 1)
+    assert _gen(cif, count=1, max_source_bytes=size)["source"]["bytes"] == size
+    for bad in (0, -1, True, 1.5, module.HARD_MAX_SOURCE_BYTES + 1):
+        with pytest.raises(CandidateRequestError, match="max_source_bytes"):
+            _gen(cif, count=1, max_source_bytes=bad)
+    # Above the old hard caps now allowed up to the documented ceilings.
+    assert _gen(cif, count=17, max_candidates=17, independent_assemblies=True)["actual_count"] == 4
+    assert _gen(cif, count=1, max_payload_bytes=module.HARD_MAX_PAYLOAD_BYTES)["actual_count"] == 1
+    with pytest.raises(CandidateRequestError, match="max_candidates"):
+        _gen(cif, count=1, max_candidates=module.HARD_MAX_CANDIDATES + 1)
+    assert module.MAX_CANDIDATES == 16 and module.MAX_PAYLOAD_BYTES == 8 * 1024 * 1024
+
+
+def test_payload_limit_is_checked_incrementally(cif, monkeypatch):
+    import mat_viewer.phone.candidates as module
+
+    commits = []
+    real = module._commit_candidate
+
+    def counting(*args, **kwargs):
+        commits.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_commit_candidate", counting)
+    one = len(json.dumps(_gen(cif, count=1)["candidates"][0]))
+    with pytest.raises(CandidatePayloadError, match=r"after 1 of \d+ candidates.*max_payload_bytes"):
+        _gen(cif, count=4, independent_assemblies=True, max_payload_bytes=one)
+    assert len(commits) == 2  # 1 for the sizing call + 1 before stopping, not 4 more
