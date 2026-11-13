@@ -30,12 +30,18 @@ dependencies = [
     "ase",
     # PyPI 0.8.0 does not include BondRecord.role,
     # MolecularCrystal.get_connectivity_report(), or find_polyhedra
-    # disorder_policy (major / exclusive / as_refined). Track post-merge main
-    # commit ee45c7e7 until those APIs are published, then restore a version range.
+    # disorder_policy (major / exclusive / as_refined). Track open PR #225 branch
+    # commit 9616debf until those APIs are published, then restore a version range.
+    # This follow-up makes lightweight CIF formula/Z metadata case-insensitive
+    # while preserving unrelated multiline text. It also carries the phone path
+    # (fractional-site Atoms stand-in).
+    # requirements/ci-constraints.txt, mat_viewer/capabilities.py and
+    # tests/test_ci_environment_contract.py must name this same commit; pip
+    # rejects a constraint file whose direct URL differs from this one.
     # Do not invent a PyPI version for this commit.
     # identify_molecules defaults to as_refined; only shell construction
     # defaults to major. Exclusive shell selection keeps whole orientations.
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@ee45c7e7c9e44f50b0b55ed46ee5dca306550541",
+    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@9616debfdae715c75313263f5cedca1788fddf4a",
 ]
 
 [project.scripts]
@@ -73,6 +79,9 @@ test = [
     "tomli; python_version < '3.11'",
 ]
 dev = ["matter-vis[all,test]", "build", "ruff"]
+
+[tool.setuptools]
+license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
 include = ["mat_viewer*"]

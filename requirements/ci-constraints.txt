@@ -114,7 +114,7 @@ mdit-py-plugins==0.6.1
     # via textual
 mdurl==0.1.2
     # via markdown-it-py
-molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@ee45c7e7c9e44f50b0b55ed46ee5dca306550541
+molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@9616debfdae715c75313263f5cedca1788fddf4a
     # via matter-vis (pyproject.toml)
 monty==2025.3.3
     # via pymatgen

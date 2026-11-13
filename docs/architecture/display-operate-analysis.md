@@ -77,3 +77,145 @@ The mixed `_OperationsBackendMixin`, `_STRUCTURAL_OP_KINDS`, and
 bodies live in `DisplayService`. `molecular_crystal_from_scene` rejects
 rendered traces and materializes only an explicit `scientific_snapshot`.
 There is no `mat_viewer.ops.source` or `mat_viewer.ops.display` package.
+
+## Phone snapshots
+
+`mat_viewer.phone` is the Android-facing facade over the same effects. It
+imports no desktop chemistry (ASE, SciPy, pymatgen, spglib, Matplotlib,
+Pillow) on its own path; the MolCrysKit commit that provides the phone
+path is named in `pyproject.toml`.
+
+`mat_viewer/phone/` is a folder-first package: `__init__.py` re-exports the
+public functions below and `snapshot.py` holds the implementation, so
+`from mat_viewer.phone import analyze_cif` is unchanged.
+
+| Function | Returns |
+|---|---|
+| `analyze_cif(path)` | Revision-1 snapshot: `cell`, `sites` (Cartesian `position`, `fractional_position`, `image_shift`, `occupancy`, `alpha`, `disorder_group`, `disorder_assembly`), `bonds` |
+| `display(snapshot, disorder_group=None)` | View-only copy; sets `visible`, never `occupancy` |
+| `operate_commit_major(path)` | Snapshot of the committed major disorder component (`operation = "commit_disorder_candidate"`, `revision = 2`) |
+| `operate_commit_major_with_cif(path)` | `{"snapshot": <identical to operate_commit_major>, "cif": <str>}` |
+
+Each entry of `bonds` is a pass-through of one MolCrysKit `BondRecord`:
+
+| Key | Meaning |
+|---|---|
+| `left`, `right` | `left_global_index`, `right_global_index` |
+| `role` | `"covalent"` or `"coordination"`, verbatim from `BondRecord.role` |
+| `vector_A` | Canonical Cartesian bond vector in Å, drawn from the `left` site |
+| `right_image_shift` | Integer lattice translation of the right site relative to the left site |
+
+`vector_A` and `right_image_shift` were added to the original
+`left`/`right`/`role` keys; existing keys are unchanged. A client must draw
+a bond as `position[left]` to `position[left] + vector_A`. Connecting the
+two displayed endpoints is wrong for periodic-image bonds, where
+`position[right] - position[left]` differs from `vector_A`. Self-image bonds
+(`left == right`, non-zero shift) are valid. Draw sticks for `covalent`;
+`coordination` bonds are kept for topology and are not sticks. MatterVis
+copies these fields and derives no chemistry.
+
+Each entry of `sites` also passes through two MolCrysKit `SiteRecord` fields:
+
+| Key | Meaning |
+|---|---|
+| `fractional_position` | `SiteRecord.fractional_position`, three floats, verbatim |
+| `image_shift` | `SiteRecord.image_shift`, three ints: lattice translation used to make the molecule contiguous |
+
+These were added next to the existing site keys; `position`, ordering and
+all existing keys are unchanged. `position` stays the contiguous-molecule
+Cartesian site, so `fractional_position` can lie outside `[0, 1)`. A client
+that offers a unit-cell view may wrap a site with
+`fractional_position - floor(fractional_position)` and convert with `cell`.
+`image_shift` is per-site provenance only; it is not a generally valid
+whole-molecule or home-cell wrapping shortcut, so do not wrap by subtracting
+it; a periodic bond is drawn from the wrapped `left` using
+`vector_A`. Wrapping is a display choice; MatterVis derives no chemistry and
+the snapshot keeps the contiguous view by default.
+
+`operate_commit_major` and `operate_commit_major_with_cif` share one
+internal operation: a single `EffectSession.operate` call and a single
+MolCrysKit replica generation. The CIF is MolCrysKit's public
+`write_cif(crystal, representation="p1")` applied to the same checked-out
+crystal that produced the snapshot — never to display coordinates and never
+after a second chemistry run. The CIF is a complete P1 cell and re-reads
+through `analyze_cif` to the same cell, symbols, positions and occupancies.
+The writer must be importable without ASE; that is a MolCrysKit contract,
+and the phone-like test in `tests/test_phone_snapshot.py` enforces it.
+
+
+### Multiple ordered disorder candidates
+
+`generate_disorder_candidates(path, *, method="enumerate", count, seed=None,
+coupled=False, independent_assemblies=False, max_candidates=16,
+max_payload_bytes=8 MiB, max_source_bytes=None -> 2 MiB)` (in `mat_viewer/phone/candidates.py`) is additive;
+the four functions above are unchanged. It calls MolCrysKit's
+`generate_ordered_replicas_from_disordered_sites` exactly once and commits
+each returned replica through its own `EffectSession` registered from the
+original source, so candidates are siblings (each snapshot is `revision = 2`
+of its own session), never a chain. The source file is not modified and is
+not replaced by any candidate; Android keeps the original.
+
+Result (JSON-serializable, `schema_version` 1):
+
+```
+{method, requested_count, seed, coupled, independent_assemblies,
+ actual_count, unique_count, source: {path, sha256, bytes},
+ candidates: [{candidate_id, index, kept_indices, duplicate_of,
+               fingerprint, snapshot, cif}],
+ warnings: [{source, category, message}]}
+```
+
+- `candidate_id` is `candidate-NNN`, the 1-based position in MolCrysKit's
+  return order; order is preserved. `snapshot` has the same shape as
+  `operate_commit_major`; `cif` is the P1 `write_cif` text of the same
+  checked-out crystal, so both describe the same candidate.
+- `enumerate` is MolCrysKit's deterministic enumeration; `count` is a top-N
+  cap and `seed` must be `None`. `random` is occupancy-weighted sampling with
+  replacement and requires an explicit integer `seed` (0..2^32-1), which is
+  echoed back. Random samples can repeat: repeats keep their own ID and
+  position and set `duplicate_of` to the first matching `candidate_id`;
+  `unique_count` counts distinct `kept_indices` sets.
+- MolCrysKit may return fewer than requested (`actual_count < requested_count`);
+  a `FewerCandidates` warning is added and nothing is padded.
+- `independent_assemblies` defaults to `False` (MolCrysKit legacy semantics:
+  separate assemblies are not assumed independent) and MolCrysKit's warning
+  is returned in `warnings` (`source = "molcrys_kit"`). Pass `True` only when
+  the source confirms independent assemblies. `coupled` is forwarded as is.
+  Deprecation/Future warnings from libraries are not included.
+- Invalid `method` (including `"optimal"`; use `operate_commit_major`),
+  `count`, `seed`, flags, or any bound below raise `CandidateRequestError`
+  (`ValueError`; `CandidatePayloadError` for payload size). Results are never
+  truncated. Bounds are keyword arguments with conservative defaults that
+  were **not measured on a phone**; raise them per call when the device can
+  take it, up to hard ceilings (the largest size buffered in one synchronous
+  call; the Dash upload path is not reused here):
+
+  | kwarg | default | ceiling |
+  |---|---|---|
+  | `max_candidates` | 16 | 64 |
+  | `max_source_bytes` | 2 MiB | 64 MiB |
+  | `max_payload_bytes` | 8 MiB | 64 MiB |
+
+  The payload bound is checked after each candidate is built (a lower bound
+  of the final size), so an oversized request stops early; the exact final
+  size is checked again. Errors name the kwarg to raise.
+- Duplicate identity is the **set** of `kept_indices`: the same atoms in a
+  different order are the same candidate. `kept_indices`, `candidate_id`,
+  `index` and order are reported exactly as MolCrysKit returned them, so a
+  duplicate's `cif` may list sites in a different order than its original.
+
+Android can preview any candidate's `snapshot`, export its `cif`, or zip all
+`cif` strings; the ZIP is built in the Android layer from this payload.
+Limitation: the payload carries full P1 CIF plus snapshot per candidate, so it
+is roughly linear in count and structure size. The call is synchronous.
+
+Concurrency: calls are safe from several threads. MolCrysKit log records and
+Python warnings are attributed only to the calling thread, handlers and
+warning filters are restored on error, and the MolCrysKit generation step
+(inside `warnings.catch_warnings`, which mutates process-global state) is
+serialized between concurrent calls with a lock; commits and CIF writing are
+not. Limitation: warning filters cannot be isolated per thread before
+Python 3.14, so another thread that emits a warning during that window sees
+the `always` filter; its warning is passed to the previous handler, not
+recorded or swallowed, and unrelated code that mutates `warnings` itself is
+not protected.

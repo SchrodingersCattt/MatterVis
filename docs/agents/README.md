@@ -73,6 +73,8 @@ The same routing as a quick table:
 | Draw styled, depth-tested display-only bond hints without changing chemical connectivity | [`scene_api.md#display-only-bond-annotations`](scene_api.md#display-only-bond-annotations) |
 | Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
 | Commit a structural supercell, slab, insertion, deletion, substitution, hydrogen, solvent, cluster, or disorder candidate | [`effects_api.md`](effects_api.md) |
+| Feed an Android/phone client a snapshot, or commit the major disorder component and get its P1 CIF in one operation | [`../architecture/display-operate-analysis.md#phone-snapshots`](../architecture/display-operate-analysis.md#phone-snapshots) |
+| Generate a bounded, ordered set of disorder candidates (enumerate or seeded random), each with snapshot and P1 CIF, for Android preview/export | [`../architecture/display-operate-analysis.md#multiple-ordered-disorder-candidates`](../architecture/display-operate-analysis.md#multiple-ordered-disorder-candidates) |
 | Preview and commit atom/molecule coordinate edits or revision-local bond perception | [`effects_api.md`](effects_api.md) |
 | Inspect a preview candidate's coordinates, bonds, and molecule grouping before commit | [`effects_api.md`](effects_api.md) |
 | Wrap displayed unit-cell atoms into the home cell, including bond-context images that stay aligned across lattice translations, without changing source coordinates | [`scene_api.md`](scene_api.md) |
