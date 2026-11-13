@@ -211,10 +211,17 @@ def test_color_cube_rejects_a_grid_that_does_not_cover_the_surface(
 
 
 def test_cube_mesh_material_coefficients_are_validated(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match=r"ambient \+ diffuse"):
+    with pytest.raises(ValueError, match="non-negative"):
         cube_isosurface_meshes(
-            _cube(tmp_path), isovalue=0.5, ambient=0.7, diffuse=0.4,
+            _cube(tmp_path), isovalue=0.5, ambient=-0.1,
         )
+    meshes = cube_isosurface_meshes(
+        _cube(tmp_path), isovalue=0.5, ambient=0.7, diffuse=0.4,
+    )
+    material = meshes[0]["metadata"]["material"]
+    assert material["ambient"] == 0.7
+    assert material["diffuse"] == 0.4
+    assert material["ambient"] + material["diffuse"] > 1.0
 
 def test_cube_meshes_are_attached_to_the_loaded_scene(tmp_path: Path) -> None:
     @dataclass

@@ -10,6 +10,11 @@ from ..config.colors import (
     CUBE_ELEMENT_COLORS,
 )
 from ..config import element_color as configured_element_color
+from .annotations import (
+    axis_indicator_traces,
+    cell_box_trace,
+    sign_legend_annotations,
+)
 from .io import (
     CubeAtom,
     CubeData,
@@ -65,8 +70,24 @@ def orbital_isosurface_traces(
     positive_color: str = "#D55E00",
     negative_color: str = "#0072B2",
     opacity: float = 0.55,
+    material: str | None = None,
 ) -> list[go.Isosurface]:
-    """Create positive and negative orbital isosurface traces (Plotly volume)."""
+    """Create positive and negative orbital isosurface traces (Plotly volume).
+
+    Lighting is the shared isosurface material. Omitting ``material`` uses
+    the historical Lambert pair (ambient 0.68, diffuse 0.32, specular 0),
+    not Plotly's implicit volume lighting. ``opacity`` still defaults to
+    0.55. A coefficient Plotly cannot store raises
+    ``IsosurfaceShadingUnsupported`` instead of being clamped.
+    """
+    from ..render.isosurface_material import (
+        plotly_surface_kwargs,
+        resolve_isosurface_material,
+    )
+
+    surface_shading = plotly_surface_kwargs(
+        resolve_isosurface_material(material, opacity=float(opacity))
+    )
     x, y, z, values = cube_grid(cube, stride=stride)
     iso = (
         float(isovalue)
@@ -89,6 +110,8 @@ def orbital_isosurface_traces(
                 surface_count=1,
                 opacity=opacity,
                 colorscale=[[0.0, positive_color], [1.0, positive_color]],
+                lighting=surface_shading["lighting"],
+                lightposition=surface_shading["lightposition"],
                 caps=dict(x_show=False, y_show=False, z_show=False),
                 showscale=False,
                 name="+ orbital",
@@ -106,6 +129,8 @@ def orbital_isosurface_traces(
                 surface_count=1,
                 opacity=opacity,
                 colorscale=[[0.0, negative_color], [1.0, negative_color]],
+                lighting=surface_shading["lighting"],
+                lightposition=surface_shading["lightposition"],
                 caps=dict(x_show=False, y_show=False, z_show=False),
                 showscale=False,
                 name="- orbital",
@@ -185,6 +210,7 @@ def orbital_mesh_traces(
     min_volume_voxels: int = 0,
     atom_mask_radius: float | None = None,
     extra_atom_positions: np.ndarray | None = None,
+    material: str | None = None,
 ) -> list[go.Mesh3d]:
     """Build positive/negative orbital surfaces as ``go.Mesh3d`` traces.
 
@@ -192,6 +218,15 @@ def orbital_mesh_traces(
     renders reliably both interactively and via kaleido static export
     (unlike ``go.Isosurface`` whose volume ray-marching can drop out under
     Kaleido). This is the recommended path for publication-quality figures.
+
+    ``material`` is ``matte``, ``glossy``, or omitted. The omitted material
+    stays the shared historical Lambert pair (ambient 0.68, diffuse 0.32,
+    specular 0). That replaced the older fixed Plotly lighting (ambient
+    0.85, diffuse 0.55, specular 0.2) and is not changed further here.
+    Named presets are forwarded as stored. A coefficient outside the
+    interval Plotly can store raises ``IsosurfaceShadingUnsupported``
+    instead of being clamped. Trace opacity stays the ``opacity`` argument
+    and still defaults to 0.6.
     """
     try:
         from skimage.measure import marching_cubes
@@ -201,7 +236,14 @@ def orbital_mesh_traces(
             "install with `pip install scikit-image`"
         ) from exc
 
+    from ..render.isosurface_material import (
+        plotly_surface_kwargs,
+        resolve_isosurface_material,
+    )
+
     stride = max(1, int(stride))
+    surface_material = resolve_isosurface_material(material, opacity=float(opacity))
+    surface_shading = plotly_surface_kwargs(surface_material)
     values = cube.values[::stride, ::stride, ::stride]
     iso = (
         float(isovalue)
@@ -280,8 +322,8 @@ def orbital_mesh_traces(
             color=color,
             opacity=opacity,
             flatshading=flatshading,
-            lighting=dict(ambient=0.85, diffuse=0.55, specular=0.2, roughness=0.55),
-            lightposition=dict(x=200, y=200, z=200),
+            lighting=surface_shading["lighting"],
+            lightposition=surface_shading["lightposition"],
             name=name,
             hoverinfo="name",
             showlegend=False,
@@ -825,146 +867,3 @@ def export_static(
     out = Path(path)
     fig.write_image(str(out), width=width, height=height, scale=scale)
     return out
-
-
-def cell_box_trace(
-    lattice: np.ndarray,
-    origin: np.ndarray | None = None,
-    *,
-    color: str = "#444444",
-    width: float = 3.0,
-) -> go.Scatter3d:
-    """Return a single Scatter3d trace tracing the 12 edges of a parallelepiped."""
-    if origin is None:
-        origin = np.zeros(3)
-    a, b, c = lattice[0], lattice[1], lattice[2]
-    o = np.asarray(origin, dtype=float)
-    corners = np.array(
-        [o, o + a, o + a + b, o + b, o + c, o + a + c, o + a + b + c, o + b + c]
-    )
-    edges = [
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 0),
-        (4, 5),
-        (5, 6),
-        (6, 7),
-        (7, 4),
-        (0, 4),
-        (1, 5),
-        (2, 6),
-        (3, 7),
-    ]
-    xs: list[float] = []
-    ys: list[float] = []
-    zs: list[float] = []
-    for i, j in edges:
-        xs.extend([corners[i, 0], corners[j, 0], None])
-        ys.extend([corners[i, 1], corners[j, 1], None])
-        zs.extend([corners[i, 2], corners[j, 2], None])
-    return _plotly_go().Scatter3d(
-        x=xs,
-        y=ys,
-        z=zs,
-        mode="lines",
-        line=dict(color=color, width=width),
-        hoverinfo="skip",
-        showlegend=False,
-        name="cell",
-    )
-
-
-def sign_legend_annotations(
-    *,
-    positive_color: str = "#D55E00",
-    negative_color: str = "#0072B2",
-    x: float = 0.99,
-    y: float = 0.99,
-    fontsize: int = 14,
-    spacing: float = 0.035,
-) -> list[dict]:
-    """Two-line +/- sign legend for orbital phase (paper-coord annotations)."""
-    return [
-        dict(
-            xref="paper",
-            yref="paper",
-            x=x,
-            y=y,
-            xanchor="right",
-            yanchor="top",
-            text=f"<b><span style='color:{positive_color}'>\u25a0</span> +</b>",
-            showarrow=False,
-            font=dict(
-                family="Arial, Helvetica, sans-serif", size=fontsize, color="#000"
-            ),
-        ),
-        dict(
-            xref="paper",
-            yref="paper",
-            x=x,
-            y=y - spacing,
-            xanchor="right",
-            yanchor="top",
-            text=f"<b><span style='color:{negative_color}'>\u25a0</span> \u2212</b>",
-            showarrow=False,
-            font=dict(
-                family="Arial, Helvetica, sans-serif", size=fontsize, color="#000"
-            ),
-        ),
-    ]
-
-
-def axis_indicator_traces(
-    lattice: np.ndarray,
-    origin: np.ndarray | None = None,
-    *,
-    length: float = 2.5,
-    width: float = 6.0,
-    label_offset: float = 0.6,
-    colors: tuple[str, str, str] = ("#D62728", "#2CA02C", "#1F77B4"),
-    labels: tuple[str, str, str] = ("a", "b", "c"),
-) -> list[go.Scatter3d]:
-    """Three short ``a/b/c`` arrows + labels anchored at ``origin``.
-
-    Lengths are normalised so the indicator is the same physical size in
-    Angstrom along each axis, regardless of the lattice anisotropy.
-    """
-    if origin is None:
-        origin = np.zeros(3)
-    o = np.asarray(origin, dtype=float)
-    traces: list[go.Scatter3d] = []
-    for vec, color, label in zip(lattice, colors, labels):
-        n = float(np.linalg.norm(vec))
-        if n < 1e-9:
-            continue
-        end = o + (vec / n) * length
-        traces.append(
-            _plotly_go().Scatter3d(
-                x=[o[0], end[0]],
-                y=[o[1], end[1]],
-                z=[o[2], end[2]],
-                mode="lines",
-                line=dict(color=color, width=width),
-                hoverinfo="skip",
-                showlegend=False,
-                name=f"axis-{label}",
-            )
-        )
-        tip = o + (vec / n) * (length + label_offset)
-        traces.append(
-            _plotly_go().Scatter3d(
-                x=[tip[0]],
-                y=[tip[1]],
-                z=[tip[2]],
-                mode="text",
-                text=[f"<b>{label}</b>"],
-                textfont=dict(
-                    color=color, size=18, family="Arial, Helvetica, sans-serif"
-                ),
-                hoverinfo="skip",
-                showlegend=False,
-                name=f"label-{label}",
-            )
-        )
-    return traces
