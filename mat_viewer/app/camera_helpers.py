@@ -55,39 +55,186 @@ def _status_message(message: str, level: str = "info") -> tuple[str, str]:
     return message, f"status-banner status-banner--{level}"
 
 
+_SUMMARY_SCOPE_LABELS = {
+    "formula_unit": "Formula unit cluster",
+    "unit_cell": "Unit cell",
+    "asymmetric_unit": "Asymmetric unit",
+    "cluster": "Isolated cluster",
+}
+
+
+def _disorder_summary_inputs(state: dict) -> tuple:
+    """Fields that change which atoms the disorder summary is counting."""
+    from ..transforms import transforms_cache_key
+
+    options = state.get("display_options") or ()
+    if isinstance(options, (str, bytes)):
+        options = ()
+    option_set = set(options)
+    return (
+        state.get("structure"),
+        state.get("display_mode"),
+        "hydrogens" in option_set,
+        "wrap_into_cell" in option_set,
+        transforms_cache_key(state.get("transforms") or []),
+    )
+
+
+def _disorder_summary_for_scope_change(backend, previous_state, state):
+    """Return a new summary when the drawn subset changed before the figure.
+
+    ``no_update`` means the card already describes this scope. The figure
+    worker can still be drawing. The summary only reads the scene, so a
+    scope change must not wait for that frame.
+    """
+    if not isinstance(previous_state, dict):
+        return no_update
+    if _disorder_summary_inputs(previous_state) == _disorder_summary_inputs(state):
+        return no_update
+    try:
+        return _structure_summary(backend.scene_for_state(state))
+    except (KeyError, ValueError, OSError, TypeError):
+        return no_update
+
+
+def _summary_scope_label(scene: dict) -> str:
+    return _SUMMARY_SCOPE_LABELS.get(str(scene.get("display_mode") or ""), "This view")
+
+
+def _drawn_is_minor(atom: dict) -> bool:
+    """Read the loader minor flag, then the scene's copied ``is_minor`` field.
+
+    Occupancy is not a minor-disorder signal. ``_is_minor`` is the loader
+    contract; scene assembly copies that decision onto ``is_minor`` for
+    mappings that no longer carry the private key.
+    """
+    if "_is_minor" in atom:
+        return bool(atom.get("_is_minor"))
+    return bool(atom.get("is_minor"))
+
+
+def _drawn_site_key(atom: dict, ordinal: int) -> tuple[str, int]:
+    source = atom.get("_source_index")
+    try:
+        if source is not None:
+            return ("source", int(source))
+    except (TypeError, ValueError):
+        pass
+    return ("drawn", ordinal)
+
+
 def _structure_summary(scene: dict) -> str:
-    if not scene.get("draw_atoms"):
+    """Describe disorder for the drawn subset and, separately, the loaded source.
+
+    Counts use loader flags already stored on the scene (``is_disordered``,
+    ``_is_minor``, ``disorder_resolved``) and the canonical source atoms the
+    scene builder recorded. Visual copies stamped by scene assembly are not
+    additional source sites. Occupancy alone is not treated as disorder.
+    """
+    from ..style.disorder import atom_is_disordered
+    from .panel_status import atom_is_visual_copy, visual_copy_phrase
+
+    draw_atoms = [atom for atom in (scene.get("draw_atoms") or []) if isinstance(atom, dict)]
+    if not draw_atoms:
         return "No structure loaded yet. Upload a CIF to begin."
-    disordered_atoms = sum(
-        1 for atom in scene["draw_atoms"] if atom.get("is_disordered", False)
+    bonds = [bond for bond in (scene.get("bonds") or []) if isinstance(bond, dict)]
+    home = [atom for atom in draw_atoms if not atom_is_visual_copy(atom)]
+    copies = [atom for atom in draw_atoms if atom_is_visual_copy(atom)]
+
+    disordered_resolved: dict[tuple[str, int], bool] = {}
+    minor_sites: set[tuple[str, int]] = set()
+    home_sites: set[tuple[str, int]] = set()
+    for ordinal, atom in enumerate(home):
+        key = _drawn_site_key(atom, ordinal)
+        home_sites.add(key)
+        if atom_is_disordered(atom):
+            resolved = bool(atom.get("disorder_resolved", False))
+            previous = disordered_resolved.get(key)
+            disordered_resolved[key] = resolved if previous is None else previous and resolved
+        if _drawn_is_minor(atom):
+            minor_sites.add(key)
+
+    def _bond_touches_copy(bond: dict) -> bool:
+        for endpoint in ("i", "j"):
+            index = bond.get(endpoint)
+            if (
+                isinstance(index, int)
+                and 0 <= index < len(draw_atoms)
+                and atom_is_visual_copy(draw_atoms[index])
+            ):
+                return True
+        return False
+
+    minor_source_bonds = sum(
+        1 for bond in bonds if bond.get("is_minor") and not _bond_touches_copy(bond)
     )
-    unresolved_atoms = sum(
-        1
-        for atom in scene["draw_atoms"]
-        if atom.get("is_disordered", False)
-        and not atom.get("disorder_resolved", False)
-    )
-    minor_atoms = sum(1 for atom in scene["draw_atoms"] if atom["is_minor"])
-    minor_bonds = sum(1 for bond in scene["bonds"] if bond["is_minor"])
+    source_atoms = scene.get("_canonical_source_atoms")
+    source_known = isinstance(source_atoms, list)
+    source_disorder: set[int] = set()
+    if source_known:
+        for index, atom in enumerate(source_atoms):
+            if isinstance(atom, dict) and atom_is_disordered(atom):
+                source_disorder.add(index)
+    drawn_source_disorder = {
+        key[1]
+        for key in disordered_resolved
+        if key[0] == "source" and key[1] in source_disorder
+    }
+    outside = len(source_disorder - drawn_source_disorder) if source_known else None
+
+    scope = _summary_scope_label(scene)
+    copy_text = ""
+    if copies:
+        copy_text = (
+            f" {visual_copy_phrase(len(copies))} are repeated drawings,"
+            " not additional source sites."
+        )
     overflow_count = len(scene.get("unwrap_overflow") or [])
     overflow_text = (
         f" {overflow_count} fragment(s) kept wrapped after exceeding the unwrap cap."
         if overflow_count
         else ""
     )
-    if disordered_atoms:
+    unresolved = sum(1 for resolved in disordered_resolved.values() if not resolved)
+    if disordered_resolved:
         unresolved_text = (
-            f" {unresolved_atoms} site(s) have no resolved major/minor "
+            f" {unresolved} site(s) have no resolved major/minor "
             "assignment; occupancy is used visually."
-            if unresolved_atoms
+            if unresolved
             else ""
         )
-        return (
-            f"Disorder detected: {disordered_atoms} site(s), "
-            f"{minor_atoms} minor atoms, {minor_bonds} minor bonds."
-            f"{unresolved_text}{overflow_text}"
+        drawn_text = (
+            f"{scope}: drawn subset has disorder in {len(disordered_resolved)} source site(s), "
+            f"{len(minor_sites)} minor source atom(s), {minor_source_bonds} minor source bond(s)."
+            f"{unresolved_text}{copy_text}"
         )
-    return f"Disorder: none detected.{overflow_text}"
+    else:
+        drawn_text = (
+            f"{scope}: drawn subset has no disorder in {len(home_sites)} source site(s)."
+            f"{copy_text}"
+        )
+    if source_known and not source_disorder:
+        loaded_text = " Loaded structure: no disorder detected."
+    elif source_known and outside == len(source_disorder):
+        loaded_text = (
+            f" Loaded structure: disorder in {len(source_disorder)} source site(s)"
+            " outside this drawn subset."
+        )
+    elif source_known and outside:
+        loaded_text = (
+            f" Loaded structure: disorder in {len(source_disorder)} source site(s). "
+            f"{outside} of those source site(s) are not in this drawn subset."
+        )
+    elif source_known:
+        loaded_text = f" Loaded structure: disorder in {len(source_disorder)} source site(s)."
+    elif disordered_resolved:
+        loaded_text = (
+            " Loaded-structure disorder is not available on this scene,"
+            " so the count is only the drawn subset."
+        )
+    else:
+        loaded_text = " This does not establish that the loaded structure is ordered."
+    return f"{drawn_text}{loaded_text}{overflow_text}"
 
 
 def _display_options_from_style(style: dict) -> list[str]:

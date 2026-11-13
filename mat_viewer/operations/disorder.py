@@ -242,10 +242,11 @@ def resolve_disorder_with_crystals(
         return [], {}
 
     raw_atoms = list(getattr(bundle, "raw_atoms", []) or [])
-    # A loaded scene the structure summary calls "none detected" has atoms
-    # and no occupancy disorder. Enumerating that still used to return MCK
-    # replicas. An empty raw-atom list is not that signal: callers that only
-    # have a CIF path still go through MolCrysKit.
+    # Occupancy below 1 is this resolver's membership test. The structure
+    # summary does not decide it. Enumerating an ordered atom list still
+    # used to return MolCrysKit replicas. An empty raw-atom list is not
+    # that signal: callers that only have a CIF path still go through
+    # MolCrysKit.
     if raw_atoms and not _disorder_raw_indices(raw_atoms):
         return [], {}
 

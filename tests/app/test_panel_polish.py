@@ -52,6 +52,17 @@ def test_status_bar_names_scope_and_counts():
     assert counts == "2 atoms · 1 bonds"
 
 
+def test_status_bar_separates_visual_copies_from_source_sites():
+    _label, _scope, counts = status_bar_parts(
+        {"display_mode": "unit_cell"},
+        {
+            "draw_atoms": [{}, {"_is_boundary_replica": True}, {"_is_bonded_image_replica": True}],
+            "bonds": [{}, {}],
+        },
+    )
+    assert counts == "1 source site + 2 visual copies · 2 bonds"
+
+
 def test_atom_list_samples_the_displayed_atoms():
     scene = {
         "draw_atoms": [
@@ -108,6 +119,34 @@ def test_atom_list_renderer_marks_a_truncated_sample():
         if isinstance(children, str):
             texts.append(children)
     assert any(text.startswith("Showing 12 of 15") for text in texts)
+    assert atom_list_model(scene)["visual_copies"] == 0
+    assert not any("repeated drawings" in text for text in texts)
+
+
+def test_atom_list_names_visual_copies_as_repeated_drawings():
+    """Boundary, bonded-image, and framework copies are not extra source sites."""
+    scene = {
+        "draw_atoms": [
+            {"label": "C1", "elem": "C"},
+            {"label": "C1b", "elem": "C", "_is_boundary_replica": True},
+            {"label": "N1b", "elem": "N", "_is_bonded_image_replica": True},
+            {"label": "O1b", "elem": "O", "_is_framework_context_replica": True},
+        ]
+    }
+    model = atom_list_model(scene)
+    assert model["total"] == 4
+    assert model["visual_copies"] == 3
+    assert [row["label"] for row in model["rows"]] == ["C1", "C1b", "N1b", "O1b"]
+
+    texts = []
+    for node in walk_layout(html.Div(render_atom_list(scene))):
+        children = getattr(node, "children", None)
+        if isinstance(children, str):
+            texts.append(children)
+    assert (
+        "3 visual copies of 4 displayed atoms are repeated drawings, "
+        "not extra source sites."
+    ) in texts
 
 
 def test_workbench_layout_includes_status_bar_atom_list_and_log_filter(tmp_path, monkeypatch):
@@ -156,6 +195,13 @@ def test_panel_assets_define_status_loading_and_log_grouping():
     assert "calc(28px + 12px)" in panels
 
 
+def _status_drawn_atoms(counts: str) -> int:
+    """Return drawn atoms, adding visual copies back onto source sites."""
+    head = counts.split("·", 1)[0]
+    numbers = [int(item) for item in head.replace("+", " ").split() if item.isdigit()]
+    return sum(numbers)
+
+
 def _listed_atom_total(nodes) -> int:
     rows = 0
     for node in walk_layout(html.Div(nodes)):
@@ -198,7 +244,7 @@ def test_status_counts_follow_the_drawn_display_mode(tmp_path):
         backend.patch_state({"display_mode": "unit_cell"}, broadcast=False)
         _label, scope, counts, atoms = refresh(backend.get_state(), "")
         assert scope == "Unit cell"
-        cell_atoms = int(str(counts).split(" ", 1)[0])
+        cell_atoms = _status_drawn_atoms(str(counts))
         assert cell_atoms != formula_atoms
         assert _listed_atom_total(atoms) == cell_atoms
 

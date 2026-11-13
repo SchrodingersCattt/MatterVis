@@ -832,13 +832,14 @@ def register_view_callbacks(app, backend):
                 # continue using the client-side relayout fast path.
                 backend._render_worker.request_figure_build(state, force=True)
             return (no_update,) * 4
+        scope_summary = _disorder_summary_for_scope_change(backend, previous_state, state)
         topo_key_preview = topology_side_panel_cache_key(state)
         prev_key = getattr(update_view, "_topo_cache_key", None)
         # One scheduling owner; no figure assembly on a Dash request thread.
         # The existing broadcast journal is also the HTTP fallback when WS is
         # absent. Never stamp a newer revision onto the browser's old geometry.
         if not backend._figure_revision_matches_current(scene_id, state):
-            return (no_update,) * 4
+            return no_update, no_update, no_update, scope_summary
         event = backend.latest_figure_broadcast(scene_id)
         if (
             not event
@@ -848,7 +849,7 @@ def register_view_callbacks(app, backend):
             != state.get("camera_revision", 0)
         ):
             backend._render_worker.request_figure_build(state)
-            return (no_update,) * 4
+            return no_update, no_update, no_update, scope_summary
         fig, topology_data = event["figure"], event.get("topology")
         # Dash's figure prop may lag behind a WS delivery; the browser gate
         # deduplicates that case after successful Plotly completion.
@@ -871,7 +872,8 @@ def register_view_callbacks(app, backend):
         # the markdown table tear-down was visible in the CPU profile.
         topo_key = topo_key_preview
         if prev_key == topo_key:
-            summary = _structure_summary(backend.get_bundle(state["structure"]).scene)
+            # Follow the drawn scene. ``bundle.scene`` stays the load-time formula unit.
+            summary = _structure_summary(backend.scene_for_state(state))
             perf_log.record(
                 "callback:update_view",
                 duration_ms=(time.monotonic() - cb_start) * 1000.0,

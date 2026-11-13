@@ -129,8 +129,10 @@ def test_structure_summary_reports_unresolved_disorder():
 
     summary = _structure_summary(scene)
 
-    assert "Disorder detected: 1 site(s)" in summary
+    assert "drawn subset has disorder in 1 source site(s)" in summary
     assert "no resolved major/minor assignment" in summary
+    assert "only the drawn subset" in summary
+    assert "Disorder: none detected" not in summary
 
 
 def test_ws_figure_broadcast_rejects_empty_2d_payload(tmp_path):

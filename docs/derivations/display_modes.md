@@ -228,6 +228,13 @@ Cluster mode is intentionally direct:
 - `mat_viewer/scene/core.py:519-520` passes `cell=None` to bond detection only
   for `display_mode == "cluster"`.
 
+Unit-cell boundary replicas are repeated drawings of source sites. The
+structure-summary card and the canvas atom count do not add those
+copies, or bonded-image and framework-context copies, to a source-site
+total. The disorder line also keeps the drawn subset separate from
+loader disorder flags on the canonical source atoms, so an ordered
+formula-unit cluster does not describe the loaded structure as ordered.
+
 Unit-cell boundary replicas are implemented by `_expand_boundary_replicas`:
 
 - `mat_viewer/scene/core.py:264-290` defines the per-axis canonical shift sets
