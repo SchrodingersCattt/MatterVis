@@ -127,6 +127,31 @@ class _IOBackendMixin:
             _prewarm_bundle_async(self, bundle.name)
         return bundle
 
+    @staticmethod
+    def _reuse_published_upload(path: str, data: bytes, digest: str) -> None:
+        """Keep an existing upload instead of replacing it.
+
+        A Windows sharing violation while reading a published file means
+        another worker already has it open. Same-size bytes stay in place.
+        A different size, or a readable file with a different digest, is a
+        collision and is not overwritten.
+        """
+        try:
+            with open(path, "rb") as existing:
+                existing_digest = hashlib.sha256(existing.read()).hexdigest()
+        except PermissionError as denied:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = None
+            if size is not None and size != len(data):
+                raise RuntimeError(
+                    "content-addressed upload digest collision"
+                ) from denied
+            return
+        if existing_digest != digest:
+            raise RuntimeError("content-addressed upload digest collision")
+
     def add_uploaded_file_bytes(self, data: bytes, filename: str) -> LoadedCrystal:
         # Sanitise the user-supplied filename before joining it onto a
         # writable directory. ``os.path.join("/tmp/uploads", "/etc/passwd")``
@@ -140,10 +165,12 @@ class _IOBackendMixin:
 
         digest = hashlib.sha256(data).hexdigest()
 
-        # The file path is content-addressed, so concurrent requests for the
-        # same bytes may safely write it before taking the backend lock.  The
-        # lock below then makes digest/name reservation atomic and prevents two
-        # requests from creating a ``foo_2`` tab for one upload.
+        # The path is content-addressed. Each request writes a private
+        # temporary file, then the backend lock publishes it only when the
+        # destination is absent. A retry must not replace that path: on
+        # Windows a reader with the file open rejects the replace. The
+        # digest is checked outside the lock so the read does not stall
+        # every other backend operation.
 
         upload_dir = os.path.realpath(os.path.join(tempfile.gettempdir(), "mat_viewer_uploads"))
         os.makedirs(upload_dir, exist_ok=True)
@@ -164,17 +191,22 @@ class _IOBackendMixin:
             filename=safe,
             bytes=len(data),
         ):
-            # Write to a per-request temporary inode and atomically replace
-            # the content-addressed target.  Two concurrent retries can then
-            # never expose a truncated CIF to MolCrysKit while one request is
-            # still writing the shared path.
+            # Write to a per-request temporary inode. The first publisher
+            # atomically moves it into place. A retry keeps the published
+            # inode, so a reader never observes a truncated CIF and Windows
+            # never has to replace a file it already has open.
             fd, temporary_path = tempfile.mkstemp(
                 prefix=f".{digest[:12]}-", suffix=".tmp", dir=upload_dir
             )
             try:
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(data)
-                os.replace(temporary_path, path)
+                with self._lock:
+                    reuse = os.path.exists(path)
+                    if not reuse:
+                        os.replace(temporary_path, path)
+                if reuse:
+                    self._reuse_published_upload(path, data, digest)
             finally:
                 try:
                     os.unlink(temporary_path)

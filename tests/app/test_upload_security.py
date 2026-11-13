@@ -12,7 +12,9 @@ DO NOT REMOVE -- this guards a remote arbitrary-file-write bug.
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -21,7 +23,6 @@ import pytest
 
 from mat_viewer.app import ViewerBackend
 from mat_viewer.presets import default_preset_path
-
 
 _VALID_CIF = b"""data_minimal
 _cell_length_a 10.0
@@ -120,6 +121,195 @@ def test_reupload_same_bytes_is_idempotent(backend: ViewerBackend) -> None:
     assert first.name == second.name
     assert backend.structure_names.count(first.name) == 1
     assert getattr(second, "_upload_existing", False) is True
+
+
+def _content_addressed_upload(filename: str) -> Path:
+    """The on-disk path ``add_uploaded_file_bytes`` uses for ``_VALID_CIF``."""
+    import hashlib
+
+    from werkzeug.utils import secure_filename
+
+    digest = hashlib.sha256(_VALID_CIF).hexdigest()
+    safe = secure_filename(filename) or "upload.cif"
+    if not safe.lower().endswith(".cif"):
+        safe = f"{safe}.cif"
+    upload_dir = Path(
+        os.path.realpath(os.path.join(tempfile.gettempdir(), "mat_viewer_uploads"))
+    )
+    return upload_dir / f"{digest[:16]}_{safe}"
+
+
+def _restore_valid_cif(path: Path) -> None:
+    if not path.exists():
+        return
+    path.chmod(path.stat().st_mode | stat.S_IWRITE)
+    path.write_bytes(_VALID_CIF)
+
+
+def _published_valid_cif(backend: ViewerBackend, filename: str):
+    """Publish ``_VALID_CIF`` even if an earlier case left different bytes."""
+    path = _content_addressed_upload(filename)
+    if path.exists() and path.read_bytes() != _VALID_CIF:
+        path.chmod(path.stat().st_mode | stat.S_IWRITE)
+        path.unlink()
+    return backend.add_uploaded_file_bytes(_VALID_CIF, filename)
+
+
+def test_retry_keeps_published_file_when_replace_is_denied(
+    backend: ViewerBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows rejects replacing a CIF another worker already has open."""
+    first = backend.add_uploaded_file_bytes(_VALID_CIF, "windows_replace_denied.cif")
+    published = Path(first.cif_path)
+    inode = published.stat().st_ino
+    held = published.open("rb")
+    real_replace = os.replace
+
+    def refuse_replace(src, dst):
+        if os.path.realpath(dst) == str(published):
+            raise PermissionError(13, "Access is denied")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", refuse_replace)
+    try:
+        second = backend.add_uploaded_file_bytes(
+            _VALID_CIF, "windows_replace_denied.cif"
+        )
+    finally:
+        held.close()
+
+    assert second.cif_path == first.cif_path
+    assert published.stat().st_ino == inode
+    assert published.read_bytes() == _VALID_CIF
+
+
+def test_retry_reuses_upload_when_windows_denies_the_digest_read(
+    backend: ViewerBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sharing violation on the verify read must not fail a same-size retry."""
+    first = backend.add_uploaded_file_bytes(_VALID_CIF, "windows_read_denied.cif")
+    published = Path(first.cif_path)
+    inode = published.stat().st_ino
+    real_open = open
+
+    def deny_published(file, *args, **kwargs):
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if os.path.realpath(file) == str(published) and "r" in str(mode):
+            raise PermissionError(13, "Access is denied")
+        return real_open(file, *args, **kwargs)
+
+    real_replace = os.replace
+
+    def refuse_replace(src, dst):
+        if os.path.realpath(dst) == str(published):
+            raise AssertionError("published upload was replaced")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr("builtins.open", deny_published)
+    monkeypatch.setattr(os, "replace", refuse_replace)
+    second = backend.add_uploaded_file_bytes(_VALID_CIF, "windows_read_denied.cif")
+
+    assert second.cif_path == first.cif_path
+    assert published.stat().st_ino == inode
+    assert published.read_bytes() == _VALID_CIF
+
+
+def test_unreadable_upload_with_a_different_size_is_not_replaced(
+    backend: ViewerBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _published_valid_cif(backend, "windows_size_conflict.cif")
+    published = Path(first.cif_path)
+    try:
+        published.write_bytes(b"short")
+        real_open = open
+
+        def deny_published(file, *args, **kwargs):
+            mode = args[0] if args else kwargs.get("mode", "r")
+            if os.path.realpath(file) == str(published) and "r" in str(mode):
+                raise PermissionError(13, "Access is denied")
+            return real_open(file, *args, **kwargs)
+
+        real_replace = os.replace
+
+        def refuse_replace(src, dst):
+            if os.path.realpath(dst) == str(published):
+                raise AssertionError("published upload was replaced")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr("builtins.open", deny_published)
+        monkeypatch.setattr(os, "replace", refuse_replace)
+        with pytest.raises(RuntimeError, match="digest collision"):
+            backend.add_uploaded_file_bytes(_VALID_CIF, "windows_size_conflict.cif")
+        assert published.read_bytes() == b"short"
+    finally:
+        _restore_valid_cif(published)
+
+
+def test_published_upload_with_different_bytes_is_not_replaced(
+    backend: ViewerBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _published_valid_cif(backend, "windows_digest_conflict.cif")
+    published = Path(first.cif_path)
+    replacement = b"x" * len(_VALID_CIF)
+    try:
+        published.write_bytes(replacement)
+        replaced = []
+        real_replace = os.replace
+
+        def spy_replace(src, dst):
+            replaced.append(os.path.realpath(dst))
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", spy_replace)
+        with pytest.raises(RuntimeError, match="digest collision"):
+            backend.add_uploaded_file_bytes(_VALID_CIF, "windows_digest_conflict.cif")
+        assert os.path.realpath(published) not in replaced
+        assert published.read_bytes() == replacement
+    finally:
+        _restore_valid_cif(published)
+
+
+def test_upload_retry_does_not_hold_the_backend_lock_while_reading(
+    backend: ViewerBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = backend.add_uploaded_file_bytes(_VALID_CIF, "windows_lock_scope.cif")
+    published = Path(first.cif_path)
+    release = threading.Event()
+    entered = threading.Event()
+    real_open = open
+
+    def blocking_open(file, *args, **kwargs):
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if os.path.realpath(file) == str(published) and "r" in str(mode):
+            entered.set()
+            assert release.wait(5), "published-file read was not released"
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", blocking_open)
+    holder: dict[str, object] = {}
+    errors: list[Exception] = []
+
+    def retry() -> None:
+        try:
+            holder["bundle"] = backend.add_uploaded_file_bytes(
+                _VALID_CIF, "windows_lock_scope.cif"
+            )
+        except (AssertionError, OSError, RuntimeError) as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=retry)
+    thread.start()
+    try:
+        assert entered.wait(5), "retry did not read the published upload"
+        acquired = backend._lock.acquire(timeout=1)
+        assert acquired, "backend lock held during published-file read"
+        backend._lock.release()
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert Path(holder["bundle"].cif_path) == published
 
 
 def test_concurrent_same_bytes_share_one_sync_parse(backend: ViewerBackend) -> None:
