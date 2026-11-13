@@ -59,7 +59,7 @@ signatures.
 
 Every install job uses the git commit in `pyproject.toml`:
 
-`0c8b1c10161323ba4e0caf097f19d572b36b322c`
+`9616debfdae715c75313263f5cedca1788fddf4a`
 
 `requirements/ci-constraints.txt` names the same commit; a differing
 direct URL makes pip fail with a conflict, so change both together.
