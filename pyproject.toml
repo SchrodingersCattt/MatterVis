@@ -30,7 +30,7 @@ dependencies = [
     "ase",
     # PyPI 0.8.0 does not include BondRecord.role,
     # MolecularCrystal.get_connectivity_report(), or find_polyhedra
-    # disorder_policy (major / exclusive / as_refined). Track post-merge main
+    # disorder_policy (major / exclusive / as_refined). Track open PR #225 branch
     # commit 9616debf until those APIs are published, then restore a version range.
     # This follow-up makes lightweight CIF formula/Z metadata case-insensitive
     # while preserving unrelated multiline text. It also carries the phone path
