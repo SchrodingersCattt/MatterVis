@@ -365,11 +365,26 @@ jobs:
         run: |
           import glob
           from pathlib import Path
+          import tarfile
           import zipfile
+
+          source, = glob.glob("dist/*.tar.gz")
+          with tarfile.open(source) as archive:
+              source_names = set(archive.getnames())
+          assert any(name.endswith("/LICENSE") for name in source_names), source_names
 
           wheel, = glob.glob("dist/*.whl")
           with zipfile.ZipFile(wheel) as archive:
               names = set(archive.namelist())
+              license_name, = [
+                  name for name in names if name.endswith(".dist-info/licenses/LICENSE")
+              ]
+              metadata_name, = [name for name in names if name.endswith(".dist-info/METADATA")]
+              license_text = archive.read(license_name).decode("utf-8")
+              metadata = archive.read(metadata_name).decode("utf-8")
+          assert "Copyright (c) 2026 Ming-Yu Guo" in license_text
+          assert "License: MIT" in metadata
+          assert "License-File: LICENSE" in metadata
           assert any(name.startswith("mat_viewer/") for name in names), sorted(names)[:20]
           assert not any(name.startswith("crystal_viewer/") for name in names), names
           missing = []
