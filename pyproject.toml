@@ -80,6 +80,9 @@ test = [
 ]
 dev = ["matter-vis[all,test]", "build", "ruff"]
 
+[tool.setuptools]
+license-files = ["LICENSE"]
+
 [tool.setuptools.packages.find]
 include = ["mat_viewer*"]
 
