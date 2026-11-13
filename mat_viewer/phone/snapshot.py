@@ -123,6 +123,11 @@ def _project(crystal) -> dict[str, Any]:
             "left": int(record.left_global_index),
             "right": int(record.right_global_index),
             "role": str(record.role),
+            # Canonical MolCrysKit periodic-bond provenance, passed through
+            # unchanged. A renderer must draw ``vector_A`` from ``left``;
+            # right-site minus left-site is wrong for periodic-image bonds.
+            "vector_A": [float(value) for value in record.vector_A],
+            "right_image_shift": [int(value) for value in record.right_image_shift],
         }
         for record in crystal.get_bond_records()
     ]

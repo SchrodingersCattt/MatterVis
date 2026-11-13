@@ -96,6 +96,24 @@ public functions below and `snapshot.py` holds the implementation, so
 | `operate_commit_major(path)` | Snapshot of the committed major disorder component (`operation = "commit_disorder_candidate"`, `revision = 2`) |
 | `operate_commit_major_with_cif(path)` | `{"snapshot": <identical to operate_commit_major>, "cif": <str>}` |
 
+Each entry of `bonds` is a pass-through of one MolCrysKit `BondRecord`:
+
+| Key | Meaning |
+|---|---|
+| `left`, `right` | `left_global_index`, `right_global_index` |
+| `role` | `"covalent"` or `"coordination"`, verbatim from `BondRecord.role` |
+| `vector_A` | Canonical Cartesian bond vector in Å, drawn from the `left` site |
+| `right_image_shift` | Integer lattice translation of the right site relative to the left site |
+
+`vector_A` and `right_image_shift` were added to the original
+`left`/`right`/`role` keys; existing keys are unchanged. A client must draw
+a bond as `position[left]` to `position[left] + vector_A`. Connecting the
+two displayed endpoints is wrong for periodic-image bonds, where
+`position[right] - position[left]` differs from `vector_A`. Self-image bonds
+(`left == right`, non-zero shift) are valid. Draw sticks for `covalent`;
+`coordination` bonds are kept for topology and are not sticks. MatterVis
+copies these fields and derives no chemistry.
+
 `operate_commit_major` and `operate_commit_major_with_cif` share one
 internal operation: a single `EffectSession.operate` call and a single
 MolCrysKit replica generation. The CIF is MolCrysKit's public

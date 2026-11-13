@@ -260,3 +260,100 @@ print(json.dumps({"snapshot": result["snapshot"], "again": again, "loaded": load
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
     assert payload["loaded"] == []
     _assert_same_structure(payload["snapshot"], payload["again"])
+
+
+class _Crystal:
+    """Minimal stand-in exposing the public MolCrysKit record accessors."""
+
+    lattice = np.diag([10.0, 10.0, 10.0])
+
+    def __init__(self, bonds):
+        self._bonds = bonds
+
+    def get_site_records(self):
+        return []
+
+    def get_bond_records(self):
+        return self._bonds
+
+
+def _bond(left, right, shift, vector, role="covalent"):
+    from molcrys_kit.structures.records import BondRecord
+
+    return BondRecord(
+        molecule_index=0,
+        left_local_index=left,
+        right_local_index=right,
+        left_global_index=left,
+        right_global_index=right,
+        left_asym_index=None,
+        right_asym_index=None,
+        right_image_shift=shift,
+        vector_A=vector,
+        distance_A=float(np.linalg.norm(vector)),
+        role=role,
+    )
+
+
+def test_bonds_keep_canonical_vector_shift_and_role():
+    from mat_viewer.phone.snapshot import _project
+
+    records = [
+        _bond(0, 1, (1, 0, 0), (-1.5, 0.0, 0.0)),  # periodic image
+        _bond(2, 2, (0, 0, 1), (0.0, 0.0, 4.0)),  # self-image
+        _bond(0, 3, (0, -1, 0), (0.0, 2.0, 0.0), role="coordination"),
+    ]
+    bonds = _project(_Crystal(records))["bonds"]
+    assert len(bonds) == 3
+    for bond, record in zip(bonds, records):
+        assert bond["left"] == record.left_global_index
+        assert bond["right"] == record.right_global_index
+        assert bond["role"] == record.role
+        assert bond["vector_A"] == [float(v) for v in record.vector_A]
+        assert bond["right_image_shift"] == list(record.right_image_shift)
+    assert bonds[0]["right_image_shift"] == [1, 0, 0]
+    assert bonds[1]["left"] == bonds[1]["right"]
+    assert bonds[1]["right_image_shift"] == [0, 0, 1]
+    assert [b["role"] for b in bonds] == ["covalent", "covalent", "coordination"]
+    assert json.loads(json.dumps(bonds)) == bonds
+
+
+def test_bond_fields_serialize_without_desktop_dependencies():
+    script = r"""
+import json, sys
+blocked = ("ase", "scipy", "matplotlib", "pymatgen", "spglib", "PIL")
+
+class Block:
+    def find_spec(self, name, path, target=None):
+        if name.split(".")[0] in blocked:
+            raise ImportError(name)
+        return None
+
+sys.meta_path.insert(0, Block())
+from molcrys_kit.structures.records import BondRecord
+from mat_viewer.phone.snapshot import _project
+
+class C:
+    lattice = [[10, 0, 0], [0, 10, 0], [0, 0, 10]]
+    def get_site_records(self):
+        return []
+    def get_bond_records(self):
+        return [BondRecord(0, 0, 0, 0, 0, None, None, (0, 0, 1), (0.0, 0.0, 4.0), 4.0, "covalent")]
+
+text = json.dumps(_project(C()))
+loaded = sorted(m for m in sys.modules if m.split(".")[0] in blocked)
+print(json.dumps({"snapshot": json.loads(text), "loaded": loaded}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert payload["loaded"] == []
+    bond = payload["snapshot"]["bonds"][0]
+    assert bond["vector_A"] == [0.0, 0.0, 4.0]
+    assert bond["right_image_shift"] == [0, 0, 1]

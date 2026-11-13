@@ -113,7 +113,12 @@ def test_snapshot_returns_events_and_matching_latest_sequence():
 def test_time_block_records_positive_elapsed_ms(monkeypatch):
     # Test the seconds-to-milliseconds contract, not Windows timer granularity
     # or scheduler behavior during a parallel suite.
-    clock = [perf_log_core._M0]
+    # Use a small fake monotonic epoch (and a consistent ``_M0``) so the
+    # result does not depend on the host's real uptime: adding 0.020 to a
+    # large float loses precision and breaks the strict assertion below.
+    fake_epoch = 1000.0
+    monkeypatch.setattr(perf_log_core, "_M0", fake_epoch)
+    clock = [fake_epoch]
     monkeypatch.setattr(perf_log_core, "time", SimpleNamespace(
         monotonic=lambda: clock[0], strftime=time.strftime, localtime=time.localtime,
     ))
