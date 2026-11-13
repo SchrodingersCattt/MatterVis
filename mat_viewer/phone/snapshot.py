@@ -111,6 +111,16 @@ def _project(crystal) -> dict[str, Any]:
                 "site_id": str(record.site_id),
                 "symbol": str(record.symbol),
                 "position": [float(value) for value in record.cartesian_position_A],
+                # Canonical MolCrysKit SiteRecord provenance, passed through
+                # unchanged. ``position`` is the contiguous-molecule Cartesian
+                # site; ``fractional_position`` corresponds to it, and
+                # ``image_shift`` is the lattice translation applied to make
+                # the molecule contiguous. Unit-cell wrapping must use
+                # ``fractional_position - floor(fractional_position)``;
+                # ``image_shift`` is per-site provenance, not a general
+                # whole-molecule or home-cell wrapping shortcut.
+                "fractional_position": [float(value) for value in record.fractional_position],
+                "image_shift": [int(value) for value in record.image_shift],
                 "occupancy": occupancy,
                 "alpha": occupancy,
                 "disorder_group": str(record.disorder_group),
