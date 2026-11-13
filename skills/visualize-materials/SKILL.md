@@ -8,9 +8,16 @@ description: "Use first for every atomistic drawing, model preview, or animation
 Use the public `mat-vis` CLI for coordinate-based visuals. Do not replace it
 with ASE plotting, raw matplotlib, or private MatterVis imports.
 
-## Visible-text default
-Unless explicitly requested by the user, render no visible text in figures: no titles, panel letters, legends, axis labels, tick numbers, atom labels, annotations, units, formulas, or watermarks.
-Explain meanings, colors, scale, units, and values in chat or accompanying data. Invisible accessibility metadata may remain. This default overrides conflicting reference examples.
+## Figure text and data completeness
+
+Include the information needed to read the data directly in the figure: axis
+labels, units, tick values, and legends or scale bars when applicable. Ensure
+these match the underlying data and remain legible at the final display size.
+For structural panels, include identification or scale labels when necessary
+to understand the comparison. Do not add explanatory paragraphs, narrative
+annotations, decorative titles, or crowded text by default; communicate those
+explanations in chat or a caption. Respect explicit user requests and inspect
+the exported figure for missing, overlapping, or clipped labels.
 
 ## Choose the scene route
 
