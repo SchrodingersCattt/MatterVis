@@ -524,6 +524,18 @@ configure Python `requests` with `session.trust_env = False` (or
 `proxies={"http": None, "https": None}`) when calling
 `http://127.0.0.1:<port>/api/v2`.
 
+## Dash version
+
+The web extra requires Dash 2.18.2 or newer. Scene selection is always
+`scene-tabs`. When the installed Dash accepts a component as
+`dcc.Tab.label` (Dash 4.0 and later, where `label` is a Tab base node),
+the per-tab close control is inside that label (`scene-tab-label-{id}`
+and `scene-tab-close-{id}`). On Dash 2.18.2 through 3.x the label is the
+scene name string, and the same close control is a child of
+`scene-tab-close-row`. Passing a component label to those older releases
+raises `TypeError` while the layout is built and the page falls back to
+the error screen.
+
 ## Stable UI element IDs
 
 Use these when scripting through Selenium / Playwright / Dash testing
@@ -566,7 +578,7 @@ The full list (authoritative; the diagram only groups them):
 
 - `scene-tabs`: scene tab row
 - `scene-tab-{id}`: individual scene tab
-- `scene-tab-close-{id}`: per-tab close button when rendered
+- `scene-tab-close-{id}`: per-tab close button. Inside the tab label when Dash accepts a component label; otherwise in `scene-tab-close-row`
 - `scene-new-tab-btn`: duplicate/new scene button
 - `scene-tab-rename-input`: active scene rename input
 - `scene-cif-upload`: upload zone

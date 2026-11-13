@@ -232,6 +232,9 @@ def test_scene_catalog_reconciles_tabs_without_stealing_focus(backend, monkeypat
     labels = []
     for tab in tabs:
         text = getattr(tab, "label", None)
+        if isinstance(text, str):
+            labels.append(text)
+            continue
         label = getattr(text, "children", None)
         if isinstance(label, list) and label:
             labels.append(getattr(label[0], "children", None))

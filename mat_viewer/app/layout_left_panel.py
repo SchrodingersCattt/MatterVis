@@ -35,6 +35,12 @@ def build_left_panel(
     preset_path: str,
     property_visible_range: Any = None,
 ):
+    # Import the submodule by name. ``from . import dash_tabs`` is attribute
+    # access on this package, and ``app/__init__.py`` resolves unknown names
+    # by importing ``dash_impl``, which imports ``factory`` while ``factory``
+    # is still loading this module.
+    from .dash_tabs import tab_label_accepts_components
+
     static_export_resolution = resolve_requirements("static-web-export")
     static_export_hint = (
         ""
@@ -104,15 +110,20 @@ def build_left_panel(
                         parent_className="scene-tabs",
                         **_SCENE_TAB_EXTRAS,
                     ),
-                    # Kept as an empty compatibility target for older Dash
-                    # callbacks; close controls now live inside each tab label.
+                    # Empty when the close control sits inside the tab label.
+                    # Older Dash keeps the same control in this row.
                     html.Div(
                         id="scene-tab-close-row",
-                        children=[],
+                        children=backend.scene_tab_close_row(),
                         className="scene-tab-close-row",
                     ),
                 ],
-                className="scene-tabs-card",
+                className="scene-tabs-card"
+                + (
+                    ""
+                    if tab_label_accepts_components()
+                    else " scene-tabs-card--string-labels"
+                ),
             ),
             html.Div(
                 [

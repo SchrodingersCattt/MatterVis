@@ -188,31 +188,45 @@ class _SceneBackendMixin:
     def scene_options(self) -> list[dict[str, Any]]:
         return self.scene_store.list()
 
+    def _scene_close_control(self, scene: dict[str, Any]):
+        """Per-tab close button. The string id and the pattern id stay stable."""
+        return html.Button(
+            html.Span(
+                "\u00d7",
+                id=f"scene-tab-close-{scene['id']}",
+                **{"aria-hidden": "true"},
+            ),
+            id={"type": "tab-close", "scene_id": scene["id"]},
+            className="tab-close-x",
+            n_clicks=0,
+            title=f"Close {scene['label']}",
+            **{"aria-label": f"Close {scene['label']} tab"},
+        )
+
     def scene_tabs(self) -> list[Any]:
+        from .dash_tabs import tab_label_accepts_components
+
+        component_label = tab_label_accepts_components()
         tabs = []
         for scene in self.scene_store.list():
-            close_id = f"scene-tab-close-{scene['id']}"
-            close_button = html.Button(
-                html.Span("\u00d7", id=close_id, **{"aria-hidden": "true"}),
-                id={"type": "tab-close", "scene_id": scene["id"]},
-                className="tab-close-x",
-                n_clicks=0,
-                title=f"Close {scene['label']}",
-                **{"aria-label": f"Close {scene['label']} tab"},
-            )
-            label = html.Span(
-                [
-                    html.Span(
-                        scene["label"],
-                        className="scene-tab-text",
-                        title=str(scene["label"]),
-                    ),
-                    close_button,
-                ],
-                id=f"scene-tab-label-{scene['id']}",
-                className="scene-tab-label",
-                title=str(scene["label"]),
-            )
+            if component_label:
+                label: Any = html.Span(
+                    [
+                        html.Span(
+                            scene["label"],
+                            className="scene-tab-text",
+                            title=str(scene["label"]),
+                        ),
+                        self._scene_close_control(scene),
+                    ],
+                    id=f"scene-tab-label-{scene['id']}",
+                    className="scene-tab-label",
+                    title=str(scene["label"]),
+                )
+            else:
+                # Dash rejects a component in this prop and the layout
+                # callback would replace the viewer with the error screen.
+                label = str(scene["label"])
             tabs.append(
                 dcc.Tab(
                     label=label,
@@ -222,12 +236,41 @@ class _SceneBackendMixin:
             )
         return tabs
 
-    def scene_close_buttons(self) -> list[Any]:
-        """Visible tab chips. The close control sits inside the chip.
+    def scene_tab_close_row(self) -> list[Any]:
+        """Close controls that cannot live inside ``dcc.Tab.label``.
 
-        ``dcc.Tabs`` stays mounted so existing callbacks can read
-        ``scene-tabs.value``, and is hidden. Selecting a chip writes that
-        value from the browser.
+        When the installed Dash accepts a component label, the close
+        control is inside the tab and this row is empty. Otherwise the
+        tab label is the scene name and the same close ids render here.
+        """
+        from .dash_tabs import tab_label_accepts_components
+
+        if tab_label_accepts_components():
+            return []
+        row = []
+        for scene in self.scene_store.list():
+            row.append(
+                html.Span(
+                    [
+                        html.Span(
+                            scene["label"],
+                            className="scene-tab-text",
+                            title=str(scene["label"]),
+                        ),
+                        self._scene_close_control(scene),
+                    ],
+                    className="scene-tab-label",
+                    title=str(scene["label"]),
+                )
+            )
+        return row
+
+    def scene_close_buttons(self) -> list[Any]:
+        """Chip row with a select button and a close button for each scene.
+
+        The live layout uses ``scene_tabs`` and ``scene_tab_close_row``.
+        Chips stay available for callers that select a scene by writing
+        ``scene-tabs.value`` from the browser.
         """
         active = self.active_scene_id()
         chips = []
