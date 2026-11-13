@@ -8,20 +8,19 @@ description: "Use first for every atomistic drawing, model preview, or animation
 Use the public `mat-vis` CLI for coordinate-based visuals. Do not replace it
 with ASE plotting, raw matplotlib, or private MatterVis imports.
 
+## Visible-text default
+Unless explicitly requested by the user, render no visible text in figures: no titles, panel letters, legends, axis labels, tick numbers, atom labels, annotations, units, formulas, or watermarks.
+Explain meanings, colors, scale, units, and values in chat or accompanying data. Invisible accessibility metadata may remain. This default overrides conflicting reference examples.
+
 ## Choose the scene route
 
 Read one scene-specific primary page and run its first path. Scene type wins:
 
-- ordinary structure, molecule, slab, interface, or comparison:
-  [static render](./references/quickstart.md);
-- MD trajectory, final frame, GIF, or MP4:
-  [trajectory](./references/trajectory-animation.md);
-- vibration or phonon displacement arrows:
-  [vibration](./references/vibration-mode-vectors.md);
-- coordination or packing hulls:
-  [polyhedra](./references/polyhedra.md);
-- per-atom scalar/tensor colors:
-  [atom properties](./references/atom-property-coloring.md);
+- ordinary structure, molecule, slab, interface, or comparison: [static render](./references/quickstart.md);
+- MD trajectory, final frame, GIF, or MP4: [trajectory](./references/trajectory-animation.md);
+- vibration or phonon displacement arrows: [vibration](./references/vibration-mode-vectors.md);
+- coordination or packing hulls: [polyhedra](./references/polyhedra.md);
+- per-atom scalar/tensor colors: [atom properties](./references/atom-property-coloring.md);
 - forces with density fields:
   [force vectors](./references/atomic-force-vectors.md);
 - multiple panels or publication composition: [panels](./references/multi-structure-panels.md)
