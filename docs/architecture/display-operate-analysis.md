@@ -91,7 +91,7 @@ public functions below and `snapshot.py` holds the implementation, so
 
 | Function | Returns |
 |---|---|
-| `analyze_cif(path)` | Revision-1 snapshot: `cell`, `sites` (Cartesian `position`, `occupancy`, `alpha`, `disorder_group`, `disorder_assembly`), `bonds` |
+| `analyze_cif(path)` | Revision-1 snapshot: `cell`, `sites` (Cartesian `position`, `fractional_position`, `image_shift`, `occupancy`, `alpha`, `disorder_group`, `disorder_assembly`), `bonds` |
 | `display(snapshot, disorder_group=None)` | View-only copy; sets `visible`, never `occupancy` |
 | `operate_commit_major(path)` | Snapshot of the committed major disorder component (`operation = "commit_disorder_candidate"`, `revision = 2`) |
 | `operate_commit_major_with_cif(path)` | `{"snapshot": <identical to operate_commit_major>, "cif": <str>}` |
@@ -113,6 +113,24 @@ two displayed endpoints is wrong for periodic-image bonds, where
 (`left == right`, non-zero shift) are valid. Draw sticks for `covalent`;
 `coordination` bonds are kept for topology and are not sticks. MatterVis
 copies these fields and derives no chemistry.
+
+Each entry of `sites` also passes through two MolCrysKit `SiteRecord` fields:
+
+| Key | Meaning |
+|---|---|
+| `fractional_position` | `SiteRecord.fractional_position`, three floats, verbatim |
+| `image_shift` | `SiteRecord.image_shift`, three ints: lattice translation used to make the molecule contiguous |
+
+These were added next to the existing site keys; `position`, ordering and
+all existing keys are unchanged. `position` stays the contiguous-molecule
+Cartesian site, so `fractional_position` can lie outside `[0, 1)`. A client
+that offers a unit-cell view may wrap a site with
+`fractional_position - floor(fractional_position)` and convert with `cell`.
+`image_shift` is per-site provenance only; it is not a generally valid
+whole-molecule or home-cell wrapping shortcut, so do not wrap by subtracting
+it; a periodic bond is drawn from the wrapped `left` using
+`vector_A`. Wrapping is a display choice; MatterVis derives no chemistry and
+the snapshot keeps the contiguous view by default.
 
 `operate_commit_major` and `operate_commit_major_with_cif` share one
 internal operation: a single `EffectSession.operate` call and a single

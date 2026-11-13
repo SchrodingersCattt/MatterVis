@@ -357,3 +357,115 @@ print(json.dumps({"snapshot": json.loads(text), "loaded": loaded}))
     bond = payload["snapshot"]["bonds"][0]
     assert bond["vector_A"] == [0.0, 0.0, 4.0]
     assert bond["right_image_shift"] == [0, 0, 1]
+
+
+PBC_CIF = """data_pbc
+_cell_length_a 10
+_cell_length_b 10
+_cell_length_c 10
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_IT_number 1
+_space_group_name_H-M_alt 'P 1'
+loop_
+_space_group_symop_operation_xyz
+x,y,z
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+O1 O 0.995 0.50 0.50 1.0
+H1 H 0.03 0.50 0.50 1.0
+H2 H 0.99 0.58 0.50 1.0
+"""
+
+
+def _read_records(path: Path):
+    from mat_viewer.phone.snapshot import _read
+
+    crystal = _quiet(_read, path)
+    return crystal, list(crystal.get_site_records())
+
+
+def test_sites_pass_through_fractional_position_and_image_shift(tmp_path: Path):
+    path = _write(tmp_path, PBC_CIF, name="pbc.cif")
+    _, records = _read_records(path)
+    snapshot = _quiet(analyze_cif, path)
+    sites = snapshot["sites"]
+    assert len(sites) == len(records) == 3
+    # The boundary-straddling molecule really needs a periodic image shift.
+    assert any(any(record.image_shift) for record in records)
+    assert any(
+        any(v < 0.0 or v >= 1.0 for v in record.fractional_position) for record in records
+    )
+    for site, record in zip(sites, records):  # order unchanged
+        assert site["site_id"] == str(record.site_id)
+        assert site["position"] == [float(v) for v in record.cartesian_position_A]
+        assert site["fractional_position"] == [float(v) for v in record.fractional_position]
+        assert site["image_shift"] == [int(v) for v in record.image_shift]
+        assert all(type(v) is int for v in site["image_shift"])
+    # Existing keys remain; new keys are additive.
+    assert {
+        "site_id", "symbol", "position", "occupancy", "alpha",
+        "disorder_group", "disorder_assembly", "visible",
+        "fractional_position", "image_shift",
+    } == set(sites[0])
+    # Wrapping by the passed-through fractional position stays inside the cell.
+    cell = np.array(snapshot["cell"])
+    for site in sites:
+        frac = np.array(site["fractional_position"])
+        wrapped = frac - np.floor(frac)
+        assert ((wrapped >= 0) & (wrapped < 1)).all()
+        assert np.allclose(np.array(site["position"]), frac @ cell, atol=1e-6)
+
+
+def test_site_fields_roundtrip_json_and_survive_display(tmp_path: Path):
+    snapshot = _quiet(analyze_cif, _write(tmp_path, PBC_CIF, name="pbc.cif"))
+    assert json.loads(json.dumps(snapshot)) == snapshot
+    shown = display(snapshot)
+    for before, after in zip(snapshot["sites"], shown["sites"]):
+        assert after["fractional_position"] == before["fractional_position"]
+        assert after["image_shift"] == before["image_shift"]
+    # Committed (operate) snapshots carry the same fields.
+    committed = _quiet(operate_commit_major, _write(tmp_path))
+    for site in committed["sites"]:
+        assert len(site["fractional_position"]) == 3
+        assert len(site["image_shift"]) == 3
+
+
+def test_site_fields_without_desktop_dependencies(tmp_path: Path):
+    path = _write(tmp_path, PBC_CIF, name="pbc.cif")
+    script = r"""
+import json, sys, warnings
+blocked = ("ase", "scipy", "matplotlib", "pymatgen", "spglib", "PIL")
+
+class Block:
+    def find_spec(self, name, path, target=None):
+        if name.split(".")[0] in blocked:
+            raise ImportError(name)
+        return None
+
+sys.meta_path.insert(0, Block())
+from mat_viewer.phone import analyze_cif
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", UserWarning)
+    snapshot = analyze_cif(sys.argv[1])
+loaded = sorted(m for m in sys.modules if m.split(".")[0] in blocked)
+print(json.dumps({"snapshot": snapshot, "loaded": loaded}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(path)],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert payload["loaded"] == []
+    shifts = [site["image_shift"] for site in payload["snapshot"]["sites"]]
+    assert [1, 0, 0] in shifts
