@@ -191,3 +191,33 @@ def test_animation_passes_fixed_vector_overlays_to_every_frame(
         "animated": True,
         "policy": "fixed_source_frame",
     }
+
+
+def test_animation_reports_the_frame_renderer_backend(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("imageio.v2")
+    from dataclasses import replace
+
+    camera = CameraSpec.looking_along(
+        (0, 0, 1), up=(0, 1, 0), distance=5.0, near=0.1, far=10.0
+    )
+    plan = RenderPlan(
+        width=8,
+        height=8,
+        background=(1.0, 1.0, 1.0, 1.0),
+        viewports=(ViewportPlan("main", camera=camera, primitives=()),),
+    )
+
+    def render_on_gpu(received):
+        assert received is plan
+        painted = cpu_module.render_png(received)
+        return replace(painted, backend="gpu")
+
+    monkeypatch.setattr(planning_module, "prepare_render", lambda *args, **kwargs: plan)
+    result = render_animation(
+        SimpleNamespace(frames=(_scene(0.0), _scene(1.0))),
+        tmp_path / "gpu.gif",
+        camera=camera,
+        frame_renderer=render_on_gpu,
+    )
+    assert result.backend == "gpu"
+

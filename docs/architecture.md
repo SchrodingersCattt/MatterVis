@@ -86,13 +86,17 @@ at the operation that needs them:
 - terminal UI: `matter-vis[tui]`;
 - Cube isosurfaces: `matter-vis[cube]`;
 - GIF/MP4 encoding: `matter-vis[animation]`.
-- native offscreen opaque PNG: `matter-vis[gpu]` (wgpu; runtime device probe required).
+- native offscreen PNG/GIF/MP4: `matter-vis[gpu]` (wgpu; runtime device probe required; GIF/MP4 also need `matter-vis[animation]`).
 
-The GPU backend is explicit and PNG-only in its first release. It lowers the
-same immutable `RenderPlan`, rejects transparent, dashed, depth-disabled, and
-text primitives before device submission, and never substitutes the CPU
-renderer when the optional dependency or device is unavailable. CPU PNG and
-true-vector PDF/SVG remain the reference paths.
+The GPU backend is explicit. It lowers the same immutable `RenderPlan`,
+draws opaque meshes and instanced spheres, cylinders, and solid ellipsoids,
+and composites depth-disabled lines together with lines that are not one
+pixel wide, using each viewport's own camera and pixel crop. It does not apply CPU
+supersampling or the CPU sphere and cylinder tessellation controls.
+Transparent primitives, dashed lines, and text are rejected. It never
+substitutes the CPU renderer when the optional dependency, the device, or a
+primitive is unavailable. CPU PNG and true-vector PDF/SVG remain the
+reference paths.
 
 `mat-vis capabilities` and `mat-vis render --check` are the authoritative
 dependency resolver. No skill or installer maintains a second dependency

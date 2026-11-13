@@ -314,9 +314,9 @@ def render(
 
     output_suffix = Path(output).suffix.lower() if output is not None else ""
     if output_suffix in {".gif", ".mp4"}:
-        if backend_name != "cpu":
+        if backend_name not in {"cpu", "gpu"}:
             raise ValueError(
-                "GIF/MP4 use the shared CPU frame renderer; select backend='cpu'"
+                "GIF/MP4 use the CPU frame renderer or the GPU session"
             )
         from .render.animation_adapter import render_animation
 
@@ -338,10 +338,31 @@ def render(
             )
             _require_plan_backend(first_plan, backend_name)
             effective_camera = first_plan.camera
-        result = render_animation(
-            source_or_plan,
-            output,
-            view=view,
+        if backend_name == "gpu":
+            from .render.gpu_batch import render_gpu_animation
+
+            result = render_gpu_animation(
+                source_or_plan,
+                output,
+                view=view,
+                camera=effective_camera,
+                render_spec=bound_render_spec,
+                fps=fps,
+                topology_data=topology_data,
+                cell_overlays=cell_overlays,
+                vector_overlays=vector_overlays,
+                atom_groups=atom_groups,
+                bond_groups=bond_groups,
+                time_spec=animation_time,
+                annotation_spec=frame_annotation,
+                atom_property_color=atom_property_color,
+            )
+        else:
+            result = render_animation(
+                source_or_plan,
+                output,
+                frame_renderer=None,
+                view=view,
             camera=effective_camera,
             render_spec=bound_render_spec,
             topology_data=topology_data,

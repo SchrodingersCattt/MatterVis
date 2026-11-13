@@ -101,8 +101,10 @@ def map_readback_sync(
     raise error_type("wgpu readback buffer does not expose mapped bytes")
 
 
-def release_gpu_resources(resources: list[Any], device: Any) -> None:
-    """Best-effort release of transient GPU resources and the device."""
+def release_gpu_resources(
+    resources: list[Any], device: Any, *, release_device: bool = True
+) -> None:
+    """Best-effort release of transient GPU resources and, by default, the device."""
 
     for resource in reversed(resources):
         unmap = getattr(resource, "unmap", None)
@@ -117,9 +119,10 @@ def release_gpu_resources(resources: list[Any], device: Any) -> None:
                 destroy()
             except Exception:
                 pass
-    destroy_device = getattr(device, "destroy", None)
-    if callable(destroy_device):
-        try:
-            destroy_device()
-        except Exception:
-            pass
+    if release_device:
+        destroy_device = getattr(device, "destroy", None)
+        if callable(destroy_device):
+            try:
+                destroy_device()
+            except Exception:
+                pass

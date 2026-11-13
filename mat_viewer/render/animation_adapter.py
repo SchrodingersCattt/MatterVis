@@ -1,4 +1,9 @@
-"""Optional GIF/MP4 encoding over the shared CPU RenderPlan renderer."""
+"""Optional GIF/MP4 encoding over one RenderPlan frame renderer.
+
+The default renderer is the CPU rasterizer. A caller can pass
+``frame_renderer`` to draw each planned frame on another backend. The
+returned result reports that frame renderer's backend.
+"""
 
 from __future__ import annotations
 
@@ -28,8 +33,9 @@ def render_animation(
     time_spec: Any = None,
     annotation_spec: Any = None,
     atom_property_color: Any = None,
+    frame_renderer: Any = None,
 ) -> RenderResult:
-    """Render selected source frames with one CPU camera, then encode lazily."""
+    """Render selected source frames with one camera, then encode lazily."""
     try:
         import imageio.v2 as imageio
     except ImportError as exc:  # pragma: no cover - minimal CI
@@ -103,6 +109,7 @@ def render_animation(
     plan_hashes: list[str] = []
     warnings: list[str] = []
     dimensions: tuple[int, int] | None = None
+    frame_backend = "cpu"
     with imageio.get_writer(output_path, mode="I", **writer_kwargs) as writer:
         for frame_number, frame in enumerate(frames):
             plan = prepare_render(
@@ -117,7 +124,8 @@ def render_animation(
                 bond_groups=bond_groups,
                 atom_property_color=property_context,
             )
-            frame_result = render_png(plan)
+            frame_result = (frame_renderer or render_png)(plan)
+            frame_backend = str(getattr(frame_result, "backend", frame_backend))
             if frame_result.data is None:  # pragma: no cover - renderer contract guard
                 raise RuntimeError("CPU frame renderer did not return PNG bytes")
             with Image.open(BytesIO(frame_result.data)) as image:
@@ -144,7 +152,7 @@ def render_animation(
     width, height = dimensions or (0, 0)
     return RenderResult(
         schema=RENDER_RESULT_SCHEMA,
-        backend="cpu",
+        backend=frame_backend,
         format=output_format,
         width=width,
         height=height,
