@@ -17,8 +17,9 @@
   font-size: 12px;
   font-weight: 600;
   padding: 4px 0;
-  border: 1px solid #BBBBBB;
-  background: #F8F8F8;
+  border: 1px solid var(--mv-control-line, #BBBBBB);
+  background: var(--mv-control-bg, #F8F8F8);
+  color: var(--mv-control-ink, #172b4d);
   border-radius: 3px;
   cursor: pointer;
   text-align: center;
@@ -26,19 +27,19 @@
 }
 
 .view-align-btn:hover {
-  background: #E8F0FF;
-  border-color: #5C8AFF;
+  background: var(--mv-control-hover, #E8F0FF);
+  border-color: var(--mv-accent, #5C8AFF);
 }
 
 .view-align-btn:active {
-  background: #D8E4FF;
+  background: var(--mv-accent-soft, #D8E4FF);
 }
 
 .view-reset-btn {
   font-family: Arial, sans-serif;
   font-weight: 500;
   font-size: 11px;
-  color: #555;
+  color: var(--mv-muted, #555);
 }
 
 .view-projection-row {

@@ -36,3 +36,18 @@ def test_workbench_styles_define_scene_hierarchy_and_focus_tokens() -> None:
     assert "width: auto !important" in css
     assert "minmax(0, 1fr) auto" in css
     assert "outline: 2px solid var(--mv-accent)" in css
+    assert "color-scheme: light" in css
+    assert "color-scheme: dark" in css
+    dark_block = css.split("@media (prefers-color-scheme: dark)", 1)[1][:1200]
+    assert "--mv-page:" in dark_block
+    assert "color-scheme: dark" in dark_block
+    appearance = (ASSETS / "selection_appearance.css").read_text(encoding="utf-8")
+    script = (ASSETS / "selection_appearance.js").read_text(encoding="utf-8")
+    dock = appearance.split("#mv-selection-appearance {", 1)[1].split("}", 1)[0]
+    assert "position: fixed" in dock
+    assert "position:absolute" not in dock
+    assert "paddingRight" in script
+    assert "document.body" in script
+    compact = "".join(script.split())
+    assert "if(!selected.length){serial++;editing=[];concealDock();return;}" in compact
+    assert "concealDock();if(selected.length)load(selected)" in compact

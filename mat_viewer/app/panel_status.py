@@ -118,6 +118,11 @@ def register_workbench_status(app, backend) -> None:
     Counts come from ``scene_for_state``, which follows the current display
     mode and transforms. ``bundle.scene`` is the formula-unit scene from
     load and is shared across callers, so it is not a status source.
+
+    A rename writes ``scene-event-store`` and the tab strip without writing
+    ``agent-state-store``. This callback also listens to that event and
+    reads the live scene, so the footer label matches the tab in the same
+    round instead of waiting for a later scene switch.
     """
     from dash import Input, Output
 
@@ -128,8 +133,9 @@ def register_workbench_status(app, backend) -> None:
         Output("atom-list", "children"),
         Input("agent-state-store", "data"),
         Input("structure-summary", "children"),
+        Input("scene-event-store", "data"),
     )
-    def refresh_workbench_status(agent_state, _summary):
+    def refresh_workbench_status(agent_state, _summary, _scene_event=None):
         scene_id = agent_state.get("scene_id") if isinstance(agent_state, dict) else None
         try:
             state = backend.get_state(scene_id)

@@ -47,8 +47,11 @@ work and future polling; no background work is executed for them by this API.
 
 Panels appear only when at least one plugin returns a panel. The Web container
 `mv-extension-panels` is the optional third column, to the right of the native
-viewer. Without plugin panels, the Web layout has only a left tool sidebar and
-the center plot. Multiple plugin panels share that one extension container.
+viewer. It uses the workbench surface tokens and the document `color-scheme`,
+so native controls inside a plugin panel match the sidebar in both light and
+dark preferences. Without plugin panels, the Web layout has only a left tool
+sidebar and the center plot. Multiple plugin panels share that one extension
+container.
 The TUI container of the same ID is appended inside the original `body` after
 canvas and inspector (the native narrow-screen vertical layout still applies).
 Use plugin-prefixed component/widget IDs; do not reuse host IDs. With no panels,
