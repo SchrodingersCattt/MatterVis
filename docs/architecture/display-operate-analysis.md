@@ -141,3 +141,55 @@ after a second chemistry run. The CIF is a complete P1 cell and re-reads
 through `analyze_cif` to the same cell, symbols, positions and occupancies.
 The writer must be importable without ASE; that is a MolCrysKit contract,
 and the phone-like test in `tests/test_phone_snapshot.py` enforces it.
+
+
+### Multiple ordered disorder candidates
+
+`generate_disorder_candidates(path, *, method="enumerate", count, seed=None,
+coupled=False, independent_assemblies=False, max_candidates=16,
+max_payload_bytes=8 MiB)` (in `mat_viewer/phone/candidates.py`) is additive;
+the four functions above are unchanged. It calls MolCrysKit's
+`generate_ordered_replicas_from_disordered_sites` exactly once and commits
+each returned replica through its own `EffectSession` registered from the
+original source, so candidates are siblings (each snapshot is `revision = 2`
+of its own session), never a chain. The source file is not modified and is
+not replaced by any candidate; Android keeps the original.
+
+Result (JSON-serializable, `schema_version` 1):
+
+```
+{method, requested_count, seed, coupled, independent_assemblies,
+ actual_count, unique_count, source: {path, sha256, bytes},
+ candidates: [{candidate_id, index, kept_indices, duplicate_of,
+               fingerprint, snapshot, cif}],
+ warnings: [{source, category, message}]}
+```
+
+- `candidate_id` is `candidate-NNN`, the 1-based position in MolCrysKit's
+  return order; order is preserved. `snapshot` has the same shape as
+  `operate_commit_major`; `cif` is the P1 `write_cif` text of the same
+  checked-out crystal, so both describe the same candidate.
+- `enumerate` is MolCrysKit's deterministic enumeration; `count` is a top-N
+  cap and `seed` must be `None`. `random` is occupancy-weighted sampling with
+  replacement and requires an explicit integer `seed` (0..2^32-1), which is
+  echoed back. Random samples can repeat: repeats keep their own ID and
+  position and set `duplicate_of` to the first matching `candidate_id`;
+  `unique_count` counts distinct `kept_indices` sets.
+- MolCrysKit may return fewer than requested (`actual_count < requested_count`);
+  a `FewerCandidates` warning is added and nothing is padded.
+- `independent_assemblies` defaults to `False` (MolCrysKit legacy semantics:
+  separate assemblies are not assumed independent) and MolCrysKit's warning
+  is returned in `warnings` (`source = "molcrys_kit"`). Pass `True` only when
+  the source confirms independent assemblies. `coupled` is forwarded as is.
+  Deprecation/Future warnings from libraries are not included.
+- Invalid `method` (including `"optimal"`; use `operate_commit_major`),
+  `count`, `seed`, flags, a `count` above `max_candidates` (hard cap 16), a
+  source above 2 MiB, or a serialized result above `max_payload_bytes` raise
+  `CandidateRequestError` (`ValueError`; `CandidatePayloadError` for payload
+  size). Results are never truncated.
+
+Android can preview any candidate's `snapshot`, export its `cif`, or zip all
+`cif` strings; the ZIP is built in the Android layer from this payload.
+Limitation: the payload carries full P1 CIF plus snapshot per candidate, so it
+is roughly linear in count and structure size. The call is synchronous and
+not thread-safe while MolCrysKit log records are captured.
