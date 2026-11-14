@@ -21,6 +21,14 @@ from mat_viewer.loader import (
 from mat_viewer.loader.mryx_adapter import read_mryx_frames
 
 
+# pytest.warns re-emits unmatched warnings from this test module, so the
+# repository's ASE-module-only filter cannot match this known upstream warning.
+# Keep the exact warning filter scoped here; MRYX UserWarning assertions remain.
+pytestmark = pytest.mark.filterwarnings(
+    r"ignore:Setting the shape on a NumPy array has been deprecated in NumPy 2\.5\.:DeprecationWarning"
+)
+
+
 def synthetic_mryx():
     # Independent artificial geometry: isolated helium in rectangular cells.
     def structure(i):
