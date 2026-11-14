@@ -33,7 +33,7 @@ MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
 # Development pin for shared Mercury IO and disorder APIs. pyproject.toml must
 # name this same commit. Restore a release range once the API is on PyPI.
-MOLCRYSKIT_SOURCE_COMMIT = "7bcaec3ff3b73c47da9adc455c95fe24a365f7b6"
+MOLCRYSKIT_SOURCE_COMMIT = "0702ed8d8276b9b9adf8bd17a24b32fd2e04a9d0"
 MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
     "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
     f"{MOLCRYSKIT_SOURCE_COMMIT}"

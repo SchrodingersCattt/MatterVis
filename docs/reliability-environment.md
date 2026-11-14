@@ -59,7 +59,7 @@ signatures.
 
 Every install job uses the git commit in `pyproject.toml`:
 
-`7bcaec3ff3b73c47da9adc455c95fe24a365f7b6`
+`0702ed8d8276b9b9adf8bd17a24b32fd2e04a9d0`
 
 The checkout version is derived from git tags by setuptools_scm. The fast-job window check
 still requires the installed version to be at least 0.8.0 and below

@@ -18,7 +18,7 @@ BUILD_INSTALL = (
     "python -m pip install -c requirements/ci-constraints.txt "
     'build setuptools "setuptools-scm[toml]"'
 )
-MOLCRYS_COMMIT = "7bcaec3ff3b73c47da9adc455c95fe24a365f7b6"
+MOLCRYS_COMMIT = "0702ed8d8276b9b9adf8bd17a24b32fd2e04a9d0"
 
 
 def _requirement_lines() -> list[str]:
