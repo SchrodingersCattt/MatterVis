@@ -28,14 +28,13 @@ dependencies = [
     "matplotlib",
     "pillow",
     "ase",
-    # PyPI 0.8.0 does not include BondRecord.role,
-    # MolecularCrystal.get_connectivity_report(), or find_polyhedra
-    # disorder_policy (major / exclusive / as_refined). Track post-merge main
-    # commit ee45c7e7 until those APIs are published, then restore a version range.
-    # Do not invent a PyPI version for this commit.
-    # identify_molecules defaults to as_refined; only shell construction
-    # defaults to major. Exclusive shell selection keeps whole orientations.
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@ee45c7e7c9e44f50b0b55ed46ee5dca306550541",
+    # Pin the shared Mercury IO implementation as well as the existing
+    # BondRecord.role/connectivity/disorder APIs until a release includes them.
+    # Merge the corresponding upstream change before this downstream adapter.
+    # Do not invent a PyPI version for an unreleased commit.
+    # identify_molecules defaults to as_refined; shell construction defaults
+    # to major. Exclusive shell selection keeps whole orientations.
+    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@7bcaec3ff3b73c47da9adc455c95fe24a365f7b6",
 ]
 
 [project.scripts]

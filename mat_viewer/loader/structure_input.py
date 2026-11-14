@@ -18,6 +18,7 @@ from .core import LoadedCrystal, build_loaded_crystal
 
 _FORMAT_ALIASES = {
     "ase-traj": "traj",
+    "mercury": "mryx",
     "lammps-dump": "lammps-dump-text",
     "lammps-data": "lammps-data",
     "poscar": "vasp",
@@ -29,6 +30,7 @@ _SUFFIX_FORMATS = {
     ".data": "lammps-data",
     ".dump": "lammps-dump-text",
     ".extxyz": "extxyz",
+    ".mryx": "mryx",
     ".lammpstrj": "lammps-dump-text",
     ".lammpsdump": "lammps-dump-text",
     ".poscar": "vasp",
@@ -87,7 +89,7 @@ def _normalise_format(path: Path, input_format: str | None) -> str | None:
     if input_format:
         value = input_format.strip().lower()
         if value in {"", "auto"}:
-            return None
+            return "mryx" if path.suffix.lower() == ".mryx" else None
         return _FORMAT_ALIASES.get(value, value)
     if path.name.upper() in {"POSCAR", "CONTCAR"}:
         return "vasp"
@@ -178,6 +180,12 @@ def _ase_frames(
     resolved_format: str | None,
     symbols: list[str] | None,
 ):
+    if resolved_format == "mryx":
+        from .mryx_adapter import read_mryx_frames
+
+        yield from read_mryx_frames(source_path)
+        return
+
     from ase.io import iread as ase_iread
 
     kwargs = _ase_read_kwargs(resolved_format, symbols)
@@ -246,6 +254,7 @@ def _ase_atoms_to_pipeline(
     symbols = atoms.get_chemical_symbols()
     arrays = _atom_arrays(atoms)
     site_ids = _optional_scalar_array(arrays, "site_id", len(atoms))
+    source_labels = _optional_scalar_array(arrays, "label", len(atoms))
     occupancies = _optional_scalar_array(arrays, "occupancy", len(atoms))
     disorder = _optional_scalar_array(arrays, "disorder", len(atoms))
     if site_ids is not None:
@@ -257,7 +266,7 @@ def _ase_atoms_to_pipeline(
         site_ids = np.asarray(normalized_ids, dtype=object)
     raw_atoms: list[dict[str, Any]] = []
     for index, (symbol, cart, frac) in enumerate(zip(symbols, positions, fractional)):
-        label = f"{symbol}{index + 1}"
+        label = f"{symbol}{index + 1}" if source_labels is None else str(source_labels[index])
         occupancy = 1.0 if occupancies is None else float(occupancies[index])
         if not np.isfinite(occupancy) or not 0.0 <= occupancy <= 1.0:
             raise ValueError("occupancy values must be finite and between 0 and 1")

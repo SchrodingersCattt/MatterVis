@@ -280,7 +280,7 @@
         if (meta && meta.scene_id) sceneId = String(meta.scene_id);
         setStatus("Processing complete: " + names.join(", "), "success");
       }
-      setStatus("Uploaded CIF(s): " + names.join(", ") + ". Updating scene...", "success");
+      setStatus("Uploaded structure(s): " + names.join(", ") + ". Updating scene...", "success");
       // Wait for the scene store to expose every completed upload, then
       // switch exactly once to the scene this upload owns. Awaiting this
       // sequence prevents a stale tab value, or the other browser's active

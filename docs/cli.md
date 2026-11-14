@@ -43,6 +43,13 @@ mat-vis skills tree visualize-materials
 mat-vis skills show visualize-materials --all
 ~~~
 
+## Mercury MRYX
+
+`mat-vis render document.mryx --frame 1 -o stored-sites.png --backend cpu`
+uses the shared MolCrysKit reader. Each stored structure is one selectable frame.
+This is stored-site import, not symmetry expansion or Mercury session restoration;
+see [MRYX entry points, dependency and limitations](mryx.md).
+
 ## Subcommands
 
 | Command | Description |

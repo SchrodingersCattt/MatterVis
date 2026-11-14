@@ -794,7 +794,15 @@ def build_loaded_crystal(
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | dict[str, float] | None = None,
 ) -> LoadedCrystal:
-    """Parse a CIF and enter the shared canonical structure pipeline."""
+    """Parse CIF (or the first stored MRYX structure) into the shared pipeline."""
+    if str(cif_path).lower().endswith(".mryx"):
+        from .mryx_adapter import build_mryx_bundle
+
+        return build_mryx_bundle(
+            path=cif_path, name=name, title=title, preset=preset, source=source,
+            view_weights=view_weights, bond_scale=bond_scale,
+            bond_thresholds=bond_thresholds,
+        )
     ops = scene_ops()
     with perf_log.time_block(
         "loader:parse_asu",
