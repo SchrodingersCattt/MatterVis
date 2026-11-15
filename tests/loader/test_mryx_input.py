@@ -123,6 +123,39 @@ def test_single_bundle_and_legacy_upload(mryx_path, tmp_path):
     assert uploaded.frame_info["mryx"]["structure_index"] == 0
 
 
+def test_display_scene_keeps_import_diagnostics(mryx_path):
+    from mat_viewer.loader.core import build_bundle_scene
+
+    with pytest.warns(UserWarning, match="MRYX"):
+        bundle = build_loaded_crystal(
+            name="synthetic",
+            cif_path=str(mryx_path),
+            source="upload",
+        )
+    scene = build_bundle_scene(bundle, display_mode="formula_unit", show_hydrogen=True)
+    assert scene["source_structure_count"] == 2
+    assert scene["input_format"] == "mryx"
+    assert scene["input_diagnostics"]
+    assert scene["draw_atoms"][0]["label"] == "He47"
+
+
+def test_iteration_parses_the_whole_document(monkeypatch, mryx_path):
+    import molcrys_kit.io as io
+
+    calls = []
+    original = io.read_mryx_atoms
+
+    def wrapped(path, index=0):
+        calls.append(index)
+        return original(path, index=index)
+
+    monkeypatch.setattr(io, "read_mryx_atoms", wrapped)
+    with pytest.warns(UserWarning, match="MRYX"):
+        frames = list(iter_atomistic_frames(mryx_path, frame_indices=[1]))
+    assert calls == [":"]
+    assert [frame.index for frame, _fmt in frames] == [1]
+
+
 def test_missing_upstream_is_actionable(monkeypatch, mryx_path):
     import molcrys_kit.io
 

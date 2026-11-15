@@ -14,8 +14,11 @@ mat-vis tui document.mryx --frame 1 --no-interaction
 The unified Python APIs `load_atomistic_input`, `iter_atomistic_frames`,
 `count_structure_frames`, and `load_structure_input` recognize `.mryx` (or
 `input_format="mryx"` / `"mercury"`). Each stored structure is a frame in document
-order. The load APIs accept negative indices; the streaming iterator keeps its
-existing contract of pre-resolved non-negative indices. Stored structures are
+order. The load APIs accept negative indices. `iter_atomistic_frames` still
+requires pre-resolved non-negative indices, but MRYX is not a bounded-memory
+stream: the adapter calls `read_mryx_atoms(index=":")`, so every stored
+structure and its provenance are parsed before the first frame is yielded.
+Selecting one frame does not make that read lazy. Stored structures are
 document indices, not a physical time trajectory.
 
 Browser upload and `build_loaded_crystal` show the first stored structure and
@@ -38,7 +41,9 @@ This is read-only **stored-site geometry** import, not Mercury session
 restoration. Upstream warnings are emitted and retained in
 `bundle.frame_info["mryx"]["diagnostics"]`; source metadata also appears in
 `bundle.scene["source_info"]["mryx"]`. Single-bundle uploads additionally expose
-`input_diagnostics` and `source_structure_count` on the scene. Atom labels and
+`input_diagnostics` and `source_structure_count` on the scene, including the
+scene served after display rebuild. The browser upload status repeats the
+first diagnostic under the loaded name. Atom labels and
 arrays pass through the shared ASE adapter.
 
 Important upstream limitations apply unchanged: no automatic symmetry expansion

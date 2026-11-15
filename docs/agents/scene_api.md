@@ -587,6 +587,8 @@ keeps tab, camera, and style edits from racing one another.
 
 The unified loader APIs accept `.mryx` via MolCrysKit IO, with each stored
 structure treated as a document-index frame, not a simulation-time sample.
+`iter_atomistic_frames` yields those frames in document order, but the read is
+eager: MolCrysKit materializes the whole document before the first yield.
 `build_loaded_crystal` accepts the same suffix but
 selects only the first structure. Source labels, raw metadata and import
 diagnostics remain on the bundle. This does not expand symmetry or

@@ -169,4 +169,6 @@ are in `docs/reliability-worker-shutdown.md`.
 the existing ASE/canonical bundle pipeline. Container/XML parsing and structural
 semantics live only upstream. Native MRYX uploads use the existing asynchronous
 job and filename-safety path, selecting the first stored structure; frame-aware
-loaders expose the ordered document. See [input limitations](mryx.md).
+loaders expose the ordered document. The adapter still asks upstream for every
+stored structure up front, so MRYX iteration is not a bounded-memory stream.
+See [input limitations](mryx.md).

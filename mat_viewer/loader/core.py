@@ -608,6 +608,9 @@ def build_bundle_scene(
             molcrys_analysis=bundle.molcrys_analysis,
         )
         base_scene["cif_path"] = bundle.cif_path
+        for key in ("input_format", "input_diagnostics", "source_structure_count"):
+            if key in bundle.scene:
+                base_scene[key] = copy.deepcopy(bundle.scene[key])
         base_scene["view_direction"] = view_dir
         base_scene["up"] = up
         base_scene["unwrap_overflow"] = copy.deepcopy(bundle.unwrap_overflow)

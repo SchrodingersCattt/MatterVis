@@ -484,12 +484,15 @@ def iter_atomistic_frames(
     type_map: Iterable[str] | None = None,
     frame_indices: Iterable[int] | None = None,
 ):
-    """Yield selected ASE frames in source order with bounded memory.
+    """Yield selected ASE frames in source order.
 
-    ``frame_indices`` must already contain non-negative source indices.  This
-    is the contract used after the CLI resolves Python slices against the
-    counted trajectory length.  Output ordering can be restored separately by
-    callers that requested a reverse slice.
+    ASE and LAMMPS reads stay bounded to the selected frames. Mercury
+    ``.mryx`` does not: ``read_mryx_atoms(index=':')`` materializes every
+    stored structure before the first frame is yielded. ``frame_indices``
+    must already contain non-negative source indices. This is the contract
+    used after the CLI resolves Python slices against the counted document
+    length. Output ordering can be restored separately by callers that
+    requested a reverse slice.
     """
     source_path, resolved_format, symbols = _prepare_source(
         path, input_format, type_map
