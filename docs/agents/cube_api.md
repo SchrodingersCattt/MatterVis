@@ -228,7 +228,8 @@ The renderer lights both sides of the sheet, so an open isosurface stays
 visible when a normal points away from the camera. The defaults leave the
 previous coefficients unchanged. Pass `cell_origin` and `cell_vectors`
 (three lattice rows) together to draw the twelve cell edges; omit both to
-leave the box off.
+leave the box off. `bond_color=None` paints each half of a stick with the
+endpoint atom color; a single RGB triple keeps a uniform stick.
 
 `look` and `up` are directions. The camera distance and the three lights
 scale with the scene radius, and the focal point is the center of the mesh

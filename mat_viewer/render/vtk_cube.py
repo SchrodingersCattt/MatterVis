@@ -103,7 +103,7 @@ def render_cube_figure(
     bonds: np.ndarray | None = None,
     bond_finder: Callable[[np.ndarray, np.ndarray], Sequence] | None = None,
     bond_radius: float = 0.15,
-    bond_color: tuple[float, float, float] = (0.45, 0.45, 0.45),
+    bond_color: tuple[float, float, float] | None = (0.45, 0.45, 0.45),
     sphere_resolution: int = 18,
     depth_peels: int = 8,
     colormap_stops: Sequence[tuple[int, int, int]] | None = None,
@@ -139,7 +139,9 @@ def render_cube_figure(
     and ``surface_specular_power`` shade the isosurface. Atom and bond
     coefficients are separate. VTK's specular power is the Phong exponent.
     Pass ``cell_origin`` and ``cell_vectors`` (three lattice rows) to draw
-    the twelve cell edges. Omit both to leave the box off.
+    the twelve cell edges. Omit both to leave the box off. ``bond_color=None``
+    draws each half of a bond in the endpoint atom color; a single RGB triple
+    keeps a uniform stick.
     """
 
     iso_grid = _as_grid("iso", iso)
@@ -165,7 +167,7 @@ def render_cube_figure(
     radius = float(bond_radius)
     if not np.isfinite(radius) or radius <= 0.0:
         raise ValueError("bond_radius must be finite and positive")
-    bond_rgb = _rgb01("bond_color", bond_color)
+    bond_rgb = None if bond_color is None else _rgb01("bond_color", bond_color)
     surface_shade = _shade(
         "surface",
         surface_ambient,
@@ -269,6 +271,36 @@ def render_cube_figure(
         cell_rgb,
         edge_width,
     )
+
+
+def _bond_segments(xyz, atomic_numbers, bonds, element_color, bond_color):
+    """Group bond line segments by RGB color.
+
+    A uniform ``bond_color`` keeps one full stick per pair. ``None`` splits
+    each bond at the midpoint and paints each half with the endpoint atom
+    color.
+    """
+
+    groups: dict[tuple[float, float, float], dict[str, list]] = {}
+    for left, right in bonds:
+        i = int(left)
+        j = int(right)
+        start = np.asarray(xyz[i], dtype=float)
+        end = np.asarray(xyz[j], dtype=float)
+        if bond_color is None:
+            mid = 0.5 * (start + end)
+            halves = (
+                (tuple(float(c) for c in element_color[int(atomic_numbers[i])]), start, mid),
+                (tuple(float(c) for c in element_color[int(atomic_numbers[j])]), end, mid),
+            )
+        else:
+            halves = ((tuple(float(c) for c in bond_color), start, end),)
+        for color, point_a, point_b in halves:
+            bucket = groups.setdefault(color, {"points": [], "lines": [], "cursor": 0})
+            bucket["points"].extend([point_a, point_b])
+            bucket["lines"].append([2, bucket["cursor"], bucket["cursor"] + 1])
+            bucket["cursor"] += 2
+    return groups
 
 
 def _cell_box(origin, vectors) -> tuple[np.ndarray, np.ndarray] | None:
@@ -699,24 +731,20 @@ def _draw(
             show_scalar_bar=False,
         )
         if len(bonds):
-            bond_points = []
-            lines = []
-            cursor = 0
-            for left, right in bonds:
-                bond_points.extend([xyz[int(left)], xyz[int(right)]])
-                lines.append([2, cursor, cursor + 1])
-                cursor += 2
-            tubes = pv.PolyData(
-                np.asarray(bond_points, dtype=float),
-                lines=np.hstack(lines),
-            ).tube(radius=bond_radius, n_sides=_BOND_TUBE_SIDES)
-            plotter.add_mesh(
-                tubes,
-                color=bond_color,
-                ambient=bond_shade[0],
-                diffuse=bond_shade[1],
-                specular=bond_shade[2],
-            )
+            for color, segments in _bond_segments(
+                xyz, atomic_numbers, bonds, element_color, bond_color
+            ).items():
+                tubes = pv.PolyData(
+                    np.asarray(segments["points"], dtype=float),
+                    lines=np.hstack(segments["lines"]),
+                ).tube(radius=bond_radius, n_sides=_BOND_TUBE_SIDES)
+                plotter.add_mesh(
+                    tubes,
+                    color=color,
+                    ambient=bond_shade[0],
+                    diffuse=bond_shade[1],
+                    specular=bond_shade[2],
+                )
         for atomic_number in np.unique(atomic_numbers):
             number = int(atomic_number)
             mask = atomic_numbers == atomic_number

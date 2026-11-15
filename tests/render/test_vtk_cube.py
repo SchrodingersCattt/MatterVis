@@ -15,6 +15,7 @@ from mat_viewer.render import vtk_cube
 from mat_viewer.render.vtk_cube import (
     _SCALAR,
     _apply_depth_peeling,
+    _bond_segments,
     _cell_shifts,
     _closed_values,
     _color_limits,
@@ -46,6 +47,19 @@ def test_supplied_bonds_tile_by_atom_count() -> None:
     bonds = np.array([[0, 1], [1, 2]])
     tiled = _tile_bonds(bonds, 4, 2)
     assert np.array_equal(tiled, np.array([[0, 1], [1, 2], [4, 5], [5, 6]]))
+
+
+def test_bond_segments_split_by_endpoint_element_color() -> None:
+    xyz = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+    numbers = np.array([6, 7])
+    colors = {6: (0.6, 0.6, 0.6), 7: (0.3, 0.5, 1.0)}
+    groups = _bond_segments(xyz, numbers, [(0, 1)], colors, None)
+    assert set(groups) == {(0.6, 0.6, 0.6), (0.3, 0.5, 1.0)}
+    for bucket in groups.values():
+        assert len(bucket["lines"]) == 1
+    uniform = _bond_segments(xyz, numbers, [(0, 1)], colors, (0.2, 0.2, 0.2))
+    assert set(uniform) == {(0.2, 0.2, 0.2)}
+    assert len(uniform[(0.2, 0.2, 0.2)]["lines"]) == 1
 
 
 def test_asymmetric_green_stop_matches_the_data_zero() -> None:
