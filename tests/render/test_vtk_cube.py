@@ -16,6 +16,7 @@ from mat_viewer.render.vtk_cube import (
     _SCALAR,
     _apply_depth_peeling,
     _bond_segments,
+    _cell_edge_polydata,
     _cell_shifts,
     _closed_values,
     _color_limits,
@@ -47,6 +48,18 @@ def test_supplied_bonds_tile_by_atom_count() -> None:
     bonds = np.array([[0, 1], [1, 2]])
     tiled = _tile_bonds(bonds, 4, 2)
     assert np.array_equal(tiled, np.array([[0, 1], [1, 2], [4, 5], [5, 6]]))
+
+
+def test_cell_edge_face_mode_drops_depth_edges() -> None:
+    pv = pytest.importorskip("pyvista")
+    origin = np.zeros(3)
+    vectors = np.eye(3)
+    box = _cell_edge_polydata(pv, origin, vectors, mode="box")
+    face = _cell_edge_polydata(
+        pv, origin, vectors, look=np.array([1.0, 0.0, 0.0]), mode="face"
+    )
+    assert box.n_lines == 12
+    assert face.n_lines == 4
 
 
 def test_bond_segments_split_by_endpoint_element_color() -> None:
