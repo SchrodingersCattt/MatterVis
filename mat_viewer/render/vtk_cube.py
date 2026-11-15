@@ -118,6 +118,10 @@ def render_cube_figure(
     bond_ambient: float = _BOND_AMBIENT,
     bond_diffuse: float = _BOND_DIFFUSE,
     bond_specular: float = _BOND_SPECULAR,
+    cell_origin: np.ndarray | None = None,
+    cell_vectors: np.ndarray | None = None,
+    cell_edge_color: tuple[float, float, float] = (0.15, 0.15, 0.15),
+    cell_edge_width: float = 2.0,
 ) -> None:
     """Write one PNG. ``look`` points from the camera toward the scene.
 
@@ -134,6 +138,8 @@ def render_cube_figure(
     this window. ``surface_ambient``, ``surface_diffuse``, ``surface_specular``,
     and ``surface_specular_power`` shade the isosurface. Atom and bond
     coefficients are separate. VTK's specular power is the Phong exponent.
+    Pass ``cell_origin`` and ``cell_vectors`` (three lattice rows) to draw
+    the twelve cell edges. Omit both to leave the box off.
     """
 
     iso_grid = _as_grid("iso", iso)
@@ -175,6 +181,11 @@ def render_cube_figure(
         _unit_interval("bond_diffuse", bond_diffuse),
         _unit_interval("bond_specular", bond_specular),
     )
+    cell_box = _cell_box(cell_origin, cell_vectors)
+    cell_rgb = _rgb01("cell_edge_color", cell_edge_color)
+    edge_width = float(cell_edge_width)
+    if not np.isfinite(edge_width) or edge_width <= 0.0:
+        raise ValueError("cell_edge_width must be finite and positive")
     resolution = _positive_int("sphere_resolution", sphere_resolution, minimum=3)
     peels = _positive_int("depth_peels", depth_peels, minimum=1)
     frame_scale = float(parallel_scale)
@@ -254,7 +265,58 @@ def render_cube_figure(
         surface_shade,
         atom_shade,
         bond_shade,
+        cell_box,
+        cell_rgb,
+        edge_width,
     )
+
+
+def _cell_box(origin, vectors) -> tuple[np.ndarray, np.ndarray] | None:
+    if origin is None and vectors is None:
+        return None
+    if origin is None or vectors is None:
+        raise ValueError("cell_origin and cell_vectors must both be set or both omitted")
+    corner = _as_vector(origin, "cell_origin")
+    lattice = _as_axes(vectors)
+    return corner, lattice
+
+
+def _cell_edge_polydata(pv, origin: np.ndarray, vectors: np.ndarray):
+    corners = np.array(
+        [
+            origin,
+            origin + vectors[0],
+            origin + vectors[1],
+            origin + vectors[2],
+            origin + vectors[0] + vectors[1],
+            origin + vectors[0] + vectors[2],
+            origin + vectors[1] + vectors[2],
+            origin + vectors[0] + vectors[1] + vectors[2],
+        ],
+        dtype=float,
+    )
+    edges = (
+        (0, 1),
+        (0, 2),
+        (0, 3),
+        (1, 4),
+        (1, 5),
+        (2, 4),
+        (2, 6),
+        (3, 5),
+        (3, 6),
+        (4, 7),
+        (5, 7),
+        (6, 7),
+    )
+    points = []
+    lines = []
+    cursor = 0
+    for left, right in edges:
+        points.extend([corners[left], corners[right]])
+        lines.append([2, cursor, cursor + 1])
+        cursor += 2
+    return pv.PolyData(np.asarray(points, dtype=float), lines=np.hstack(lines))
 
 
 def _shade(name, ambient, diffuse, specular, power) -> tuple[float, float, float, float]:
@@ -582,10 +644,34 @@ def _draw(
     surface_shade,
     atom_shade,
     bond_shade,
+    cell_box,
+    cell_edge_color,
+    cell_edge_width,
 ) -> None:
     from matplotlib.colors import ListedColormap
 
-    center, radius = _scene_extent(np.asarray(mesh.points), xyz)
+    cell_points = np.empty((0, 3))
+    if cell_box is not None:
+        corner, lattice = cell_box
+        cell_points = np.array(
+            [
+                corner,
+                corner + lattice[0],
+                corner + lattice[1],
+                corner + lattice[2],
+                corner + lattice[0] + lattice[1],
+                corner + lattice[0] + lattice[2],
+                corner + lattice[1] + lattice[2],
+                corner + lattice[0] + lattice[1] + lattice[2],
+            ],
+            dtype=float,
+        )
+    center, radius = _scene_extent(
+        np.vstack([np.asarray(mesh.points), cell_points])
+        if len(cell_points)
+        else np.asarray(mesh.points),
+        xyz,
+    )
     camera, focal, screen_up, lights, clipping = _view_rig(center, radius, look, up)
     # Do not assign pv.OFF_SCREEN. The plotter flag is local; the global
     # switches later plots in this process to offscreen mode.
@@ -648,6 +734,15 @@ def _draw(
                 diffuse=atom_shade[1],
                 specular=atom_shade[2],
                 specular_power=atom_shade[3],
+            )
+        if cell_box is not None:
+            plotter.add_mesh(
+                _cell_edge_polydata(pv, cell_box[0], cell_box[1]),
+                color=cell_edge_color,
+                line_width=cell_edge_width,
+                ambient=1.0,
+                diffuse=0.0,
+                specular=0.0,
             )
         plotter.camera_position = [tuple(camera), tuple(focal), tuple(screen_up)]
         plotter.camera.parallel_projection = True
