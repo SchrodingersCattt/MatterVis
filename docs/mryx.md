@@ -16,7 +16,15 @@ The unified Python APIs `load_atomistic_input`, `iter_atomistic_frames`,
 `input_format="mryx"` / `"mercury"`). Each stored structure is a frame in document
 order. The load APIs accept negative indices; the streaming iterator keeps its
 existing contract of pre-resolved non-negative indices. Stored structures are
-not necessarily a time trajectory.
+document indices, not a physical time trajectory.
+
+Browser upload and `build_loaded_crystal` show the first stored structure and
+do not start a playback clock. CLI and TUI selection uses `--frame`, which is
+that document index. Animation export does not draw a simulation-time label
+from the index. `--display-time` is accepted only when every selected frame
+already carries `time_fs`, `time_ps`, or `time_ns`. A missing step field is not
+turned into femtoseconds. To print the index, pass
+`--frame-field index --frame-label 'structure {index}'`.
 
 `build_loaded_crystal(cif_path="document.mryx", ...)` and browser/Dash/native
 uploads load the **first stored structure only**. Native upload retains the

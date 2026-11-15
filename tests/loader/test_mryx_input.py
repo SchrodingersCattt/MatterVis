@@ -157,6 +157,47 @@ def test_native_upload_suffix_and_path_safety(mryx_path, tmp_path):
     assert len(bundle.raw_atoms) == 1
 
 
+def test_animation_time_keeps_structure_indices(mryx_path):
+    from dataclasses import replace
+
+    from mat_viewer.render.animation_time import (
+        AnimationTimeSpec,
+        resolve_animation_times,
+    )
+    from mat_viewer.render.batch_pipeline import load_frame_batches
+
+    with pytest.warns(UserWarning, match="MRYX"):
+        frames = load_frame_batches(
+            mryx_path,
+            input_format="mryx",
+            type_map=None,
+            frame_indices=[0, 1],
+            repeat=(1, 1, 1),
+        )
+    assert [frame.source_index for frame in frames] == [0, 1]
+    assert [frame.info["mryx"]["structure_index"] for frame in frames] == [0, 1]
+    assert all("time_fs" not in frame.info for frame in frames)
+    assert all("time_ps" not in frame.info for frame in frames)
+    assert all("time_ns" not in frame.info for frame in frames)
+    assert all("timestep" not in frame.info for frame in frames)
+    with pytest.raises(ValueError, match="document indices"):
+        resolve_animation_times(
+            frames,
+            AnimationTimeSpec(
+                display_unit="ps", time_step=0.5, dump_frequency=1
+            ),
+        )
+    explicit = tuple(
+        replace(frame, info={**frame.info, "time_ps": float(frame.source_index)})
+        for frame in frames
+    )
+    series = resolve_animation_times(
+        explicit, AnimationTimeSpec(display_unit="ps")
+    )
+    assert series.source == "frame_info.time_ps"
+    assert series.labels == ("t = 0 ps", "t = 1 ps")
+
+
 def test_cli_render_common_pipeline(mryx_path, tmp_path):
     from mat_viewer.cli import main
 

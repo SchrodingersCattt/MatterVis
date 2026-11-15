@@ -131,6 +131,13 @@ def _format_time(value: float, unit: str) -> str:
     return f"t = {clean:.6g} {unit}"
 
 
+def _stored_mryx_frames(frames: Sequence[Any]) -> bool:
+    """True when every frame is Mercury stored-site provenance, not an MD dump."""
+
+    infos = [_frame_info(frame) for frame in frames]
+    return bool(infos) and all(isinstance(info.get("mryx"), Mapping) for info in infos)
+
+
 def resolve_animation_times(
     frames: Sequence[Any],
     spec: AnimationTimeSpec | Mapping[str, Any],
@@ -155,6 +162,13 @@ def resolve_animation_times(
         )
         source = f"frame_info.{key}"
     else:
+        if _stored_mryx_frames(selected):
+            raise ValueError(
+                "MRYX stored structures are document indices, not a physical "
+                "time trajectory. Select them with --frame or label them with "
+                "--frame-field index. --display-time applies only when every "
+                "selected frame already contains time_fs, time_ps, or time_ns."
+            )
         if resolved_spec.time_step is None:
             raise ValueError(
                 "--display-time requires --time-step unless every selected frame "

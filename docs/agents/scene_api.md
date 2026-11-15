@@ -586,7 +586,8 @@ keeps tab, camera, and style edits from racing one another.
 ## Mercury stored-site input
 
 The unified loader APIs accept `.mryx` via MolCrysKit IO, with each stored
-structure treated as a frame. `build_loaded_crystal` accepts the same suffix but
+structure treated as a document-index frame, not a simulation-time sample.
+`build_loaded_crystal` accepts the same suffix but
 selects only the first structure. Source labels, raw metadata and import
 diagnostics remain on the bundle. This does not expand symmetry or
 restore Mercury UI state; see [MRYX contract](../mryx.md).

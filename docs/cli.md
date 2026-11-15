@@ -47,8 +47,10 @@ mat-vis skills show visualize-materials --all
 
 `mat-vis render document.mryx --frame 1 -o stored-sites.png --backend cpu`
 uses the shared MolCrysKit reader. Each stored structure is one selectable frame.
-This is stored-site import, not symmetry expansion or Mercury session restoration;
-see [MRYX entry points, dependency and limitations](mryx.md).
+This is stored-site import, not symmetry expansion or Mercury session restoration.
+`--frame` selects a document index. `--display-time` is not inferred from that
+index; it requires `time_fs`, `time_ps`, or `time_ns` on every selected frame.
+See [MRYX entry points, dependency and limitations](mryx.md).
 
 ## Subcommands
 
