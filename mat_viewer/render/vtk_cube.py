@@ -273,12 +273,20 @@ def render_cube_figure(
     )
 
 
-def _bond_segments(xyz, atomic_numbers, bonds, element_color, bond_color):
+def _bond_segments(
+    xyz,
+    atomic_numbers,
+    bonds,
+    element_color,
+    bond_color,
+    element_radius=None,
+):
     """Group bond line segments by RGB color.
 
     A uniform ``bond_color`` keeps one full stick per pair. ``None`` splits
     each bond at the midpoint and paints each half with the endpoint atom
-    color.
+    color. When ``element_radius`` is set, each half starts at the atom
+    sphere surface so the color join sits in the visible gap.
     """
 
     groups: dict[tuple[float, float, float], dict[str, list]] = {}
@@ -288,14 +296,29 @@ def _bond_segments(xyz, atomic_numbers, bonds, element_color, bond_color):
         start = np.asarray(xyz[i], dtype=float)
         end = np.asarray(xyz[j], dtype=float)
         if bond_color is None:
+            delta = end - start
+            length = float(np.linalg.norm(delta))
+            if length <= 0.0:
+                continue
+            unit = delta / length
             mid = 0.5 * (start + end)
-            halves = (
-                (tuple(float(c) for c in element_color[int(atomic_numbers[i])]), start, mid),
-                (tuple(float(c) for c in element_color[int(atomic_numbers[j])]), end, mid),
-            )
+            halves = []
+            for index, center, outward in (
+                (i, start, unit),
+                (j, end, -unit),
+            ):
+                color = tuple(float(c) for c in element_color[int(atomic_numbers[index])])
+                radius = 0.0
+                if element_radius is not None:
+                    radius = float(element_radius[int(atomic_numbers[index])])
+                # Keep a short stub if the sphere reaches past the midpoint.
+                inset = min(max(radius, 0.0), 0.5 * length - 1e-6)
+                halves.append((color, center + outward * inset, mid))
         else:
             halves = ((tuple(float(c) for c in bond_color), start, end),)
         for color, point_a, point_b in halves:
+            if float(np.linalg.norm(np.asarray(point_a) - np.asarray(point_b))) <= 1e-9:
+                continue
             bucket = groups.setdefault(color, {"points": [], "lines": [], "cursor": 0})
             bucket["points"].extend([point_a, point_b])
             bucket["lines"].append([2, bucket["cursor"], bucket["cursor"] + 1])
@@ -732,7 +755,12 @@ def _draw(
         )
         if len(bonds):
             for color, segments in _bond_segments(
-                xyz, atomic_numbers, bonds, element_color, bond_color
+                xyz,
+                atomic_numbers,
+                bonds,
+                element_color,
+                bond_color,
+                element_radius,
             ).items():
                 tubes = pv.PolyData(
                     np.asarray(segments["points"], dtype=float),
