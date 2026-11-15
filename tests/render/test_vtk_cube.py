@@ -53,10 +53,14 @@ def test_bond_segments_split_by_endpoint_element_color() -> None:
     xyz = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
     numbers = np.array([6, 7])
     colors = {6: (0.6, 0.6, 0.6), 7: (0.3, 0.5, 1.0)}
-    groups = _bond_segments(xyz, numbers, [(0, 1)], colors, None)
+    radii = {6: 0.4, 7: 0.3}
+    groups = _bond_segments(xyz, numbers, [(0, 1)], colors, None, radii)
     assert set(groups) == {(0.6, 0.6, 0.6), (0.3, 0.5, 1.0)}
     for bucket in groups.values():
         assert len(bucket["lines"]) == 1
+    gray = np.asarray(groups[(0.6, 0.6, 0.6)]["points"])
+    assert gray[0, 0] == pytest.approx(0.4)
+    assert gray[1, 0] == pytest.approx(1.0)
     uniform = _bond_segments(xyz, numbers, [(0, 1)], colors, (0.2, 0.2, 0.2))
     assert set(uniform) == {(0.2, 0.2, 0.2)}
     assert len(uniform[(0.2, 0.2, 0.2)]["lines"]) == 1
