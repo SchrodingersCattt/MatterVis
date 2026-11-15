@@ -122,6 +122,7 @@ def render_cube_figure(
     cell_vectors: np.ndarray | None = None,
     cell_edge_color: tuple[float, float, float] = (0.15, 0.15, 0.15),
     cell_edge_width: float = 2.0,
+    cell_edge_mode: str = "box",
 ) -> None:
     """Write one PNG. ``look`` points from the camera toward the scene.
 
@@ -139,7 +140,9 @@ def render_cube_figure(
     and ``surface_specular_power`` shade the isosurface. Atom and bond
     coefficients are separate. VTK's specular power is the Phong exponent.
     Pass ``cell_origin`` and ``cell_vectors`` (three lattice rows) to draw
-    the twelve cell edges. Omit both to leave the box off. ``bond_color=None``
+    cell edges. ``cell_edge_mode="box"`` draws all twelve edges;
+    ``"face"`` draws only the face most facing the camera (no depth edges).
+    Omit both cell arguments to leave the box off. ``bond_color=None``
     draws each half of a bond in the endpoint atom color; a single RGB triple
     keeps a uniform stick.
     """
@@ -188,6 +191,9 @@ def render_cube_figure(
     edge_width = float(cell_edge_width)
     if not np.isfinite(edge_width) or edge_width <= 0.0:
         raise ValueError("cell_edge_width must be finite and positive")
+    edge_mode = str(cell_edge_mode).strip().lower()
+    if edge_mode not in {"box", "face"}:
+        raise ValueError("cell_edge_mode must be 'box' or 'face'")
     resolution = _positive_int("sphere_resolution", sphere_resolution, minimum=3)
     peels = _positive_int("depth_peels", depth_peels, minimum=1)
     frame_scale = float(parallel_scale)
@@ -270,6 +276,7 @@ def render_cube_figure(
         cell_box,
         cell_rgb,
         edge_width,
+        edge_mode,
     )
 
 
@@ -336,7 +343,14 @@ def _cell_box(origin, vectors) -> tuple[np.ndarray, np.ndarray] | None:
     return corner, lattice
 
 
-def _cell_edge_polydata(pv, origin: np.ndarray, vectors: np.ndarray):
+def _cell_edge_polydata(
+    pv,
+    origin: np.ndarray,
+    vectors: np.ndarray,
+    *,
+    look: np.ndarray | None = None,
+    mode: str = "box",
+):
     corners = np.array(
         [
             origin,
@@ -364,6 +378,42 @@ def _cell_edge_polydata(pv, origin: np.ndarray, vectors: np.ndarray):
         (5, 7),
         (6, 7),
     )
+    if mode == "face":
+        if look is None:
+            raise ValueError("cell_edge_mode='face' requires look")
+        direction = np.asarray(look, dtype=float)
+        direction = direction / np.linalg.norm(direction)
+        # Six faces as (corner index quad, edge-pair axes into the face).
+        faces = (
+            (0, 1, 4, 2),  # constant 0 along c*? no: o,a,a+b,b  (no c)
+            (3, 5, 7, 6),  # +c
+            (0, 1, 5, 3),  # o,a,a+c,c (no b)
+            (2, 4, 7, 6),  # +b
+            (0, 2, 6, 3),  # o,b,b+c,c (no a)
+            (1, 4, 7, 5),  # +a
+        )
+        best_i = 0
+        best_dot = -1.0
+        for index, face in enumerate(faces):
+            u = corners[face[1]] - corners[face[0]]
+            v = corners[face[3]] - corners[face[0]]
+            normal = np.cross(u, v)
+            norm = float(np.linalg.norm(normal))
+            if norm < 1.0e-12:
+                continue
+            normal = normal / norm
+            # Face whose normal aligns with the view (either side).
+            score = abs(float(np.dot(normal, direction)))
+            if score > best_dot:
+                best_dot = score
+                best_i = index
+        face = faces[best_i]
+        edges = (
+            (face[0], face[1]),
+            (face[1], face[2]),
+            (face[2], face[3]),
+            (face[3], face[0]),
+        )
     points = []
     lines = []
     cursor = 0
@@ -702,6 +752,7 @@ def _draw(
     cell_box,
     cell_edge_color,
     cell_edge_width,
+    cell_edge_mode,
 ) -> None:
     from matplotlib.colors import ListedColormap
 
@@ -794,7 +845,13 @@ def _draw(
             )
         if cell_box is not None:
             plotter.add_mesh(
-                _cell_edge_polydata(pv, cell_box[0], cell_box[1]),
+                _cell_edge_polydata(
+                    pv,
+                    cell_box[0],
+                    cell_box[1],
+                    look=look,
+                    mode=cell_edge_mode,
+                ),
                 color=cell_edge_color,
                 line_width=cell_edge_width,
                 ambient=1.0,
