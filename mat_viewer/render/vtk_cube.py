@@ -769,6 +769,7 @@ def _draw(
                 plotter.add_mesh(
                     tubes,
                     color=color,
+                    smooth_shading=True,
                     ambient=bond_shade[0],
                     diffuse=bond_shade[1],
                     specular=bond_shade[2],
