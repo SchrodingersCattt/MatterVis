@@ -265,6 +265,10 @@ the twelve cell edges; omit both to
 leave the box off. `cell_edge_mode="face"` draws the cell face whose
 outward normal points toward the camera, so opposite `look` directions
 select opposite faces and depth edges stay off; `"box"` keeps all twelve.
+Lattice vectors are rows. The outward normal of fractional face `f=1` is
+the matching column of the inverse; `f=0` uses the opposite column. A row
+of the inverse is not that normal, including on a skew cell with a
+non-axial `look`.
 `bond_color=None`
 paints each half of a stick with the endpoint atom color, starting at the
 atom sphere surface so the midpoint join stays visible; a single RGB triple
