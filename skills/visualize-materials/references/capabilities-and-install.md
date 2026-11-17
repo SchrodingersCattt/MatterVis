@@ -69,10 +69,11 @@ switch backend or representation silently.
 ## Development checkout
 
 This checkout declares MolCrysKit in `pyproject.toml`. The pin is commit
-`9616debfdae715c75313263f5cedca1788fddf4a`, which exposes `BondRecord.role`,
-`get_connectivity_report()`, `find_polyhedra(..., disorder_policy=...)`, and
-case-insensitive lightweight CIF formula/Z metadata while preserving unrelated
-multiline text.
+`0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4`, the merge of lightweight CIF commit
+`9616debf` and Mercury commit `0702ed8d`. It exposes `BondRecord.role`,
+`get_connectivity_report()`, `find_polyhedra(..., disorder_policy=...)`,
+case-insensitive lightweight CIF formula/Z metadata, and
+`molcrys_kit.io.read_mryx`.
 PyPI `0.8.0` does not. Install the checkout with `pip install -e .` and do
 not force `molcrys-kit==0.8.0` over that pin.
 Released users should follow the resolver's ordinary `matter-vis[...]` command;

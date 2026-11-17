@@ -59,7 +59,10 @@ signatures.
 
 Every install job uses the git commit in `pyproject.toml`:
 
-`9616debfdae715c75313263f5cedca1788fddf4a`
+`0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4`
+
+That commit merges lightweight CIF / phone-site `9616debf` with Mercury
+`read_mryx` `0702ed8d`. Neither parent is a valid substitute.
 
 `requirements/ci-constraints.txt` names the same commit; a differing
 direct URL makes pip fail with a conflict, so change both together.

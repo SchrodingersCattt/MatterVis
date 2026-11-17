@@ -31,10 +31,11 @@ MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 # runtime requirements; released installs stay on this range once the
 # role/regime API is published.
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
-# Development pin for find_polyhedra disorder_policy and lightweight CIF
-# formula/Z metadata parity. pyproject.toml must name this same commit.
-# Restore a release range once the API is on PyPI.
-MOLCRYSKIT_SOURCE_COMMIT = "9616debfdae715c75313263f5cedca1788fddf4a"
+# Development pin shared by the phone snapshot and Mercury import.
+# It merges lightweight CIF / phone-site commit 9616debf with Mercury
+# read_mryx commit 0702ed8d. pyproject.toml must name this same commit.
+# Restore a release range once those APIs are on PyPI.
+MOLCRYSKIT_SOURCE_COMMIT = "0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4"
 MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
     "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
     f"{MOLCRYSKIT_SOURCE_COMMIT}"
