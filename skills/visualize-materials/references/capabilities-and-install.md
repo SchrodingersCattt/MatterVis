@@ -68,12 +68,18 @@ switch backend or representation silently.
 
 ## Development checkout
 
-This checkout declares MolCrysKit in `pyproject.toml`. The pin is commit
-`0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4`, the merge of lightweight CIF commit
-`9616debf` and Mercury commit `0702ed8d`. It exposes `BondRecord.role`,
-`get_connectivity_report()`, `find_polyhedra(..., disorder_policy=...)`,
-case-insensitive lightweight CIF formula/Z metadata, and
-`molcrys_kit.io.read_mryx`.
+This checkout declares MolCrysKit in `pyproject.toml`. The pin is the
+`desktop` extra of commit `a54a922eb2d11dca3fafac2d63a19c603541ca4d`, the
+reviewed head of open MolCrysKit PR 234. That commit includes lightweight CIF
+commit `a4080132` and Mercury commit `0702ed8d`. It is not MolCrysKit main.
+Do not retarget the pin to a later branch tip. The constraint file repeats
+the same commit URL without the extra marker, because pip 26 rejects extras
+in a constraint. Core MolCrysKit is NumPy,
+NetworkX, and Click. The desktop extra supplies ASE, pymatgen, SciPy, spglib,
+and defusedxml; `read_mryx` imports defusedxml from that extra. The pin
+exposes `BondRecord.role`, `get_connectivity_report()`,
+`find_polyhedra(..., disorder_policy=...)`, case-insensitive lightweight CIF
+formula/Z metadata, and `molcrys_kit.io.read_mryx`.
 PyPI `0.8.0` does not. Install the checkout with `pip install -e .` and do
 not force `molcrys-kit==0.8.0` over that pin.
 Released users should follow the resolver's ordinary `matter-vis[...]` command;

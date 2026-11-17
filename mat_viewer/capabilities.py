@@ -32,12 +32,17 @@ MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 # role/regime API is published.
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
 # Development pin shared by the phone snapshot and Mercury import.
-# It merges lightweight CIF / phone-site commit 9616debf with Mercury
-# read_mryx commit 0702ed8d. pyproject.toml must name this same commit.
+# a54a922 is the reviewed head of open MolCrysKit PR 234, not MolCrysKit
+# main. It includes lightweight CIF / phone-site a4080132 and Mercury
+# read_mryx 0702ed8d. Do not retarget this URL to a later branch tip.
+# The desktop extra supplies ASE, pymatgen, SciPy, spglib, and defusedxml;
+# read_mryx imports defusedxml from that extra. pyproject.toml must name
+# this same requirement. The constraint file repeats the commit URL without
+# the extra marker because pip 26 rejects extras in constraints.
 # Restore a release range once those APIs are on PyPI.
-MOLCRYSKIT_SOURCE_COMMIT = "0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4"
+MOLCRYSKIT_SOURCE_COMMIT = "a54a922eb2d11dca3fafac2d63a19c603541ca4d"
 MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
+    "molcrys-kit[desktop] @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
     f"{MOLCRYSKIT_SOURCE_COMMIT}"
 )
 # Backward-compatible names retained for callers of the pre-0.7 helpers.
@@ -289,7 +294,9 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
             "Requires BondRecord.role and "
             "MolecularCrystal.get_connectivity_report(). "
             f"The published window is {MOLCRYSKIT_REQUIREMENT} once that "
-            "API is on PyPI. This checkout pins the commit in pyproject.toml; "
+            "API is on PyPI. This checkout pins the desktop extra of the "
+            "commit in pyproject.toml. That extra supplies ASE, pymatgen, "
+            "SciPy, spglib, and defusedxml; core MolCrysKit does not. "
             "PyPI 0.8.0 does not provide those fields."
         ),
     ),
