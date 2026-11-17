@@ -96,6 +96,48 @@ def test_face_mode_selects_opposite_faces_for_opposite_looks() -> None:
             )
 
 
+def test_skew_nonaxial_look_uses_reciprocal_column_normals() -> None:
+    """A skew cell and a diagonal look must use reciprocal columns.
+
+    Opposite-look checks can pass while the selected face still points
+    away from the camera. Lattice rows make ``inv[:, axis]`` the outward
+    normal of ``f=1``. ``inv[axis]`` is a different direction.
+    """
+
+    from mat_viewer.render._vtk_cube_geometry import _CELL_FACES, _camera_face
+
+    vectors = np.array([[1.0, 0.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    look = np.array([-1.0, -1.0, 0.0])
+    direction = look / np.linalg.norm(look)
+    selected = _camera_face(vectors, direction)
+    # f=1 on axis 1. The f=1 face on axis 0 has true outward (1, -2, 0),
+    # and (1, -2, 0) · (1, 1, 0) = -1, so that face points away.
+    assert selected == (2, 4, 7, 6)
+    assert selected != (1, 4, 7, 5)
+    assert float(np.dot(np.array([1.0, -2.0, 0.0]), np.array([1.0, 1.0, 0.0]))) < 0.0
+
+    inverse = np.linalg.inv(vectors)
+    looks = (
+        look,
+        np.array([1.0, -0.5, 0.25]),
+        np.array([-0.2, 1.0, -0.7]),
+        np.array([0.3, 0.3, 1.0]),
+    )
+    for raw_look in looks:
+        direction = raw_look / np.linalg.norm(raw_look)
+        best_cycle = None
+        best_score = -np.inf
+        for cycle, axis, side in _CELL_FACES:
+            outward = float(side) * inverse[:, axis]
+            outward = outward / np.linalg.norm(outward)
+            score = float(np.dot(outward, -direction))
+            if score > best_score:
+                best_score = score
+                best_cycle = cycle
+        assert _camera_face(vectors, direction) == best_cycle
+        assert best_score > 0.0
+
+
 def test_bond_segments_split_by_endpoint_element_color() -> None:
     xyz = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
     numbers = np.array([6, 7])

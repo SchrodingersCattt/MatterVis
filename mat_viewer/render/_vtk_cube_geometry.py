@@ -139,7 +139,10 @@ def _camera_face(vectors: np.ndarray, direction: np.ndarray) -> tuple[int, ...]:
     best_face = None
     best_score = -np.inf
     for cycle, axis, side in _CELL_FACES:
-        outward = float(side) * np.asarray(inverse[axis], dtype=float)
+        # Lattice vectors are rows, so the gradient of fractional axis
+        # ``axis`` is the reciprocal column. ``side`` is -1 on f=0 and +1
+        # on f=1. A row of the inverse is not that normal.
+        outward = float(side) * np.asarray(inverse[:, axis], dtype=float)
         length = float(np.linalg.norm(outward))
         if length < 1.0e-12:
             continue
