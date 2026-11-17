@@ -8,20 +8,9 @@ description: "Use first for every atomistic drawing, model preview, or animation
 Use the public `mat-vis` CLI for coordinate-based visuals. Do not replace it
 with ASE plotting, raw matplotlib, or private Atomaestro imports.
 
-## Figure text and data completeness
+## Figure text
 
-Include the information needed to read the data directly in the figure: axis
-labels, units, tick values, and legends or scale bars when applicable. Ensure
-these match the underlying data and remain legible at the final display size.
-For structural panels, include identification or scale labels when necessary
-to understand the comparison. Default to a final figure width of one A4 page
-(210 mm) or half an A4 page (105 mm), whichever suits the layout; use Arial
-at 10 pt for figure text at final display size. Preserve these physical sizes
-when exporting or composing panels. An explicit user request takes precedence.
-Do not add explanatory paragraphs, narrative
-annotations, decorative titles, or crowded text by default; communicate those
-explanations in chat or a caption. Respect explicit user requests and inspect
-the exported figure for missing, overlapping, or clipped labels.
+Structural drawings (structures, cells, trajectories, orbitals, polyhedra) show no visible text unless the user asks: no titles, panel letters, legends, axis labels, ticks, atom labels, annotations, units, formulas, or watermarks. A drawing that encodes a measured quantity still shows that quantity's color scale, unit, and range. Quantitative plots must show the axis labels, units, ticks, and color scale or legend needed to read the data. An explicit user request wins. Invisible accessibility metadata may remain. When text is present, check it is legible and unclipped at export size; A4 or half-A4 width and Arial 10 pt are overridable style defaults, not completeness rules. This is the only figure-text policy and overrides conflicting reference examples.
 
 ## Choose the scene route
 

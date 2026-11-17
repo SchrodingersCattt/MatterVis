@@ -98,6 +98,18 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "always read [verification]" in document
     assert "Scene type wins" in document
     assert "Run the documented command before inspecting help" in document
+    assert document.count("## Figure text") == 1
+    assert "show no visible text unless the user asks" in document
+    assert "Quantitative plots must show" in document
+    assert "color scale, unit, and range" in document
+    assert "An explicit user request wins" in document
+    assert "accessibility metadata may remain" in document
+    assert "overridable style defaults, not completeness rules" in document
+    assert "only figure-text policy" in document
+    for reference in (SKILL / "references").glob("*.md"):
+        reference_text = reference.read_text(encoding="utf-8")
+        assert "render no visible text" not in reference_text
+        assert "## Figure text" not in reference_text
     quickstart = (SKILL / "references" / "quickstart.md").read_text(encoding="utf-8")
     assert "Do not convert it to another format" in quickstart
     trajectory = (SKILL / "references" / "trajectory-animation.md").read_text(
