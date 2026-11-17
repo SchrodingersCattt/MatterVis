@@ -114,7 +114,7 @@ assert.equal(calls.filter((call) => call.id === 'scene-tabs').length, 1, 'a late
 
 
 def test_string_tab_label_rename_still_reconciles():
-    """Dash before 4.0 puts the scene name in the tab text, not scene-tab-text."""
+    """Tab text is the label only when data-display-name is absent."""
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is needed to execute the frontend regression")
@@ -156,6 +156,102 @@ assert.equal(calls.length, 0);
 reconcile({scene_catalog_seq: 2, scenes: [{id: 'a', label: 'Renamed'}], active_id: 'a', focus: false});
 assert.equal(calls.length, 1);
 assert.equal(calls[0].data.source, 'scene_catalog');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_catalog_attribute_beats_stale_tab_text():
+    """data-display-name is compared before tab text, including a stale label."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const stop = source.indexOf('  // ── Right-click menu');
+const calls = [];
+function attrs(values) {
+  return {
+    getAttribute(name) { return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : null; },
+    hasAttribute(name) { return Object.prototype.hasOwnProperty.call(values, name); },
+  };
+}
+const dom = {tabs: [], carriers: []};
+function tabWithOwnName(text, displayName) {
+  return Object.assign({
+    id: 'scene-tab-a',
+    textContent: text,
+    querySelector() { return null; },
+  }, attrs({'data-scene-id': 'a', 'data-display-name': displayName}));
+}
+function staleTextTab(text) {
+  return {
+    id: 'scene-tab-a',
+    textContent: text,
+    querySelector(sel) {
+      if (sel === '.scene-tab-text') return {textContent: text};
+      return null;
+    },
+  };
+}
+const tabs = {
+  querySelector(sel) {
+    if (String(sel).indexOf('aria-selected') >= 0) return {id: 'scene-tab-a'};
+    return null;
+  },
+  querySelectorAll() { return dom.tabs; },
+};
+const status = {textContent: '', style: {}, className: ''};
+const sandbox = {
+  console, Date, JSON, Number, String, Object, Array, Promise,
+  setTimeout() {}, clearTimeout() {}, requestAnimationFrame() {},
+  MutationObserver: function () { this.observe = function () {}; },
+  window: {
+    location: {protocol: 'http:', host: 'localhost'},
+    Plotly: null, WebSocket: null,
+    dash_clientside: {set_props(id, props) { calls.push({id, data: props.data}); return true; }},
+  },
+  document: {
+    getElementById(id) {
+      if (id === 'scene-tabs') return tabs;
+      if (id === 'upload-status') return status;
+      return null;
+    },
+    querySelectorAll(sel) { return sel === '[data-scene-id]' ? dom.carriers : []; },
+    addEventListener() {},
+  },
+};
+vm.createContext(sandbox);
+vm.runInContext(source.slice(0, stop) + '\nwindow.__mvSceneTabTest = {noteLoadedScene};\n})();', sandbox);
+const reconcile = sandbox.window.MatterVisReconcileSceneCatalog;
+const noteLoadedScene = sandbox.window.__mvSceneTabTest.noteLoadedScene;
+
+dom.tabs = [tabWithOwnName('Stale ×', 'Alpha')];
+reconcile({scene_catalog_seq: 1, scenes: [{id: 'a', label: 'Alpha'}], active_id: 'a', focus: false});
+assert.equal(calls.length, 0, 'catalog label matches data-display-name, not the stale text');
+reconcile({scene_catalog_seq: 2, scenes: [{id: 'a', label: 'Stale ×'}], active_id: 'a', focus: false});
+assert.equal(calls.length, 1, 'tab text must not satisfy a catalog label the attribute rejects');
+
+calls.length = 0;
+dom.tabs = [staleTextTab('Stale')];
+dom.carriers = [Object.assign({id: 'scene-tab-close-row-a'}, attrs({'data-scene-id': 'a', 'data-display-name': 'Alpha'}))];
+reconcile({scene_catalog_seq: 3, scenes: [{id: 'a', label: 'Alpha'}], active_id: 'a', focus: false});
+assert.equal(calls.length, 0, 'a carrier attribute wins over stale .scene-tab-text');
+reconcile({scene_catalog_seq: 4, scenes: [{id: 'a', label: 'Stale'}], active_id: 'a', focus: false});
+assert.equal(calls.length, 1);
+
+status.textContent = '';
+noteLoadedScene('a', dom.tabs[0]);
+assert.equal(status.textContent, 'Loaded: Alpha');
 """
     result = subprocess.run(
         [node, "-e", program, str(MATTERVIS_JS)],

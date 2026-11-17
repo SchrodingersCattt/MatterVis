@@ -2,15 +2,18 @@
 
 Dash 2.18.2 through 3.x reject a component in ``dcc.Tab.label`` while the
 layout is constructed. That exception used to be caught and replaced with
-the error screen. Dash 4.0 and later accept the component. The layout
-follows ``Tab._base_nodes`` so both contracts serve the viewer.
+the error screen. Dash 4.0.0 is the first stable release that accepts the
+component. The layout follows that public version so both contracts serve
+the viewer. Both shapes expose the catalog id and label as
+``data-scene-id`` and ``data-display-name`` on the tab node.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import json
 import subprocess
 import sys
+from pathlib import Path
 
 try:
     import tomllib
@@ -47,6 +50,32 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _close_id(scene_id: str) -> str:
     return f"scene-tab-close-{scene_id}"
+
+
+def _assert_catalog_identity(component, scene_id: str, label: str) -> None:
+    assert getattr(component, "data-scene-id", None) == scene_id
+    assert getattr(component, "data-display-name", None) == label
+    props = component.to_plotly_json()["props"]
+    assert props["data-scene-id"] == scene_id
+    assert props["data-display-name"] == label
+
+
+def _props_matching(payload, **wanted):
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            props = node.get("props")
+            if isinstance(props, dict) and all(props.get(key) == value for key, value in wanted.items()):
+                found.append(props)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return found
 
 
 def test_factory_import_does_not_cycle_through_package_getattr() -> None:
@@ -87,14 +116,19 @@ def test_installed_label_contract_keeps_selection_and_one_close_control(tmp_path
         tab = next(item for item in tabs if item.value == scene_id)
         assert tab.id == f"scene-tab-{scene_id}"
         close_id = _close_id(scene_id)
+        _assert_catalog_identity(tab, scene_id, str(label_text))
         if tab_label_accepts_components():
             assert isinstance(tab.label, Component)
             assert _has_component_id(tab, close_id)
             assert _has_component_id(tab, f"scene-tab-label-{scene_id}")
+            _assert_catalog_identity(tab.label, scene_id, str(label_text))
             assert row == []
         else:
             assert tab.label == str(label_text)
             assert not _has_component_id(tab, close_id)
+            carriers = [child for child in row if getattr(child, "data-scene-id", None) == scene_id]
+            assert carriers
+            _assert_catalog_identity(carriers[0], scene_id, str(label_text))
             assert any(_has_component_id(child, close_id) for child in row)
     finally:
         backend.close(wait=True)
@@ -110,10 +144,15 @@ def test_string_label_fallback_keeps_close_outside_the_tab(monkeypatch, tmp_path
         scene_id = backend.active_scene_id()
         tabs = backend.scene_tabs()
         row = backend.scene_tab_close_row()
+        label_text = next(item["label"] for item in backend.scene_options() if item["id"] == scene_id)
         tab = next(item for item in tabs if item.value == scene_id)
         close_id = _close_id(scene_id)
         assert isinstance(tab.label, str)
         assert tab.label
+        _assert_catalog_identity(tab, scene_id, str(label_text))
+        carriers = [child for child in row if getattr(child, "data-scene-id", None) == scene_id]
+        assert carriers
+        _assert_catalog_identity(carriers[0], scene_id, str(label_text))
         assert not _has_component_id(tab, close_id)
         assert any(_has_component_id(child, close_id) for child in row)
         # A string cannot trip the Dash constructor gate that rejects components.
@@ -132,8 +171,21 @@ def test_layout_endpoint_serves_the_viewer(tmp_path: Path) -> None:
         assert "crystal-graph" in body
         assert '"scene-tabs"' in body or '"id": "scene-tabs"' in body or "scene-tabs" in body
         scene_id = app.crystal_backend.active_scene_id()
+        label_text = next(
+            item["label"]
+            for item in app.crystal_backend.scene_options()
+            if item["id"] == scene_id
+        )
         close_id = _close_id(scene_id)
         assert body.count(close_id) == 1
+        payload = json.loads(body)
+        tab_props = _props_matching(payload, id=f"scene-tab-{scene_id}")
+        assert tab_props
+        assert tab_props[0]["data-scene-id"] == scene_id
+        assert tab_props[0]["data-display-name"] == str(label_text)
+        carriers = _props_matching(payload, **{"data-scene-id": scene_id})
+        assert len(carriers) >= 2
+        assert all(item["data-display-name"] == str(label_text) for item in carriers)
         if tab_label_accepts_components():
             assert "scene-tabs-card--string-labels" not in body
             assert f"scene-tab-label-{scene_id}" in body
@@ -158,25 +210,45 @@ def test_string_label_layout_is_still_the_viewer(monkeypatch, tmp_path: Path) ->
         assert "crystal-graph" in body
         assert "scene-tabs-card--string-labels" in body
         scene_id = app.crystal_backend.active_scene_id()
+        label_text = next(
+            item["label"]
+            for item in app.crystal_backend.scene_options()
+            if item["id"] == scene_id
+        )
         assert body.count(_close_id(scene_id)) == 1
         assert f"scene-tab-label-{scene_id}" not in body
         assert f"scene-tab-{scene_id}" in body
+        payload = json.loads(body)
+        tab_props = _props_matching(payload, id=f"scene-tab-{scene_id}")
+        assert tab_props
+        assert tab_props[0]["data-scene-id"] == scene_id
+        assert tab_props[0]["data-display-name"] == str(label_text)
+        carriers = _props_matching(payload, **{"data-scene-id": scene_id})
+        assert len(carriers) >= 2
+        assert all(item["data-display-name"] == str(label_text) for item in carriers)
     finally:
         app.crystal_backend.close(wait=True)
 
 
-def test_component_label_is_rejected_by_string_only_dash() -> None:
-    """Document the constructor gate the fallback exists to avoid.
+def test_component_label_follows_the_public_dash_version() -> None:
+    """Dash 4.0.0 is the first stable release that accepts a component label.
 
-    On a Dash that already accepts component labels this is a no-op check
-    of the base-node list. On Dash 2.18.2 through 3.x it is the failure
-    that used to replace the viewer.
+    The adapter caches that public comparison. It does not read Dash
+    private component fields. On Dash 2.18.2 through 3.x the constructor
+    still raises the ``TypeError`` that used to replace the viewer.
     """
+    import dash
     from dash import dcc, html
+    from packaging.version import parse as parse_version
 
+    source = (ROOT / "mat_viewer" / "app" / "dash_tabs.py").read_text(encoding="utf-8")
+    assert "_base_nodes" not in source
     accepts = tab_label_accepts_components()
+    assert accepts is (parse_version(dash.__version__) >= parse_version("4.0.0"))
+    assert tab_label_accepts_components() is accepts
     if accepts:
-        assert "label" in dcc.Tab._base_nodes
+        tab = dcc.Tab(label=html.Span("scene"), value="scene", id="scene-tab-scene")
+        assert not isinstance(tab.label, str)
         return
     with pytest.raises(TypeError, match="label"):
         dcc.Tab(label=html.Span("scene"), value="scene", id="scene-tab-scene")

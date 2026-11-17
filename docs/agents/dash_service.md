@@ -527,14 +527,16 @@ configure Python `requests` with `session.trust_env = False` (or
 ## Dash version
 
 The web extra requires Dash 2.18.2 or newer. Scene selection is always
-`scene-tabs`. When the installed Dash accepts a component as
-`dcc.Tab.label` (Dash 4.0 and later, where `label` is a Tab base node),
-the per-tab close control is inside that label (`scene-tab-label-{id}`
-and `scene-tab-close-{id}`). On Dash 2.18.2 through 3.x the label is the
+`scene-tabs`. Dash 4.0.0 is the first stable release that accepts a
+component as `dcc.Tab.label`. On that release and later, the per-tab
+close control is inside that label (`scene-tab-label-{id}` and
+`scene-tab-close-{id}`). On Dash 2.18.2 through 3.x the label is the
 scene name string, and the same close control is a child of
-`scene-tab-close-row`. Passing a component label to those older releases
-raises `TypeError` while the layout is built and the page falls back to
-the error screen.
+`scene-tab-close-row`. Both shapes write `data-scene-id` and
+`data-display-name` from the scene catalog onto the tab; tab text is a
+projection of that label. Passing a component label to Dash 2.18.2
+through 3.x raises `TypeError` while the layout is built and the page
+falls back to the error screen.
 
 ## Stable UI element IDs
 
