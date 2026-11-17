@@ -193,11 +193,15 @@ Install the Python extra with:
 python -m pip install "matter-vis[vtk]"
 ```
 
-PyVista is imported only when the function is called. Headless Linux also
-needs a system OSMesa or EGL library (Debian/Ubuntu: `libosmesa6`). MatterVis
-does not install system libraries. If no display and neither library is
+PyVista is imported only when the function is called. Windows selects
+`vtkWin32OpenGLRenderWindow` and macOS selects `vtkCocoaOpenGLRenderWindow`.
+Neither platform needs `DISPLAY`, OSMesa, or EGL. Headless Linux needs a
+system OSMesa or EGL library (Debian/Ubuntu: `libosmesa6`). MatterVis does
+not install system libraries. On Linux, if no display and neither library is
 loadable, the call raises `RuntimeError` before opening a window. A missing
-library used to abort the interpreter inside VTK.
+library used to abort the interpreter inside VTK. Set
+`VTK_DEFAULT_OPENGL_WINDOW` to keep a window class the local VTK build
+provides.
 
 The isosurface grid and the color grid share one `origin`, one `axes` matrix,
 and one shape. Voxel vectors are rows. A vertex index `(i, j, k)` is the
@@ -228,8 +232,10 @@ The renderer lights both sides of the sheet, so an open isosurface stays
 visible when a normal points away from the camera. The defaults leave the
 previous coefficients unchanged. Pass `cell_origin` and `cell_vectors`
 (three lattice rows) together to draw the twelve cell edges; omit both to
-leave the box off. `cell_edge_mode="face"` draws only the camera-facing
-cell face (no depth edges); `"box"` keeps all twelve. `bond_color=None`
+leave the box off. `cell_edge_mode="face"` draws the cell face whose
+outward normal points toward the camera, so opposite `look` directions
+select opposite faces and depth edges stay off; `"box"` keeps all twelve.
+`bond_color=None`
 paints each half of a stick with the endpoint atom color, starting at the
 atom sphere surface so the midpoint join stays visible; a single RGB triple
 keeps a uniform stick.

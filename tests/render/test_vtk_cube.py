@@ -62,6 +62,37 @@ def test_cell_edge_face_mode_drops_depth_edges() -> None:
     assert face.n_lines == 4
 
 
+def _unique_points(polydata) -> np.ndarray:
+    return np.unique(np.round(np.asarray(polydata.points), decimals=8), axis=0)
+
+
+def test_face_mode_selects_opposite_faces_for_opposite_looks() -> None:
+    pv = pytest.importorskip("pyvista")
+    origin = np.array([1.0, -2.0, 0.5])
+    cells = (
+        np.eye(3),
+        np.array([[2.0, 0.0, 0.0], [0.6, 1.5, 0.0], [0.2, -0.3, 1.0]]),
+        np.diag([-2.0, 3.0, 1.0]),
+    )
+    for vectors in cells:
+        for axis in range(3):
+            look = np.zeros(3)
+            look[axis] = 1.0
+            near = _cell_edge_polydata(pv, origin, vectors, look=look, mode="face")
+            far = _cell_edge_polydata(pv, origin, vectors, look=-look, mode="face")
+            near_pts = _unique_points(near)
+            far_pts = _unique_points(far)
+            assert len(near_pts) == 4
+            assert len(far_pts) == 4
+            shared = np.any(
+                np.all(np.isclose(near_pts[:, None, :], far_pts[None, :, :]), axis=2)
+            )
+            assert not shared
+            assert float(np.dot(near_pts.mean(axis=0), look)) < float(
+                np.dot(far_pts.mean(axis=0), look)
+            )
+
+
 def test_bond_segments_split_by_endpoint_element_color() -> None:
     xyz = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
     numbers = np.array([6, 7])
@@ -326,19 +357,22 @@ def test_depth_peeling_does_not_open_a_probe_window() -> None:
     assert ("max", 4) in idle.calls
 
 
-def test_missing_headless_backend_raises(monkeypatch) -> None:
+def _linux_without_display(monkeypatch) -> None:
+    monkeypatch.setattr(vtk_cube.sys, "platform", "linux")
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     monkeypatch.delenv("VTK_DEFAULT_OPENGL_WINDOW", raising=False)
+
+
+def test_missing_headless_backend_raises(monkeypatch) -> None:
+    _linux_without_display(monkeypatch)
     monkeypatch.setattr(vtk_cube, "_shared_library", lambda _name: None)
     with pytest.raises(RuntimeError, match="OSMesa"):
         _prepare_vtk_window()
 
 
 def test_headless_selection_prefers_osmesa(monkeypatch) -> None:
-    monkeypatch.delenv("DISPLAY", raising=False)
-    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-    monkeypatch.delenv("VTK_DEFAULT_OPENGL_WINDOW", raising=False)
+    _linux_without_display(monkeypatch)
 
     def libraries(name: str) -> str | None:
         return "libOSMesa.so.8" if name == "OSMesa" else None
@@ -349,10 +383,36 @@ def test_headless_selection_prefers_osmesa(monkeypatch) -> None:
 
 
 def test_display_does_not_override_the_window_class(monkeypatch) -> None:
+    monkeypatch.setattr(vtk_cube.sys, "platform", "linux")
     monkeypatch.setenv("DISPLAY", ":1")
     monkeypatch.delenv("VTK_DEFAULT_OPENGL_WINDOW", raising=False)
     _prepare_vtk_window()
     assert "VTK_DEFAULT_OPENGL_WINDOW" not in os.environ
+
+
+@pytest.mark.parametrize(
+    ("platform", "window"),
+    [
+        ("win32", "vtkWin32OpenGLRenderWindow"),
+        ("darwin", "vtkCocoaOpenGLRenderWindow"),
+    ],
+)
+def test_desktop_platforms_select_a_native_window(monkeypatch, platform, window) -> None:
+    monkeypatch.setattr(vtk_cube.sys, "platform", platform)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.delenv("VTK_DEFAULT_OPENGL_WINDOW", raising=False)
+    monkeypatch.setattr(vtk_cube, "_shared_library", lambda _name: None)
+    _prepare_vtk_window()
+    assert os.environ["VTK_DEFAULT_OPENGL_WINDOW"] == window
+
+
+def test_explicit_window_class_overrides_the_native_default(monkeypatch) -> None:
+    monkeypatch.setattr(vtk_cube.sys, "platform", "win32")
+    monkeypatch.setenv("VTK_DEFAULT_OPENGL_WINDOW", "vtkOSOpenGLRenderWindow")
+    monkeypatch.setattr(vtk_cube, "_shared_library", lambda _name: None)
+    _prepare_vtk_window()
+    assert os.environ["VTK_DEFAULT_OPENGL_WINDOW"] == "vtkOSOpenGLRenderWindow"
 
 
 def test_one_taubin_pass_does_not_collapse_the_surface() -> None:

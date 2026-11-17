@@ -36,10 +36,11 @@ error. Never install `[all]` when a smaller reported extra is sufficient.
 | Native offscreen opaque PNG via wgpu | `gpu` | `python -m pip install "matter-vis[gpu]"` |
 <!-- capability-matrix:end -->
 
-The `vtk` extra does not install a system OpenGL library. Headless Linux needs
-OSMesa (Debian/Ubuntu package `libosmesa6`) or EGL. The figure call raises
-`RuntimeError` when neither a display nor one of those libraries is loadable.
-MatterVis does not run `apt` or download that library.
+The `vtk` extra does not install a system OpenGL library. Windows and macOS
+use the native VTK window class and do not need `DISPLAY`. Headless Linux
+needs OSMesa (Debian/Ubuntu package `libosmesa6`) or EGL. On Linux the figure
+call raises `RuntimeError` when neither a display nor one of those libraries
+is loadable. MatterVis does not run `apt` or download that library.
 
 Combined Web operations intentionally cross two optional boundaries:
 

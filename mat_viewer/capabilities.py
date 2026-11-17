@@ -352,6 +352,7 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
         note=(
             "Optional PNG path for one offscreen isosurface figure. "
             "It is not a mat-vis render backend and does not infer bonds. "
+            "Windows and macOS use the native VTK window. "
             "Headless Linux needs an OSMesa or EGL library."
         ),
     ),
