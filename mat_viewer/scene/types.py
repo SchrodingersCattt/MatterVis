@@ -45,6 +45,13 @@ class AtomDict(TypedDict, total=False):
     _depth_t: float
     _is_boundary_replica: bool
     _is_bonded_image_replica: bool
+    _is_framework_context_replica: bool
+
+    # Representation identity. Source-site counts use unique
+    # ``source_site_id`` values; drawing counts are instances.
+    source_site_id: str
+    image_shift: tuple[int, int, int]
+    instance_kind: str  # source | boundary | bonded_image | framework_context
 
     # --- style (applied by style/atom_groups.py & scene core) ---
     color: str

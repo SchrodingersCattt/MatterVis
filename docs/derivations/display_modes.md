@@ -229,10 +229,14 @@ Cluster mode is intentionally direct:
   for `display_mode == "cluster"`.
 
 Unit-cell boundary replicas are repeated drawings of source sites. The
-structure-summary card and the canvas atom count do not add those
-copies, or bonded-image and framework-context copies, to a source-site
-total. The disorder line also keeps the drawn subset separate from
-loader disorder flags on the canonical source atoms, so an ordered
+structure-summary card and the canvas atom count use `source_site_id`
+and `instance_kind`: source-site counts are unique canonical ids and
+drawing counts are instances. Copies whose `instance_kind` is
+`boundary`, `bonded_image`, or `framework_context` are not added to a
+source-site total. The private flags `_is_boundary_replica`,
+`_is_framework_context_replica`, and `_is_bonded_image_replica` remain
+assembly stamps. The disorder line also keeps the drawn subset separate
+from loader disorder flags on the canonical source atoms, so an ordered
 formula-unit cluster does not describe the loaded structure as ordered.
 
 Unit-cell boundary replicas are implemented by `_expand_boundary_replicas`:

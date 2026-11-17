@@ -9,7 +9,9 @@ import pytest
 from mat_viewer.app import ViewerBackend
 from mat_viewer.app.callbacks_view import register_view_callbacks
 from mat_viewer.app.camera_helpers import _structure_summary
+from mat_viewer.app.panel_status import atom_is_visual_copy, status_bar_parts
 from mat_viewer.loader import build_bundle_scene, build_loaded_crystal
+from mat_viewer.scene.drawing_identity import drawing_identity, stamp_drawing_identity
 from mat_viewer.style.disorder import atom_is_disordered
 
 COD_CAFFEINE = Path(__file__).parents[1] / "fixtures" / "cod_4504310.cif"
@@ -216,6 +218,143 @@ def test_unit_cell_counts_exclude_boundary_bonded_and_framework_copies():
     assert "5 source site" not in summary
     assert "Disorder detected: 4" not in summary
     assert "1 fragment(s) kept wrapped" in summary
+
+
+def test_mixed_replica_counts_use_source_site_identity():
+    """Unique canonical ids, visual copies, and drawings come from one identity."""
+    source = stamp_drawing_identity(
+        {},
+        source_site_id="0",
+        image_shift=(0, 0, 0),
+        instance_kind="source",
+    )
+    boundary = stamp_drawing_identity(
+        {"_is_boundary_replica": True},
+        source_site_id="0",
+        image_shift=(1, 0, 0),
+        instance_kind="boundary",
+    )
+    bonded = stamp_drawing_identity(
+        {},
+        source_site_id="1",
+        image_shift=(0, 1, 0),
+        instance_kind="bonded_image",
+    )
+    framework = stamp_drawing_identity(
+        {},
+        source_site_id="2",
+        image_shift=(0, 0, 1),
+        instance_kind="framework_context",
+    )
+    atoms = [source, boundary, bonded, framework]
+    scene = {"display_mode": "unit_cell", "draw_atoms": atoms, "bonds": []}
+
+    identities = [drawing_identity(atom) for atom in atoms]
+    source_ids = {source_id for source_id, _shift, _kind in identities}
+
+    assert identities == [
+        ("0", (0, 0, 0), "source"),
+        ("0", (1, 0, 0), "boundary"),
+        ("1", (0, 1, 0), "bonded_image"),
+        ("2", (0, 0, 1), "framework_context"),
+    ]
+    assert boundary["_is_boundary_replica"] is True
+    assert len(source_ids) == 3
+    assert sum(atom_is_visual_copy(atom) for atom in atoms) == 3
+    assert len(atoms) == 4
+
+    summary = _structure_summary(scene)
+    assert "drawn subset has no disorder in 1 source site(s)." in summary
+    assert "3 visual copies are repeated drawings, not additional source sites." in summary
+    _label, _scope, counts = status_bar_parts({"display_mode": "unit_cell"}, scene)
+    assert counts == "1 source site + 3 visual copies · 0 bonds"
+
+
+def test_replica_producers_stamp_identity_without_dropping_flags():
+    """Boundary, bonded-image, and framework producers share one identity."""
+    import numpy as np
+
+    from mat_viewer.render.boundary_replicas import expand_boundary_replicas
+    from mat_viewer.scene.periodic import (
+        _manifest_spanning_bond_context,
+        _manifest_strict_bonded_images,
+    )
+
+    matrix = np.eye(3) * 10.0
+    near_face = {
+        "elem": "C",
+        "label": "C1",
+        "frac": np.array([0.01, 0.5, 0.5]),
+        "cart": np.array([0.1, 5.0, 5.0]),
+        "_source_index": 4,
+    }
+    expanded = expand_boundary_replicas([near_face], matrix)
+    boundary = [atom for atom in expanded if atom.get("_is_boundary_replica")]
+    assert boundary
+    assert drawing_identity(boundary[0]) == ("4", (1, 0, 0), "boundary")
+    assert boundary[0]["_is_boundary_replica"] is True
+    assert drawing_identity(near_face)[2] == "source"
+
+    left = {
+        "elem": "C",
+        "dg": ".",
+        "da": ".",
+        "frac": np.array([0.9, 0.5, 0.5]),
+        "cart": np.array([9.0, 5.0, 5.0]),
+        "_source_index": 0,
+        "_strict_unit_cell": True,
+        "_wrapped_frac": np.array([0.9, 0.5, 0.5]),
+    }
+    right = {
+        "elem": "C",
+        "dg": ".",
+        "da": ".",
+        "frac": np.array([0.1, 0.5, 0.5]),
+        "cart": np.array([1.0, 5.0, 5.0]),
+        "_source_index": 1,
+        "_strict_unit_cell": True,
+        "_wrapped_frac": np.array([0.1, 0.5, 0.5]),
+    }
+    bonded_atoms = [dict(left), dict(right)]
+    added = _manifest_strict_bonded_images(
+        bonded_atoms,
+        [left, right],
+        matrix,
+        [{"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}],
+    )
+    assert added >= 1
+    bonded_copies = [atom for atom in bonded_atoms if atom.get("instance_kind") == "bonded_image"]
+    assert bonded_copies
+    assert all(atom["_is_bonded_image_replica"] for atom in bonded_copies)
+    assert {drawing_identity(atom)[2] for atom in bonded_copies} == {"bonded_image"}
+    assert {drawing_identity(atom)[0] for atom in bonded_copies} <= {"0", "1"}
+
+    home = {
+        "elem": "C",
+        "frac": np.array([0.5, 0.5, 0.5]),
+        "cart": np.array([5.0, 5.0, 5.0]),
+        "_source_index": 2,
+        "_cell_spanning_component": True,
+        "_wrapped_frac": np.array([0.5, 0.5, 0.5]),
+    }
+    framework_atoms = [dict(home)]
+    context = _manifest_spanning_bond_context(
+        framework_atoms,
+        [{}, {}, home],
+        matrix,
+        [{"left": 2, "right": 2, "right_image_shift": [1, 0, 0]}],
+        [],
+    )
+    assert context >= 1
+    framework_copies = [
+        atom for atom in framework_atoms if atom.get("instance_kind") == "framework_context"
+    ]
+    assert framework_copies
+    sample = framework_copies[0]
+    assert drawing_identity(sample)[0] == "2"
+    assert drawing_identity(sample)[2] == "framework_context"
+    assert sample["_is_boundary_replica"] is True
+    assert sample["_is_framework_context_replica"] is True
 
 
 def test_missing_source_atoms_do_not_imply_the_loaded_structure_is_ordered():

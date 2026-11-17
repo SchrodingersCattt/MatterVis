@@ -1,7 +1,7 @@
 from __future__ import annotations
-# ruff: noqa: F401,F403,F405
 
 from .shared import *
+
 
 class StaleCameraWrite(Exception):
     """A drag camera lost the compare-and-set at the locked write."""
@@ -113,14 +113,20 @@ def _drawn_is_minor(atom: dict) -> bool:
     return bool(atom.get("is_minor"))
 
 
-def _drawn_site_key(atom: dict, ordinal: int) -> tuple[str, int]:
-    source = atom.get("_source_index")
+def _drawn_site_key(atom: dict, ordinal: int) -> tuple[str, int] | tuple[str, str]:
+    """Identity of one source drawing: canonical id, else this drawing."""
+    from ..scene.drawing_identity import drawing_identity
+
+    source_id, _image_shift, _kind = drawing_identity(atom)
+    if not source_id:
+        return ("drawn", ordinal)
     try:
-        if source is not None:
-            return ("source", int(source))
+        index = int(source_id)
     except (TypeError, ValueError):
-        pass
-    return ("drawn", ordinal)
+        return ("site", source_id)
+    if str(index) == source_id:
+        return ("source", index)
+    return ("site", source_id)
 
 
 def _structure_summary(scene: dict) -> str:
@@ -128,8 +134,9 @@ def _structure_summary(scene: dict) -> str:
 
     Counts use loader flags already stored on the scene (``is_disordered``,
     ``_is_minor``, ``disorder_resolved``) and the canonical source atoms the
-    scene builder recorded. Visual copies stamped by scene assembly are not
-    additional source sites. Occupancy alone is not treated as disorder.
+    scene builder recorded. Source-site identity is ``source_site_id``.
+    Drawings whose ``instance_kind`` is not ``source`` are visual copies,
+    not additional source sites. Occupancy alone is not treated as disorder.
     """
     from ..style.disorder import atom_is_disordered
     from .panel_status import atom_is_visual_copy, visual_copy_phrase

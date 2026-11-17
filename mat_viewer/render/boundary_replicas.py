@@ -15,6 +15,12 @@ from typing import Any
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
+from ..scene.drawing_identity import (
+    INSTANCE_BOUNDARY,
+    indexed_source_site_id,
+    stamp_drawing_identity,
+)
+
 _PERIODIC_FACE_TOL: float = 3e-2
 _SOURCE_IMAGE_TOL: float = 1e-5
 
@@ -229,6 +235,12 @@ def expand_boundary_replicas(
                 replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
                 replica["_is_boundary_replica"] = True
                 replica["_is_fragment_boundary_replica"] = True
+                stamp_drawing_identity(
+                    replica,
+                    source_site_id=indexed_source_site_id(replica),
+                    image_shift=effective,
+                    instance_kind=INSTANCE_BOUNDARY,
+                )
                 out.append(replica)
 
     for atom in ungrouped:
@@ -248,5 +260,11 @@ def expand_boundary_replicas(
             replica["_image_shift"] = shift
             replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
             replica["_is_boundary_replica"] = True
+            stamp_drawing_identity(
+                replica,
+                source_site_id=indexed_source_site_id(replica),
+                image_shift=shift,
+                instance_kind=INSTANCE_BOUNDARY,
+            )
             out.append(replica)
     return out

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..scene.drawing_identity import INSTANCE_SOURCE, drawing_identity
+
 DISPLAY_MODE_LABELS = {
     "formula_unit": "Formula unit",
     "unit_cell": "Unit cell",
@@ -13,20 +15,37 @@ DISPLAY_MODE_LABELS = {
 
 ATOM_LIST_LIMIT = 12
 
-# Scene assembly stamps these on Cartesian repeats of a source site.
-# They are drawings, not additional crystallographic sites.
-_VISUAL_COPY_FLAGS = (
-    "_is_boundary_replica",
-    "_is_framework_context_replica",
-    "_is_bonded_image_replica",
-)
-
 
 def atom_is_visual_copy(atom: Any) -> bool:
-    """Return whether scene assembly marked this atom as a repeated drawing."""
+    """Return whether this drawing repeats a source site.
+
+    ``instance_kind`` is the representation identity. The private replica
+    flags remain assembly stamps and are read only inside
+    ``drawing_identity`` when ``instance_kind`` is absent.
+    """
     if not isinstance(atom, dict):
         return False
-    return any(bool(atom.get(flag)) for flag in _VISUAL_COPY_FLAGS)
+    _source_site_id, _image_shift, instance_kind = drawing_identity(atom)
+    return instance_kind != INSTANCE_SOURCE
+
+
+def _source_site_count(atoms: list[Any]) -> int:
+    """Unique canonical ids among source instances.
+
+    A blank ``source_site_id`` is not a shared id, so each such drawing
+    stays its own site. Visual copies are not included.
+    """
+    seen: set[str] = set()
+    anonymous = 0
+    for atom in atoms:
+        source_id, _image_shift, kind = drawing_identity(atom)
+        if kind != INSTANCE_SOURCE:
+            continue
+        if source_id:
+            seen.add(source_id)
+        else:
+            anonymous += 1
+    return len(seen) + anonymous
 
 
 def visual_copy_phrase(count: int) -> str:
@@ -54,9 +73,10 @@ def status_bar_parts(state: dict[str, Any] | None, scene: dict[str, Any] | None)
     copies = sum(1 for atom in atoms if atom_is_visual_copy(atom))
     if atoms or bonds:
         if copies:
-            site_word = "source site" if len(atoms) - copies == 1 else "source sites"
+            sites = _source_site_count(atoms)
+            site_word = "source site" if sites == 1 else "source sites"
             counts = (
-                f"{len(atoms) - copies} {site_word} + {visual_copy_phrase(copies)}"
+                f"{sites} {site_word} + {visual_copy_phrase(copies)}"
                 f" · {len(bonds)} bonds"
             )
         else:

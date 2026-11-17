@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import copy
 from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
+from ..legacy.plot_crystal import _compute_label_positions
 from ..render.display_modes import _wrap_fractional
 from ..structure.bonds import bonds_conflict
 from ..structure.cif_parse import parse_asu
@@ -15,7 +15,13 @@ from ..structure.geometry import _nearest_pbc_cart, view_rotation
 from ..style.disorder import disorder_alpha, is_minor
 from ..style.palette import atom_r, elem_color, elem_color_light
 from ..viewpoint import auto_view_dir
-from ..legacy.plot_crystal import _compute_label_positions
+from .drawing_identity import (
+    INSTANCE_BONDED_IMAGE,
+    INSTANCE_FRAMEWORK_CONTEXT,
+    indexed_source_site_id,
+    stamp_drawing_identity,
+)
+
 
 def scene_ops():
     return SimpleNamespace(
@@ -351,6 +357,12 @@ def _manifest_strict_bonded_images(
         copied["_is_bonded_image_replica"] = True
         copied.pop("_is_boundary_replica", None)
         copied.pop("_is_fragment_boundary_replica", None)
+        stamp_drawing_identity(
+            copied,
+            source_site_id=indexed_source_site_id(copied, source),
+            image_shift=shift,
+            instance_kind=INSTANCE_BONDED_IMAGE,
+        )
         instances[target_key] = len(draw_atoms) + len(additions)
         additions.append(copied)
 
@@ -531,6 +543,12 @@ def _manifest_spanning_bond_context(
             copied["_is_boundary_replica"] = True
             copied["_is_framework_context_replica"] = True
             copied.pop("_is_fragment_boundary_replica", None)
+            stamp_drawing_identity(
+                copied,
+                source_site_id=indexed_source_site_id(copied, source),
+                image_shift=absolute,
+                instance_kind=INSTANCE_FRAMEWORK_CONTEXT,
+            )
             instances.add(key)
             additions.append(copied)
 
