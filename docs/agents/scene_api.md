@@ -44,7 +44,9 @@ ASE-readable frames with an integer `molecule_index` array constrain
 MolCrysKit bond perception to each source group. Disconnected parts of a group
 may become separate components; sites from different groups are not merged.
 IDs may be non-contiguous, and the original per-atom array remains available
-in the bundle. Frames without this array retain whole-frame bond perception.
+in the bundle. Component membership and bond endpoints, including periodic
+image shifts, stay on that original frame. Frames without this array retain
+whole-frame bond perception.
 
 ### Auxiliary cells
 

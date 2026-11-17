@@ -1,4 +1,9 @@
-"""Adapt explicit source molecule partitions to MolCrysKit identification."""
+"""Adapt explicit source molecule partitions to MolCrysKit identification.
+
+The index rewrite is a temporary adapter until MolCrysKit accepts source
+partitions. Keys rewritten here are exactly bond-record ``left`` and
+``right`` plus ``atom_indices`` and ``bond_pairs``.
+"""
 from __future__ import annotations
 
 import numpy as np
