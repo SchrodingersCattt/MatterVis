@@ -59,10 +59,20 @@ signatures.
 
 Every install job uses the git commit in `pyproject.toml`:
 
-`0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4`
+`a54a922eb2d11dca3fafac2d63a19c603541ca4d`
 
-That commit merges Mercury `read_mryx` `0702ed8d` with lightweight CIF /
-phone-site `9616debf`. Neither parent is a valid substitute.
+That commit is the reviewed head of open MolCrysKit PR 234. It includes
+Mercury `read_mryx` `0702ed8d` and lightweight CIF / phone-site
+`a4080132`. It is not MolCrysKit main. Do not retarget the pin to a
+later branch tip. Installing it before it is on MolCrysKit main is a
+readiness fact.
+
+The dependency requests the `desktop` extra. Core MolCrysKit is NumPy,
+NetworkX, and Click. The desktop extra supplies ASE, pymatgen, SciPy,
+spglib, and defusedxml. `read_mryx` imports defusedxml from that extra.
+`requirements/ci-constraints.txt` names the same commit URL without the
+`desktop` marker. Pip 26 rejects extras in a constraint file. A differing
+direct URL makes pip fail with a conflict, so change both together.
 
 The checkout version is derived from git tags by setuptools_scm. The fast-job window check
 still requires the installed version to be at least 0.8.0 and below

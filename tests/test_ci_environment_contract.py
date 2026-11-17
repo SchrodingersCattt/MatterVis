@@ -18,7 +18,7 @@ BUILD_INSTALL = (
     "python -m pip install -c requirements/ci-constraints.txt "
     'build setuptools "setuptools-scm[toml]"'
 )
-MOLCRYS_COMMIT = "0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4"
+MOLCRYS_COMMIT = "a54a922eb2d11dca3fafac2d63a19c603541ca4d"
 
 
 def _requirement_lines() -> list[str]:
@@ -39,10 +39,39 @@ def test_constraints_pin_every_package_and_the_molcrys_commit() -> None:
         assert pinned, line
     assert "pytest==9.2.0" in lines
     assert "numpy==2.2.6" in lines
-    molcrys = next(line for line in lines if line.startswith("molcrys-kit @"))
+    molcrys = next(line for line in lines if line.startswith("molcrys-kit @ "))
     assert molcrys.endswith(MOLCRYS_COMMIT)
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert MOLCRYS_COMMIT in pyproject
+
+
+def test_molcrys_pin_is_identical_in_every_declaration() -> None:
+    """The commit URL matches; the constraint omits the desktop extra.
+
+    Pip 26 rejects extras in a constraint file. The direct URL still has to
+    match pyproject.toml or the resolver reports a conflict.
+    """
+    from mat_viewer.capabilities import (
+        MOLCRYSKIT_DEVELOPMENT_REQUIREMENT,
+        MOLCRYSKIT_SOURCE_COMMIT,
+    )
+
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    declared = [
+        line.strip().strip('",')
+        for line in pyproject.splitlines()
+        if "molcrys-kit" in line and "git+https://github.com/SchrodingersCattt/MolCrysKit.git@" in line
+    ]
+    constrained = [
+        line for line in _requirement_lines() if line.startswith("molcrys-kit @ ")
+    ]
+    assert declared == [MOLCRYSKIT_DEVELOPMENT_REQUIREMENT]
+    assert declared[0].startswith("molcrys-kit[desktop] @ ")
+    assert constrained == [
+        MOLCRYSKIT_DEVELOPMENT_REQUIREMENT.replace("molcrys-kit[desktop] @ ", "molcrys-kit @ ", 1)
+    ]
+    assert constrained[0].endswith(MOLCRYS_COMMIT)
+    assert MOLCRYSKIT_SOURCE_COMMIT == MOLCRYS_COMMIT
 
 
 def test_merge_gate_uses_the_pinned_toolchain() -> None:

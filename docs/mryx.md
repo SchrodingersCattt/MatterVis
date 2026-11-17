@@ -2,9 +2,17 @@
 
 MatterVis imports `.mryx` using **MolCrysKit `read_mryx_atoms`**. The viewer has
 no Mercury XML parser, element-code table or chemistry decoder of its own. The
-required upstream revision is pinned in `pyproject.toml` and
-`requirements/ci-constraints.txt`; install that dependency rather than an older
-MolCrysKit release without this API. No CCDC installation is needed.
+required upstream revision is
+`a54a922eb2d11dca3fafac2d63a19c603541ca4d`, the reviewed head of open
+MolCrysKit PR 234. It includes Mercury `read_mryx` `0702ed8d` and the
+lightweight CIF reader `a4080132`. It is not MolCrysKit main. `pyproject.toml`
+requests the `desktop` extra of that commit. Core MolCrysKit is NumPy,
+NetworkX, and Click. The desktop extra supplies ASE, pymatgen, SciPy, spglib,
+and defusedxml, and `read_mryx` imports defusedxml from that extra.
+`requirements/ci-constraints.txt` repeats the same commit URL without the
+extra marker because pip 26 rejects extras in a constraint. Install that
+dependency rather than an older MolCrysKit release without this API. No CCDC
+installation is needed.
 
 ```bash
 mat-vis render document.mryx --frame 0 -o stored-sites.png --backend cpu

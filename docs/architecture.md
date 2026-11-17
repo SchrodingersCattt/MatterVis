@@ -166,7 +166,9 @@ are in `docs/reliability-worker-shutdown.md`.
 ### Mercury import ownership
 
 `loader/mryx_adapter.py` consumes MolCrysKit `read_mryx_atoms` output and feeds
-the existing ASE/canonical bundle pipeline. Container/XML parsing and structural
+the existing ASE/canonical bundle pipeline. The dependency is the `desktop`
+extra of the commit named in `pyproject.toml`, because `read_mryx` imports
+defusedxml from that extra. Container/XML parsing and structural
 semantics live only upstream. Native MRYX uploads use the existing asynchronous
 job and filename-safety path, selecting the first stored structure; frame-aware
 loaders expose the ordered document. The adapter still asks upstream for every
