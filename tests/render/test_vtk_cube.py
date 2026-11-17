@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import pytest
 from PIL import Image
 
 from mat_viewer.render import vtk_cube
+from mat_viewer.render.figure_shade import FigureShade
 from mat_viewer.render.vtk_cube import (
     _SCALAR,
     _apply_depth_peeling,
@@ -25,6 +27,7 @@ from mat_viewer.render.vtk_cube import (
     _prepare_vtk_window,
     _repeat_mesh,
     _repeated_atoms,
+    _resolve_surface_shade,
     _sample_indices,
     _sample_world,
     _scene_extent,
@@ -561,6 +564,107 @@ print("ok")
         return
     assert "ok" in proc.stdout
     _assert_figure(output)
+
+
+def test_figure_shade_and_kwargs_resolve_the_same_numbers() -> None:
+    coefficients = (0.25, 0.5, 0.1, 12.0)
+    ambient, diffuse, specular, shininess = coefficients
+    record = FigureShade(
+        ambient=ambient,
+        diffuse=diffuse,
+        specular=specular,
+        shininess=shininess,
+    )
+    from_record = _resolve_surface_shade(record)
+    from_kwargs = _resolve_surface_shade(
+        None,
+        surface_ambient=ambient,
+        surface_diffuse=diffuse,
+        surface_specular=specular,
+        surface_specular_power=shininess,
+    )
+    from_mapping = _resolve_surface_shade(
+        {
+            "ambient": ambient,
+            "diffuse": diffuse,
+            "specular": specular,
+            "shininess": shininess,
+        }
+    )
+    assert from_record == from_kwargs == from_mapping == coefficients
+
+
+def test_omitted_surface_keeps_the_historical_shade() -> None:
+    assert _resolve_surface_shade(None) == (
+        vtk_cube._SURFACE_AMBIENT,
+        vtk_cube._SURFACE_DIFFUSE,
+        vtk_cube._SURFACE_SPECULAR,
+        vtk_cube._SURFACE_SPECULAR_POWER,
+    )
+    parameters = inspect.signature(render_cube_figure).parameters
+    assert repr(parameters["surface_ambient"].default) == repr(vtk_cube._SURFACE_AMBIENT)
+    assert repr(parameters["surface_diffuse"].default) == repr(vtk_cube._SURFACE_DIFFUSE)
+    assert repr(parameters["surface_specular"].default) == repr(vtk_cube._SURFACE_SPECULAR)
+    assert repr(parameters["surface_specular_power"].default) == repr(
+        vtk_cube._SURFACE_SPECULAR_POWER
+    )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"surface_ambient": 0.25},
+        {"surface_diffuse": 0.5},
+        {"surface_specular": 0.1},
+        {"surface_specular_power": 12},
+    ],
+)
+def test_surface_record_and_kwargs_cannot_combine(override: dict[str, float]) -> None:
+    record = FigureShade(ambient=0.25, diffuse=0.5, specular=0.1, shininess=12)
+    with pytest.raises(ValueError, match="not both"):
+        _resolve_surface_shade(record, **override)
+
+
+def test_figure_shade_uses_shared_coefficient_bounds() -> None:
+    with pytest.raises(ValueError, match="ambient"):
+        FigureShade(ambient=-0.01, diffuse=0.2, specular=0.0, shininess=2)
+    with pytest.raises(ValueError, match="diffuse"):
+        FigureShade(ambient=0.2, diffuse=float("nan"), specular=0.0, shininess=2)
+    with pytest.raises(ValueError, match="specular"):
+        FigureShade(ambient=0.2, diffuse=0.2, specular=float("inf"), shininess=2)
+    with pytest.raises(ValueError, match="shininess"):
+        FigureShade(ambient=0.2, diffuse=0.2, specular=0.0, shininess=0.5)
+    allowed = FigureShade(ambient=1.4, diffuse=0.0, specular=0.0, shininess=1)
+    assert allowed.shininess == 1.0
+    assert _resolve_surface_shade(allowed) == (1.4, 0.0, 0.0, 1.0)
+    with pytest.raises(ValueError, match="surface_ambient"):
+        _resolve_surface_shade(None, surface_ambient=1.4)
+
+
+def test_surface_mapping_requires_the_four_shade_fields() -> None:
+    with pytest.raises(ValueError, match="shininess"):
+        _resolve_surface_shade({"ambient": 0.2, "diffuse": 0.3, "specular": 0.1})
+    with pytest.raises(ValueError, match="shininess"):
+        _resolve_surface_shade(
+            {
+                "ambient": 0.2,
+                "diffuse": 0.3,
+                "specular": 0.1,
+                "shininess": 8,
+                "opacity": 1.0,
+            }
+        )
+
+
+def test_render_cube_figure_rejects_both_shade_forms(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not both"):
+        render_cube_figure(
+            *_blob(),
+            tmp_path / "unused.png",
+            surface=FigureShade(ambient=0.25, diffuse=0.5, specular=0.1, shininess=12),
+            surface_ambient=0.25,
+            **_figure_kwargs(),
+        )
 
 
 def _tiny_fields():

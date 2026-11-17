@@ -183,9 +183,16 @@ optional implementation is an error rather than a visual fallback.
 
 ## VTK offscreen figures
 
-`mat_viewer.render.vtk_cube.render_cube_figure` writes one PNG through
-PyVista. It is not a `mat-vis render --backend` choice and it does not
-consume a `RenderPlan`.
+`mat_viewer.render.vtk_cube.render_cube_figure` is an experimental
+offscreen helper. It writes one PNG through PyVista. It is not a
+`mat-vis render --backend` choice, it does not consume a `RenderPlan`,
+and it is not a second scene authority. Pixel output may differ from
+the CPU and Plotly backends. This helper does not promise cross-backend
+pixel parity.
+
+Depth peeling (`depth_peels`), Taubin smoothing (`taubin_iterations`,
+`taubin_pass_band`), and the native VTK window class are options on this
+helper. The isosurface shade is a shared record, described below.
 
 Install the Python extra with:
 
@@ -224,14 +231,37 @@ have to be chosen after the repeat. This function does not choose elements
 or distance cutoffs. Colors and radii are caller-supplied maps keyed by
 atomic number.
 
-The isosurface shade is `surface_ambient`, `surface_diffuse`,
-`surface_specular`, and `surface_specular_power`. Atom and bond
-coefficients are the matching `atom_*` and `bond_*` arguments.
-`surface_specular_power` is the Phong exponent, not a 0–1 weight.
-The renderer lights both sides of the sheet, so an open isosurface stays
-visible when a normal points away from the camera. The defaults leave the
-previous coefficients unchanged. Pass `cell_origin` and `cell_vectors`
-(three lattice rows) together to draw the twelve cell edges; omit both to
+The isosurface shade is a `FigureShade` from
+`mat_viewer.render.figure_shade`:
+
+```python
+from mat_viewer.render.figure_shade import FigureShade
+
+surface = FigureShade(ambient=0.7, diffuse=0.45, specular=0.08, shininess=15)
+```
+
+Pass it as `surface=surface`. The fields are ambient, diffuse, specular,
+and shininess. Those are the same four numbers as `IsosurfaceMaterial`
+when that API is present. This helper does not import
+`IsosurfaceMaterial`, and it does not read opacity or light scale from
+that record. A mapping with exactly those four keys is accepted in place
+of `FigureShade`. `shininess` is the highlight exponent. This helper
+lowers it to VTK specular power (the Phong exponent), not a 0–1 weight.
+
+Omit `surface` to keep `surface_ambient`, `surface_diffuse`,
+`surface_specular`, and `surface_specular_power`. Those arguments are the
+explicit shade only when `surface` is omitted. Their defaults stay 0.7,
+0.45, 0.08, and 15, so existing figures keep their pixels. Passing
+`surface` together with any of those arguments raises `ValueError`. The
+legacy arguments keep the weights in `[0, 1]` and require a positive
+specular power. `FigureShade` uses the shared coefficient rule: the three
+weights are finite and `>= 0`, and `shininess` is finite and `>= 1`.
+
+Atom and bond coefficients are the matching `atom_*` and `bond_*`
+arguments. The renderer lights both sides of the sheet, so an open
+isosurface stays visible when a normal points away from the camera.
+Pass `cell_origin` and `cell_vectors` (three lattice rows) together to draw
+the twelve cell edges; omit both to
 leave the box off. `cell_edge_mode="face"` draws the cell face whose
 outward normal points toward the camera, so opposite `look` directions
 select opposite faces and depth edges stay off; `"box"` keeps all twelve.
