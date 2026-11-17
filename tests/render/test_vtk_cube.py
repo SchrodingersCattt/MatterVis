@@ -6,6 +6,7 @@ import inspect
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -402,11 +403,47 @@ def test_depth_peeling_does_not_open_a_probe_window() -> None:
     assert ("max", 4) in idle.calls
 
 
+_OPENGL_WINDOW = "VTK_DEFAULT_OPENGL_WINDOW"
+
+
+def _clear_opengl_window(monkeypatch) -> None:
+    """Drop the window class and remember to undo a later direct assignment.
+
+    ``MonkeyPatch.delenv(..., raising=False)`` records no undo when the
+    variable is already absent. ``_prepare_vtk_window`` then writes
+    ``os.environ`` itself, and that value survives the test.
+    """
+
+    if _OPENGL_WINDOW not in os.environ:
+        monkeypatch.setenv(_OPENGL_WINDOW, "")
+    monkeypatch.delenv(_OPENGL_WINDOW, raising=False)
+
+
+@contextmanager
+def _restored_opengl_window():
+    """Put back the window class whether it was absent or set."""
+
+    previous = os.environ.get(_OPENGL_WINDOW)
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(_OPENGL_WINDOW, None)
+        else:
+            os.environ[_OPENGL_WINDOW] = previous
+
+
+@pytest.fixture(autouse=True)
+def _restore_opengl_window_after_test():
+    with _restored_opengl_window():
+        yield
+
+
 def _linux_without_display(monkeypatch) -> None:
     monkeypatch.setattr(vtk_cube.sys, "platform", "linux")
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-    monkeypatch.delenv("VTK_DEFAULT_OPENGL_WINDOW", raising=False)
+    _clear_opengl_window(monkeypatch)
 
 
 def test_missing_headless_backend_raises(monkeypatch) -> None:
@@ -430,9 +467,9 @@ def test_headless_selection_prefers_osmesa(monkeypatch) -> None:
 def test_display_does_not_override_the_window_class(monkeypatch) -> None:
     monkeypatch.setattr(vtk_cube.sys, "platform", "linux")
     monkeypatch.setenv("DISPLAY", ":1")
-    monkeypatch.delenv("VTK_DEFAULT_OPENGL_WINDOW", raising=False)
+    _clear_opengl_window(monkeypatch)
     _prepare_vtk_window()
-    assert "VTK_DEFAULT_OPENGL_WINDOW" not in os.environ
+    assert _OPENGL_WINDOW not in os.environ
 
 
 @pytest.mark.parametrize(
@@ -446,7 +483,7 @@ def test_desktop_platforms_select_a_native_window(monkeypatch, platform, window)
     monkeypatch.setattr(vtk_cube.sys, "platform", platform)
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-    monkeypatch.delenv("VTK_DEFAULT_OPENGL_WINDOW", raising=False)
+    _clear_opengl_window(monkeypatch)
     monkeypatch.setattr(vtk_cube, "_shared_library", lambda _name: None)
     _prepare_vtk_window()
     assert os.environ["VTK_DEFAULT_OPENGL_WINDOW"] == window
@@ -494,6 +531,40 @@ def test_repeat_translates_mesh_points_by_the_cell_vector() -> None:
         assert np.any(np.linalg.norm(found - point, axis=1) < 1e-8)
     scalars = np.sort(np.asarray(merged.point_data[_SCALAR]))
     assert np.allclose(scalars, [0.2, 0.2, 0.4, 0.4, 0.6, 0.6])
+
+
+def test_opengl_window_fixture_restores_before_rendering(monkeypatch) -> None:
+    """Undo a direct window-class write before this file renders anything.
+
+    The absent case is the one ``delenv(..., raising=False)`` does not
+    record. The present case must come back as the caller's class, not the
+    simulated OSMesa class.
+    """
+
+    def prefer_osmesa(name: str) -> str | None:
+        return "libOSMesa.so.8" if name == "OSMesa" else None
+
+    os.environ.pop(_OPENGL_WINDOW, None)
+    with _restored_opengl_window():
+        monkeypatch.setattr(vtk_cube.sys, "platform", "linux")
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+        monkeypatch.delenv(_OPENGL_WINDOW, raising=False)
+        monkeypatch.setattr(vtk_cube, "_shared_library", prefer_osmesa)
+        _prepare_vtk_window()
+        assert os.environ[_OPENGL_WINDOW] == "vtkOSOpenGLRenderWindow"
+    assert _OPENGL_WINDOW not in os.environ
+
+    os.environ[_OPENGL_WINDOW] = "vtkEGLRenderWindow"
+    with _restored_opengl_window():
+        monkeypatch.setattr(vtk_cube.sys, "platform", "linux")
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+        monkeypatch.delenv(_OPENGL_WINDOW, raising=False)
+        monkeypatch.setattr(vtk_cube, "_shared_library", prefer_osmesa)
+        _prepare_vtk_window()
+        assert os.environ[_OPENGL_WINDOW] == "vtkOSOpenGLRenderWindow"
+    assert os.environ[_OPENGL_WINDOW] == "vtkEGLRenderWindow"
 
 
 def test_repeated_render_is_identical(tmp_path: Path) -> None:
