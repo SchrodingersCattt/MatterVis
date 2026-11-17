@@ -183,10 +183,10 @@ def test_retry_keeps_published_file_when_replace_is_denied(
     assert published.read_bytes() == _VALID_CIF
 
 
-def test_retry_reuses_upload_when_windows_denies_the_digest_read(
+def test_unreadable_same_size_upload_is_not_accepted(
     backend: ViewerBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A sharing violation on the verify read must not fail a same-size retry."""
+    """A sharing violation must not accept a content-addressed file by size."""
     first = backend.add_uploaded_file_bytes(_VALID_CIF, "windows_read_denied.cif")
     published = Path(first.cif_path)
     inode = published.stat().st_ino
@@ -207,10 +207,35 @@ def test_retry_reuses_upload_when_windows_denies_the_digest_read(
 
     monkeypatch.setattr("builtins.open", deny_published)
     monkeypatch.setattr(os, "replace", refuse_replace)
-    second = backend.add_uploaded_file_bytes(_VALID_CIF, "windows_read_denied.cif")
+    with pytest.raises(RuntimeError, match="could not be verified"):
+        backend.add_uploaded_file_bytes(_VALID_CIF, "windows_read_denied.cif")
 
-    assert second.cif_path == first.cif_path
     assert published.stat().st_ino == inode
+    assert published.read_bytes() == _VALID_CIF
+
+
+def test_digest_read_retries_until_the_published_bytes_match(
+    backend: ViewerBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sharing violation that clears still has to match the digest."""
+    first = backend.add_uploaded_file_bytes(_VALID_CIF, "windows_read_retry.cif")
+    published = Path(first.cif_path)
+    real_open = open
+    denied_reads = {"count": 0}
+
+    def deny_once(file, *args, **kwargs):
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if os.path.realpath(file) == str(published) and "r" in str(mode):
+            if denied_reads["count"] < 1:
+                denied_reads["count"] += 1
+                raise PermissionError(13, "Access is denied")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", deny_once)
+    second = backend.add_uploaded_file_bytes(_VALID_CIF, "windows_read_retry.cif")
+
+    assert denied_reads["count"] == 1
+    assert second.cif_path == first.cif_path
     assert published.read_bytes() == _VALID_CIF
 
 
@@ -238,7 +263,7 @@ def test_unreadable_upload_with_a_different_size_is_not_replaced(
 
         monkeypatch.setattr("builtins.open", deny_published)
         monkeypatch.setattr(os, "replace", refuse_replace)
-        with pytest.raises(RuntimeError, match="digest collision"):
+        with pytest.raises(RuntimeError, match="could not be verified"):
             backend.add_uploaded_file_bytes(_VALID_CIF, "windows_size_conflict.cif")
         assert published.read_bytes() == b"short"
     finally:

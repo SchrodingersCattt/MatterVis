@@ -135,11 +135,11 @@ Each request writes a private temporary file. The backend lock covers
 concurrent requests in one process and publishes that file only when the
 destination is absent. A later retry does not replace the published path.
 It checks the full digest when the file can be read, and that read does
-not hold the backend lock. A Windows sharing violation on the read leaves
-the published bytes in place when the file size still matches, so an open
-handle does not fail the retry and does not have to survive a replace. A
-destination whose bytes or size differ is left unchanged and the retry
-fails.
+not hold the backend lock. A Windows sharing violation retries that digest
+read a few times. If the bytes still cannot be read, the retry fails and
+leaves the published file in place. Equal size is not treated as a
+verified digest. A readable file whose digest differs is left unchanged
+and the retry fails.
 
 Native structure writes mark candidate CIFs read-only until host shutdown.
 Failed and cancelled candidates, and retained files at shutdown, are made
