@@ -1,7 +1,16 @@
-"""Offscreen cube isosurface figures through PyVista.
+"""Experimental offscreen cube isosurface figures through PyVista.
 
-This is one optional PNG entry. It is not a ``RenderPlan`` backend and it
-does not choose elements, radii, or bond cutoffs. Positions use the cube
+``render_cube_figure`` is an experimental PNG helper. It is not a
+``RenderPlan`` backend and it is not a second scene authority. Pixel
+output may differ from the CPU and Plotly backends; this entry does not
+claim cross-backend pixel parity. Depth peeling, Taubin smoothing, and
+the native window class remain VTK-specific options.
+
+Isosurface shade uses the shared
+:class:`~mat_viewer.render.figure_shade.FigureShade` coefficients
+(ambient, diffuse, specular, shininess). This module lowers those four
+numbers onto a VTK property and maps ``shininess`` to specular power.
+It does not choose elements, radii, or bond cutoffs. Positions use the cube
 frame ``origin + index @ axes`` (voxel vectors are rows), the same frame as
 :class:`mat_viewer.cube.io.CubeData`. The color grid shares that origin,
 those axes, and that shape.
@@ -40,8 +49,9 @@ from ..cube.color_field import (
     _sample_trilinear,
 )
 from ..cube.io import default_isovalue
-from ._vtk_cube_color import _colormap as _colormap
 from ._vtk_cube_color import _color_limits, _paint
+from ._vtk_cube_color import _colormap as _colormap  # noqa: PLC0414
+from .figure_shade import FigureShade
 
 # Distance is a multiple of the scene radius (half the bounds diagonal).
 # Light offsets are fractions of that distance in the view basis
@@ -61,6 +71,29 @@ _SURFACE_SPECULAR = 0.08
 _SURFACE_SPECULAR_POWER = 15
 _SURFACE_DIFFUSE = 0.45
 _SURFACE_AMBIENT = 0.7
+
+
+class _ShadeDefault:
+    """Keyword default distinct from an explicit shade coefficient.
+
+    ``surface_*`` arguments stay at the historical numbers when omitted.
+    The wrapper keeps that omission visible, so passing ``surface`` together
+    with any of those arguments can raise without shifting the default PNG.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    def __repr__(self) -> str:
+        return repr(self.value)
+
+
+_DEFAULT_SURFACE_AMBIENT = _ShadeDefault(_SURFACE_AMBIENT)
+_DEFAULT_SURFACE_DIFFUSE = _ShadeDefault(_SURFACE_DIFFUSE)
+_DEFAULT_SURFACE_SPECULAR = _ShadeDefault(_SURFACE_SPECULAR)
+_DEFAULT_SURFACE_SPECULAR_POWER = _ShadeDefault(_SURFACE_SPECULAR_POWER)
 _BOND_SPECULAR = 0.05
 _BOND_AMBIENT = 0.2
 _BOND_DIFFUSE = 0.8
@@ -120,10 +153,11 @@ def render_cube_figure(
     sphere_resolution: int = 18,
     depth_peels: int = 8,
     colormap_stops: Sequence[tuple[int, int, int]] | None = None,
-    surface_ambient: float = _SURFACE_AMBIENT,
-    surface_diffuse: float = _SURFACE_DIFFUSE,
-    surface_specular: float = _SURFACE_SPECULAR,
-    surface_specular_power: float = _SURFACE_SPECULAR_POWER,
+    surface: FigureShade | Mapping | None = None,
+    surface_ambient: float | _ShadeDefault = _DEFAULT_SURFACE_AMBIENT,
+    surface_diffuse: float | _ShadeDefault = _DEFAULT_SURFACE_DIFFUSE,
+    surface_specular: float | _ShadeDefault = _DEFAULT_SURFACE_SPECULAR,
+    surface_specular_power: float | _ShadeDefault = _DEFAULT_SURFACE_SPECULAR_POWER,
     atom_ambient: float = _ATOM_AMBIENT,
     atom_diffuse: float = _ATOM_DIFFUSE,
     atom_specular: float = _ATOM_SPECULAR,
@@ -149,9 +183,14 @@ def render_cube_figure(
     Pass ``color_center`` (often 0) to place that value at the middle of the
     colormap. ``parallel_scale`` is the orthographic half-height in the same
     length unit as ``axes``. ``depth_peels`` above 1 enables depth peeling on
-    this window. ``surface_ambient``, ``surface_diffuse``, ``surface_specular``,
-    and ``surface_specular_power`` shade the isosurface. Atom and bond
-    coefficients are separate. VTK's specular power is the Phong exponent.
+    this window. Pass ``surface`` as a :class:`~mat_viewer.render.figure_shade.FigureShade`
+    or a mapping of ``ambient``, ``diffuse``, ``specular``, and ``shininess``
+    to shade the isosurface. ``shininess`` is VTK's specular power, the Phong
+    exponent. Omit ``surface`` to use ``surface_ambient``, ``surface_diffuse``,
+    ``surface_specular``, and ``surface_specular_power``. Those arguments are
+    the explicit shade only when ``surface`` is omitted, and their defaults
+    stay 0.7, 0.45, 0.08, and 15. Passing ``surface`` together with any of
+    them raises ``ValueError``. Atom and bond coefficients are separate.
     Pass ``cell_origin`` and ``cell_vectors`` (three lattice rows) to draw
     cell edges. ``cell_edge_mode="box"`` draws all twelve edges;
     ``"face"`` draws the face whose outward normal points toward the camera,
@@ -185,8 +224,8 @@ def render_cube_figure(
     if not np.isfinite(radius) or radius <= 0.0:
         raise ValueError("bond_radius must be finite and positive")
     bond_rgb = None if bond_color is None else _rgb01("bond_color", bond_color)
-    surface_shade = _shade(
-        "surface",
+    surface_shade = _resolve_surface_shade(
+        surface,
         surface_ambient,
         surface_diffuse,
         surface_specular,
@@ -448,12 +487,84 @@ def _cell_edge_polydata(
     return pv.PolyData(np.asarray(points, dtype=float), lines=np.hstack(lines))
 
 
+_SURFACE_FIELDS = ("ambient", "diffuse", "specular", "shininess")
+
+
 def _shade(name, ambient, diffuse, specular, power) -> tuple[float, float, float, float]:
     return (
         _unit_interval(f"{name}_ambient", ambient),
         _unit_interval(f"{name}_diffuse", diffuse),
         _unit_interval(f"{name}_specular", specular),
         _positive_power(f"{name}_specular_power", power),
+    )
+
+
+def _shade_number(value: float | _ShadeDefault) -> float:
+    if isinstance(value, _ShadeDefault):
+        return value.value
+    return value
+
+
+def _figure_shade(surface: FigureShade | Mapping) -> FigureShade:
+    if isinstance(surface, FigureShade):
+        return surface
+    if isinstance(surface, Mapping):
+        if set(surface) != set(_SURFACE_FIELDS):
+            raise ValueError(
+                "surface mapping must provide ambient, diffuse, specular, "
+                "and shininess"
+            )
+        return FigureShade(
+            ambient=surface["ambient"],
+            diffuse=surface["diffuse"],
+            specular=surface["specular"],
+            shininess=surface["shininess"],
+        )
+    raise TypeError(
+        "surface must be a FigureShade or a mapping of ambient, diffuse, "
+        "specular, and shininess"
+    )
+
+
+def _resolve_surface_shade(
+    surface: FigureShade | Mapping | None = None,
+    surface_ambient: float | _ShadeDefault = _DEFAULT_SURFACE_AMBIENT,
+    surface_diffuse: float | _ShadeDefault = _DEFAULT_SURFACE_DIFFUSE,
+    surface_specular: float | _ShadeDefault = _DEFAULT_SURFACE_SPECULAR,
+    surface_specular_power: float | _ShadeDefault = _DEFAULT_SURFACE_SPECULAR_POWER,
+) -> tuple[float, float, float, float]:
+    """Return ambient, diffuse, specular, and shininess for the isosurface.
+
+    The fourth number is VTK specular power. ``surface`` supplies all four
+    when it is present. The legacy ``surface_*`` arguments supply them only
+    when ``surface`` is omitted.
+    """
+
+    provided = [
+        name
+        for name, value in (
+            ("surface_ambient", surface_ambient),
+            ("surface_diffuse", surface_diffuse),
+            ("surface_specular", surface_specular),
+            ("surface_specular_power", surface_specular_power),
+        )
+        if not isinstance(value, _ShadeDefault)
+    ]
+    if surface is not None and provided:
+        names = ", ".join(provided)
+        raise ValueError(
+            "pass surface or the surface_* shade arguments, not both "
+            f"({names})"
+        )
+    if surface is not None:
+        shade = _figure_shade(surface)
+        return (shade.ambient, shade.diffuse, shade.specular, shade.shininess)
+    return _shade(
+        "surface",
+        _shade_number(surface_ambient),
+        _shade_number(surface_diffuse),
+        _shade_number(surface_specular),
+        _shade_number(surface_specular_power),
     )
 
 
