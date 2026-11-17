@@ -6,7 +6,6 @@ import inspect
 import os
 import subprocess
 import sys
-from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -411,7 +410,8 @@ def _clear_opengl_window(monkeypatch) -> None:
 
     ``MonkeyPatch.delenv(..., raising=False)`` records no undo when the
     variable is already absent. ``_prepare_vtk_window`` then writes
-    ``os.environ`` itself, and that value survives the test.
+    ``os.environ`` itself. Recording an empty value first makes that
+    undo delete the name again.
     """
 
     if _OPENGL_WINDOW not in os.environ:
@@ -419,24 +419,40 @@ def _clear_opengl_window(monkeypatch) -> None:
     monkeypatch.delenv(_OPENGL_WINDOW, raising=False)
 
 
-@contextmanager
-def _restored_opengl_window():
-    """Put back the window class whether it was absent or set."""
+# Captured before any test in this module runs. The render that follows the
+# window-class fixture compares against this, after every finalizer.
+_OPENGL_WINDOW_AT_IMPORT = os.environ.get(_OPENGL_WINDOW)
 
-    previous = os.environ.get(_OPENGL_WINDOW)
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(_OPENGL_WINDOW, None)
-        else:
-            os.environ[_OPENGL_WINDOW] = previous
+
+def _assign_opengl_window(value: str | None) -> None:
+    if value is None:
+        os.environ.pop(_OPENGL_WINDOW, None)
+    else:
+        os.environ[_OPENGL_WINDOW] = value
 
 
 @pytest.fixture(autouse=True)
-def _restore_opengl_window_after_test():
-    with _restored_opengl_window():
-        yield
+def _restore_opengl_window_after_test(monkeypatch) -> None:
+    """Restore the caller's window class after the shared monkeypatch undo.
+
+    ``tests/conftest.py`` requests ``monkeypatch`` from an autouse fixture,
+    so that fixture is created first and its ``undo`` runs last. A restore
+    that only runs inside this fixture is overwritten when ``undo`` replays
+    a later ``delenv`` of a temporary class. Registering the original value
+    first makes that last undo step put the original back, whether it was
+    absent or set.
+    """
+
+    previous = os.environ.get(_OPENGL_WINDOW)
+    if previous is None:
+        monkeypatch.setenv(_OPENGL_WINDOW, "")
+        monkeypatch.delenv(_OPENGL_WINDOW, raising=False)
+    else:
+        monkeypatch.setenv(_OPENGL_WINDOW, previous)
+    yield
+    # ``undo`` may still be pending. Write the original now, and again if
+    # this finalizer is the last one to run.
+    _assign_opengl_window(previous)
 
 
 def _linux_without_display(monkeypatch) -> None:
@@ -533,38 +549,62 @@ def test_repeat_translates_mesh_points_by_the_cell_vector() -> None:
     assert np.allclose(scalars, [0.2, 0.2, 0.4, 0.4, 0.6, 0.6])
 
 
-def test_opengl_window_fixture_restores_before_rendering(monkeypatch) -> None:
-    """Undo a direct window-class write before this file renders anything.
+def test_opengl_window_fixture_restores_before_rendering() -> None:
+    """A local patch restores an absent variable and any caller-supplied class.
 
-    The absent case is the one ``delenv(..., raising=False)`` does not
-    record. The present case must come back as the caller's class, not the
-    simulated OSMesa class.
+    The shared ``monkeypatch`` fixture is not used. Its later ``undo`` must
+    still leave the process value that was present when this test started;
+    the following render checks that after every finalizer.
     """
 
     def prefer_osmesa(name: str) -> str | None:
         return "libOSMesa.so.8" if name == "OSMesa" else None
 
+    def select_osmesa() -> None:
+        with pytest.MonkeyPatch.context() as local:
+            local.setattr(vtk_cube.sys, "platform", "linux")
+            local.delenv("DISPLAY", raising=False)
+            local.delenv("WAYLAND_DISPLAY", raising=False)
+            _clear_opengl_window(local)
+            local.setattr(vtk_cube, "_shared_library", prefer_osmesa)
+            _prepare_vtk_window()
+            assert os.environ[_OPENGL_WINDOW] == "vtkOSOpenGLRenderWindow"
+
     os.environ.pop(_OPENGL_WINDOW, None)
-    with _restored_opengl_window():
-        monkeypatch.setattr(vtk_cube.sys, "platform", "linux")
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-        monkeypatch.delenv(_OPENGL_WINDOW, raising=False)
-        monkeypatch.setattr(vtk_cube, "_shared_library", prefer_osmesa)
-        _prepare_vtk_window()
-        assert os.environ[_OPENGL_WINDOW] == "vtkOSOpenGLRenderWindow"
+    select_osmesa()
     assert _OPENGL_WINDOW not in os.environ
 
+    os.environ[_OPENGL_WINDOW] = "vtkWin32OpenGLRenderWindow"
+    select_osmesa()
+    assert os.environ[_OPENGL_WINDOW] == "vtkWin32OpenGLRenderWindow"
+
     os.environ[_OPENGL_WINDOW] = "vtkEGLRenderWindow"
-    with _restored_opengl_window():
-        monkeypatch.setattr(vtk_cube.sys, "platform", "linux")
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-        monkeypatch.delenv(_OPENGL_WINDOW, raising=False)
-        monkeypatch.setattr(vtk_cube, "_shared_library", prefer_osmesa)
-        _prepare_vtk_window()
-        assert os.environ[_OPENGL_WINDOW] == "vtkOSOpenGLRenderWindow"
+    select_osmesa()
     assert os.environ[_OPENGL_WINDOW] == "vtkEGLRenderWindow"
+
+
+def test_render_follows_window_fixture_teardown(tmp_path: Path) -> None:
+    """Render immediately after the window-class fixture's finalizers.
+
+    This stays directly after
+    ``test_opengl_window_fixture_restores_before_rendering``. That test
+    leaves ``vtkEGLRenderWindow`` set until teardown. The shared
+    monkeypatch ``undo`` runs after this module's fixture, so the class
+    must be gone before this render. An inherited EGL class aborts native
+    VTK when the machine has libGL and neither EGL nor OSMesa.
+    """
+
+    assert os.environ.get(_OPENGL_WINDOW) == _OPENGL_WINDOW_AT_IMPORT
+    if _OPENGL_WINDOW_AT_IMPORT is not None:
+        # The caller already selected a window class. Rendering that class
+        # is outside this regression; the absent case is the one that must
+        # reach VTK without an inherited class.
+        return
+    pytest.importorskip("pyvista")
+    pytest.importorskip("skimage")
+    output = tmp_path / "after-teardown.png"
+    render_cube_figure(*_blob(), output, **_figure_kwargs())
+    _assert_figure(output)
 
 
 def test_repeated_render_is_identical(tmp_path: Path) -> None:
