@@ -48,13 +48,16 @@ def test_display_hides_the_other_disorder_group(tmp_path: Path):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         snapshot = analyze_cif(path)
-    assert snapshot["revision"] == 1
+    assert "revision" not in snapshot
+    assert snapshot["schema"] == "mattervis.phone.snapshot.v1"
     assert {site["alpha"] for site in snapshot["sites"]} == {site["occupancy"] for site in snapshot["sites"]}
     shown = display(snapshot, disorder_group=1)
     visible = [site for site in shown["sites"] if site["visible"]]
     assert visible
     assert all(site["disorder_group"] == "1" for site in visible)
     assert any(not site["visible"] for site in shown["sites"])
+    assert shown["display"]["disorder_group"] == "1"
+    assert shown["display"]["disorder_group_scope"] == "global"
 
 
 def test_operate_commits_a_new_revision(tmp_path: Path):
@@ -63,8 +66,13 @@ def test_operate_commits_a_new_revision(tmp_path: Path):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         committed = operate_commit_major(path)
-    assert committed["revision"] == 2
+    assert "revision" not in committed
+    assert committed["schema"] == "mattervis.phone.snapshot.v1"
     assert committed["operation"] == "commit_disorder_candidate"
+    assert committed["provenance"] == {
+        "operation": "commit_disorder_candidate",
+        "effect_session_revision": 2,
+    }
     assert len(committed["sites"]) == 1
 
 
@@ -89,7 +97,8 @@ from mat_viewer.phone import operate_commit_major
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", UserWarning)
     committed = operate_commit_major(sys.argv[1])
-assert committed["revision"] == 2
+assert "revision" not in committed
+assert committed["provenance"]["effect_session_revision"] == 2
 assert len(committed["sites"]) == 1
 """
     completed = subprocess.run(
@@ -164,9 +173,51 @@ def _assert_same_structure(left: dict, right: dict) -> None:
         assert best < 1e-4, (site["symbol"], frac, best)
 
 
+def _visible_keys(shown: dict) -> tuple[set, set]:
+    visible, hidden = set(), set()
+    for site in shown["sites"]:
+        key = (site["disorder_assembly"], site["disorder_group"])
+        (visible if site["visible"] else hidden).add(key)
+    return visible, hidden
+
+
+def test_display_selects_reused_group_ids_by_assembly(tmp_path: Path):
+    snapshot = _quiet(analyze_cif, _write(tmp_path))
+    both = display(snapshot, disorder_selection={"A": 1, "B": 2})
+    visible, hidden = _visible_keys(both)
+    assert {("A", "1"), ("B", "2")} <= visible
+    assert hidden == {("A", "2"), ("B", "1")}
+    assert both["display"] == {
+        "disorder_group": None,
+        "disorder_group_scope": None,
+        "disorder_selection": {"A": "1", "B": "2"},
+    }
+
+    only_a = display(snapshot, disorder_selection={"A": 1})
+    visible, hidden = _visible_keys(only_a)
+    assert {("A", "1"), ("B", "1"), ("B", "2")} <= visible
+    assert hidden == {("A", "2")}
+    assert only_a["display"]["disorder_selection"] == {"A": "1"}
+    assert only_a["display"]["disorder_group"] is None
+
+    global_one = display(snapshot, disorder_group=1)
+    visible, hidden = _visible_keys(global_one)
+    assert {("A", "1"), ("B", "1")} <= visible
+    assert hidden == {("A", "2"), ("B", "2")}
+    assert global_one["display"] == {
+        "disorder_group": "1",
+        "disorder_group_scope": "global",
+        "disorder_selection": None,
+    }
+    assert all(site["visible"] for site in snapshot["sites"])
+    with pytest.raises(ValueError, match="not both"):
+        display(snapshot, disorder_group=1, disorder_selection={"A": 1})
+
+
 def test_analyze_keeps_every_disorder_group_and_occupancy(tmp_path: Path):
     snapshot = _quiet(analyze_cif, _write(tmp_path))
-    assert snapshot["revision"] == 1
+    assert "revision" not in snapshot
+    assert snapshot["schema"] == "mattervis.phone.snapshot.v1"
     assert len(snapshot["sites"]) == 5
     groups = {(s["disorder_assembly"], s["disorder_group"]) for s in snapshot["sites"]}
     assert {("A", "1"), ("A", "2"), ("B", "1"), ("B", "2")} <= groups
@@ -179,7 +230,8 @@ def test_with_cif_snapshot_equals_operate_commit_major(tmp_path: Path):
     paired = _quiet(operate_commit_major_with_cif, path)
     assert set(paired) == {"snapshot", "cif"}
     assert paired["snapshot"] == plain
-    assert paired["snapshot"]["revision"] == 2
+    assert "revision" not in paired["snapshot"]
+    assert paired["snapshot"]["provenance"]["effect_session_revision"] == 2
     assert paired["snapshot"]["operation"] == "commit_disorder_candidate"
     # One component per disorder assembly plus the ordered oxygen.
     assert sorted(s["symbol"] for s in paired["snapshot"]["sites"]) == ["C", "N", "O"]
@@ -210,7 +262,8 @@ def test_with_cif_operates_exactly_once_through_effect_session(tmp_path: Path, m
     )
     result = _quiet(operate_commit_major_with_cif, _write(tmp_path))
     assert calls == {"operate": 1, "generate": 1}
-    assert result["snapshot"]["revision"] == 2
+    assert "revision" not in result["snapshot"]
+    assert result["snapshot"]["provenance"]["effect_session_revision"] == 2
 
 
 def test_exported_cif_reimports_as_the_committed_structure(tmp_path: Path):

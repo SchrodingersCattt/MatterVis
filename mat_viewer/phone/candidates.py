@@ -25,7 +25,7 @@ Contract (JSON-serializable, ``schema_version`` 1)::
           "kept_indices": [int, ...],         # MCK source-atom indices
           "duplicate_of": None | "candidate-00N",
           "fingerprint": str,                 # EffectSession commit fingerprint
-          "snapshot": {...},                  # as operate_commit_major
+          "snapshot": {...},                  # transport snapshot, as operate_commit_major
           "cif": "..."                        # P1 CIF of the SAME crystal
       }, ...],
       "warnings": [{"source", "category", "message"}, ...]
@@ -145,7 +145,12 @@ def generate_disorder_candidates(
 
     The source file is read-only here and every candidate is committed from a
     fresh session registered from the original source, so candidates are
-    siblings, not a chain.
+    siblings, not a chain. Each session is discarded before the call returns.
+    The snapshot is a transport payload (``schema``
+    ``mattervis.phone.snapshot.v1``) with no top-level ``revision``. The
+    discarded session's output revision is
+    ``snapshot["provenance"]["effect_session_revision"]`` and cannot be
+    passed back as ``expected_revision``.
 
     Concurrency: calls may run from several threads. MolCrysKit log records
     and Python warnings are captured only from the calling thread, and all
@@ -367,7 +372,7 @@ def _commit_candidate(source, replica, kept_indices, path, method, seed, index):
     from molcrys_kit.io import write_cif
 
     from mat_viewer.effects import EffectSession
-    from mat_viewer.phone.snapshot import _project
+    from mat_viewer.phone.snapshot import _project, _stamp_commit
 
     session = EffectSession()
     ref = session.register(source, structure_id="phone")
@@ -384,10 +389,7 @@ def _commit_candidate(source, replica, kept_indices, path, method, seed, index):
         expected_revision=ref.revision,
     )
     saved = session.checkout(committed.output_ref)
-    snapshot = _project(saved)
-    snapshot["revision"] = int(committed.output_ref.revision)
-    snapshot["source"] = str(path)
-    snapshot["operation"] = "commit_disorder_candidate"
+    snapshot = _stamp_commit(_project(saved), path, committed.output_ref.revision)
     text = write_cif(saved, representation="p1")
     if not isinstance(text, str):
         raise TypeError("MolCrysKit CIF writer returned non-text output")

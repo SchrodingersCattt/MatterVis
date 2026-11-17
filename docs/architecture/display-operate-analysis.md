@@ -89,12 +89,40 @@ path is named in `pyproject.toml`.
 public functions below and `snapshot.py` holds the implementation, so
 `from mat_viewer.phone import analyze_cif` is unchanged.
 
+A phone snapshot is a stateless transport payload, not an EffectSession
+`StructureRef`. Every snapshot from `analyze_cif`, `display`,
+`operate_commit_major`, and each candidate's `snapshot` carries
+`schema` = `mattervis.phone.snapshot.v1`. `analyze_cif` reads and projects
+one CIF. It does not open a session and it does not set `revision`.
+
 | Function | Returns |
 |---|---|
-| `analyze_cif(path)` | Revision-1 snapshot: `cell`, `sites` (Cartesian `position`, `fractional_position`, `image_shift`, `occupancy`, `alpha`, `disorder_group`, `disorder_assembly`), `bonds` |
-| `display(snapshot, disorder_group=None)` | View-only copy; sets `visible`, never `occupancy` |
-| `operate_commit_major(path)` | Snapshot of the committed major disorder component (`operation = "commit_disorder_candidate"`, `revision = 2`) |
+| `analyze_cif(path)` | Transport snapshot: `schema`, `cell`, `sites` (Cartesian `position`, `fractional_position`, `image_shift`, `occupancy`, `alpha`, `disorder_group`, `disorder_assembly`), `bonds`, `source`. No `revision` key. |
+| `display(snapshot, *, disorder_group=None, disorder_selection=None)` | View-only copy; sets `visible` and `alpha`, never `occupancy`. Records the request on `display`. |
+| `operate_commit_major(path)` | Snapshot of the committed major disorder component. Top-level `operation` is `commit_disorder_candidate`. The temporary session revision is `provenance.effect_session_revision`, not a client-addressable `revision`. |
 | `operate_commit_major_with_cif(path)` | `{"snapshot": <identical to operate_commit_major>, "cif": <str>}` |
+
+`display` does not change chemistry. Ordered groups (`"0"`, `"."`, `""`)
+stay visible. `disorder_selection` is the precise, assembly-aware selector:
+a mapping of assembly id to the group shown for that assembly
+(`{"A": 1, "B": 2}`). A site whose assembly is in the map is visible only
+when its group is the selected one, or when the site is ordered. Assemblies
+absent from the map stay fully visible, so a selection for assembly A does
+not hide assembly B. `disorder_group` is a separate global display filter:
+the same group id is applied to every assembly. It is not an assembly
+choice. Passing `disorder_group` and `disorder_selection` together raises
+`ValueError`. The applied request is stored on `display` as
+`disorder_group` and `disorder_selection` (the unused form is `None`;
+group ids are strings). When `disorder_group` is set,
+`display.disorder_group_scope` is `"global"`; otherwise that field is `None`.
+
+`operate_commit_major` and `operate_commit_major_with_cif` each build a
+fresh `EffectSession`, register the source, commit once, and discard the
+session before returning. `provenance` is
+`{"operation": "commit_disorder_candidate", "effect_session_revision": <int>}`.
+That integer is the discarded session's output revision (2 after one
+commit from a newly registered source). It cannot be passed back as
+`expected_revision`. There is no top-level `revision` on the snapshot.
 
 Each entry of `bonds` is a pass-through of one MolCrysKit `BondRecord`:
 
@@ -147,13 +175,18 @@ and the phone-like test in `tests/test_phone_snapshot.py` enforces it.
 
 `generate_disorder_candidates(path, *, method="enumerate", count, seed=None,
 coupled=False, independent_assemblies=False, max_candidates=16,
-max_payload_bytes=8 MiB, max_source_bytes=None -> 2 MiB)` (in `mat_viewer/phone/candidates.py`) is additive;
-the four functions above are unchanged. It calls MolCrysKit's
+max_payload_bytes=8 MiB, max_source_bytes=None -> 2 MiB)` (in `mat_viewer/phone/candidates.py`) is additive.
+It calls MolCrysKit's
 `generate_ordered_replicas_from_disordered_sites` exactly once and commits
 each returned replica through its own `EffectSession` registered from the
-original source, so candidates are siblings (each snapshot is `revision = 2`
-of its own session), never a chain. The source file is not modified and is
-not replaced by any candidate; Android keeps the original.
+original source, so candidates are siblings, never a chain. Each session is
+discarded after its commit. Every candidate snapshot is the same transport
+payload as `operate_commit_major`: `schema` = `mattervis.phone.snapshot.v1`,
+no top-level `revision`, and `provenance.effect_session_revision` set to
+that discarded session's output revision (2 after one commit from a newly
+registered source). The number cannot be passed back as `expected_revision`.
+The source file is not modified and is not replaced by any candidate;
+Android keeps the original.
 
 Result (JSON-serializable, `schema_version` 1):
 

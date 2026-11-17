@@ -186,7 +186,13 @@ def test_snapshot_and_cif_are_the_same_candidate(cif, tmp_path: Path):
             source_symbols[i] for i in candidate["kept_indices"]
         )
         assert snap["operation"] == "commit_disorder_candidate"
-        assert snap["revision"] == 2  # sibling of the source, not a chain
+        assert "revision" not in snap
+        assert snap["schema"] == "mattervis.phone.snapshot.v1"
+        # One commit in a discarded session (source rev 1 -> 2), not a chain.
+        assert snap["provenance"] == {
+            "operation": "commit_disorder_candidate",
+            "effect_session_revision": 2,
+        }
         assert np.allclose(snap["cell"], source["cell"], atol=1e-9)
         out = tmp_path / f"{candidate['candidate_id']}.cif"
         out.write_text(candidate["cif"], encoding="utf-8")
@@ -312,8 +318,8 @@ def test_ordered_source_yields_one_candidate_without_fabrication(tmp_path: Path)
 def test_existing_api_is_unchanged(cif):
     assert str(inspect.signature(phone.analyze_cif)) == "(path: 'str | Path') -> 'dict[str, Any]'"
     assert str(inspect.signature(phone.display)) == (
-        "(snapshot: 'dict[str, Any]', *, disorder_group: 'str | int | None' = None) "
-        "-> 'dict[str, Any]'"
+        "(snapshot: 'dict[str, Any]', *, disorder_group: 'str | int | None' = None, "
+        "disorder_selection: 'Mapping[str, str | int] | None' = None) -> 'dict[str, Any]'"
     )
     assert str(inspect.signature(phone.operate_commit_major)) == "(path: 'str | Path') -> 'dict[str, Any]'"
     assert str(inspect.signature(phone.operate_commit_major_with_cif)) == (
@@ -324,7 +330,9 @@ def test_existing_api_is_unchanged(cif):
         warnings.simplefilter("ignore")
         major = operate_commit_major(cif)
         paired = operate_commit_major_with_cif(cif)
-    assert paired["snapshot"] == major and major["revision"] == 2
+    assert paired["snapshot"] == major
+    assert "revision" not in major
+    assert major["provenance"]["effect_session_revision"] == 2
     assert set(major) == set(snapshot_before)  # candidates reuse the same shape
     assert {"CandidateRequestError", "CandidatePayloadError", "generate_disorder_candidates"} <= set(
         phone.__all__
