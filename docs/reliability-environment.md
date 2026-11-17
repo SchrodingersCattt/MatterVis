@@ -59,7 +59,10 @@ signatures.
 
 Every install job uses the git commit in `pyproject.toml`:
 
-`0702ed8d8276b9b9adf8bd17a24b32fd2e04a9d0`
+`0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4`
+
+That commit merges Mercury `read_mryx` `0702ed8d` with lightweight CIF /
+phone-site `9616debf`. Neither parent is a valid substitute.
 
 The checkout version is derived from git tags by setuptools_scm. The fast-job window check
 still requires the installed version to be at least 0.8.0 and below

@@ -28,13 +28,12 @@ dependencies = [
     "matplotlib",
     "pillow",
     "ase",
-    # Pin the shared Mercury IO implementation as well as the existing
-    # BondRecord.role/connectivity/disorder APIs until a release includes them.
-    # Merge the corresponding upstream change before this downstream adapter.
-    # Do not invent a PyPI version for an unreleased commit.
+    # Pin the merge of Mercury read_mryx (0702ed8d) and the lightweight CIF /
+    # phone-site commit (9616debf), plus BondRecord.role/connectivity/disorder.
+    # Do not pin either parent alone, and do not invent a PyPI version.
     # identify_molecules defaults to as_refined; shell construction defaults
     # to major. Exclusive shell selection keeps whole orientations.
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@0702ed8d8276b9b9adf8bd17a24b32fd2e04a9d0",
+    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4",
 ]
 
 [project.scripts]

@@ -157,9 +157,19 @@ def test_iteration_parses_the_whole_document(monkeypatch, mryx_path):
 
 
 def test_missing_upstream_is_actionable(monkeypatch, mryx_path):
-    import molcrys_kit.io
+    import molcrys_kit.io as io
 
-    monkeypatch.delattr(molcrys_kit.io, "read_mryx_atoms")
+    # The shared pin exports readers lazily. Removing the name from the
+    # table, and from the module dict if a previous call cached it, is what
+    # an older checkout without read_mryx_atoms looks like.
+    exports = {
+        name: target
+        for name, target in io._EXPORTS.items()
+        if name != "read_mryx_atoms"
+    }
+    monkeypatch.setattr(io, "_EXPORTS", exports)
+    if "read_mryx_atoms" in io.__dict__:
+        monkeypatch.delattr(io, "read_mryx_atoms")
     with pytest.raises(ValueError, match="declared MolCrysKit dependency"):
         read_mryx_frames(mryx_path)
 

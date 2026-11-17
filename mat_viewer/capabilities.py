@@ -31,9 +31,11 @@ MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 # runtime requirements; released installs stay on this range once the
 # role/regime API is published.
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
-# Development pin for shared Mercury IO and disorder APIs. pyproject.toml must
-# name this same commit. Restore a release range once the API is on PyPI.
-MOLCRYSKIT_SOURCE_COMMIT = "0702ed8d8276b9b9adf8bd17a24b32fd2e04a9d0"
+# Development pin shared by Mercury import and the phone snapshot.
+# It merges Mercury read_mryx commit 0702ed8d with lightweight CIF /
+# phone-site commit 9616debf. pyproject.toml must name this same commit.
+# Restore a release range once those APIs are on PyPI.
+MOLCRYSKIT_SOURCE_COMMIT = "0c9cecd93cfd6c0a1cccff0f13c2755107d8cef4"
 MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
     "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
     f"{MOLCRYSKIT_SOURCE_COMMIT}"
