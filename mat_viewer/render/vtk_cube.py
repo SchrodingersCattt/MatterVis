@@ -21,13 +21,15 @@ They are not taken from the opposite side unless ``periodic`` is true.
 PyVista's depth-peeling probe opens a second window and aborted the
 interpreter on headless Linux when no display, OSMesa, or EGL library was
 available. This module selects a window class before creating one, and it
-enables peeling on the figure window only.
+enables peeling on the figure window only. Windows and macOS use the native
+VTK window class and do not consult ``DISPLAY``.
 """
 
 from __future__ import annotations
 
 import ctypes.util
 import os
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
@@ -67,6 +69,23 @@ _ATOM_SPECULAR_POWER = 20
 _ATOM_AMBIENT = 0.85
 _ATOM_DIFFUSE = 0.4
 _RENDERER_AMBIENT = (1.0, 1.0, 1.0)
+# Desktop platforms render offscreen through the native VTK window. They do
+# not set DISPLAY, and a missing OSMesa/EGL library is not a failure there.
+_NATIVE_OPENGL_WINDOW = {
+    "win32": "vtkWin32OpenGLRenderWindow",
+    "darwin": "vtkCocoaOpenGLRenderWindow",
+}
+# Corner cycle, fractional axis, and side. side=-1 is the f=0 face and
+# side=+1 is the f=1 face. Outward normals come from the reciprocal lattice,
+# not from this winding.
+_CELL_FACES = (
+    ((0, 2, 6, 3), 0, -1),
+    ((1, 4, 7, 5), 0, 1),
+    ((0, 1, 5, 3), 1, -1),
+    ((2, 4, 7, 6), 1, 1),
+    ((0, 1, 4, 2), 2, -1),
+    ((3, 5, 7, 6), 2, 1),
+)
 
 
 def render_cube_figure(
@@ -135,7 +154,8 @@ def render_cube_figure(
     coefficients are separate. VTK's specular power is the Phong exponent.
     Pass ``cell_origin`` and ``cell_vectors`` (three lattice rows) to draw
     cell edges. ``cell_edge_mode="box"`` draws all twelve edges;
-    ``"face"`` draws only the face most facing the camera (no depth edges).
+    ``"face"`` draws the face whose outward normal points toward the camera,
+    so opposite ``look`` directions select opposite faces.
     Omit both cell arguments to leave the box off. ``bond_color=None``
     draws each half of a bond in the endpoint atom color; a single RGB triple
     keeps a uniform stick.
@@ -337,15 +357,10 @@ def _cell_box(origin, vectors) -> tuple[np.ndarray, np.ndarray] | None:
     return corner, lattice
 
 
-def _cell_edge_polydata(
-    pv,
-    origin: np.ndarray,
-    vectors: np.ndarray,
-    *,
-    look: np.ndarray | None = None,
-    mode: str = "box",
-):
-    corners = np.array(
+def _cell_corners(origin: np.ndarray, vectors: np.ndarray) -> np.ndarray:
+    """Eight corners of a parallelepiped whose lattice vectors are rows."""
+
+    return np.array(
         [
             origin,
             origin + vectors[0],
@@ -358,6 +373,43 @@ def _cell_edge_polydata(
         ],
         dtype=float,
     )
+
+
+def _camera_face(vectors: np.ndarray, direction: np.ndarray) -> tuple[int, ...]:
+    """Return the face whose outward normal points toward the camera.
+
+    ``direction`` points from the camera toward the scene. The outward normal
+    of the f=0 face points against that fractional axis, and the f=1 face
+    points along it, including left-handed cells. The near face maximizes
+    the alignment of that outward normal with ``-direction``.
+    """
+
+    inverse = np.linalg.inv(np.asarray(vectors, dtype=float))
+    best_face = None
+    best_score = -np.inf
+    for cycle, axis, side in _CELL_FACES:
+        outward = float(side) * np.asarray(inverse[axis], dtype=float)
+        length = float(np.linalg.norm(outward))
+        if length < 1.0e-12:
+            continue
+        score = float(np.dot(outward / length, -direction))
+        if score > best_score:
+            best_score = score
+            best_face = cycle
+    if best_face is None:
+        raise ValueError("cell faces are degenerate")
+    return best_face
+
+
+def _cell_edge_polydata(
+    pv,
+    origin: np.ndarray,
+    vectors: np.ndarray,
+    *,
+    look: np.ndarray | None = None,
+    mode: str = "box",
+):
+    corners = _cell_corners(origin, vectors)
     edges = (
         (0, 1),
         (0, 2),
@@ -376,32 +428,10 @@ def _cell_edge_polydata(
         if look is None:
             raise ValueError("cell_edge_mode='face' requires look")
         direction = np.asarray(look, dtype=float)
-        direction = direction / np.linalg.norm(direction)
-        # Six faces as (corner index quad, edge-pair axes into the face).
-        faces = (
-            (0, 1, 4, 2),  # constant 0 along c*? no: o,a,a+b,b  (no c)
-            (3, 5, 7, 6),  # +c
-            (0, 1, 5, 3),  # o,a,a+c,c (no b)
-            (2, 4, 7, 6),  # +b
-            (0, 2, 6, 3),  # o,b,b+c,c (no a)
-            (1, 4, 7, 5),  # +a
-        )
-        best_i = 0
-        best_dot = -1.0
-        for index, face in enumerate(faces):
-            u = corners[face[1]] - corners[face[0]]
-            v = corners[face[3]] - corners[face[0]]
-            normal = np.cross(u, v)
-            norm = float(np.linalg.norm(normal))
-            if norm < 1.0e-12:
-                continue
-            normal = normal / norm
-            # Face whose normal aligns with the view (either side).
-            score = abs(float(np.dot(normal, direction)))
-            if score > best_dot:
-                best_dot = score
-                best_i = index
-        face = faces[best_i]
+        norm = float(np.linalg.norm(direction))
+        if norm < 1.0e-12:
+            raise ValueError("cell_edge_mode='face' requires a non-zero look")
+        face = _camera_face(vectors, direction / norm)
         edges = (
             (face[0], face[1]),
             (face[1], face[2]),
@@ -617,12 +647,17 @@ def _shared_library(name: str) -> str | None:
 def _prepare_vtk_window() -> None:
     """Select an offscreen window class before VTK creates one.
 
-    A headless process with no OSMesa or EGL library segfaults inside
+    A headless Linux process with no OSMesa or EGL library segfaults inside
     ``vtkRenderWindow.Render``. The failure cannot be caught, and a thread
-    timeout cannot interrupt it.
+    timeout cannot interrupt it. Windows and macOS do not set ``DISPLAY``;
+    their native VTK window classes render offscreen without OSMesa or EGL.
     """
 
     if os.environ.get("VTK_DEFAULT_OPENGL_WINDOW"):
+        return
+    native = _NATIVE_OPENGL_WINDOW.get(sys.platform)
+    if native is not None:
+        os.environ["VTK_DEFAULT_OPENGL_WINDOW"] = native
         return
     if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
         return
@@ -634,7 +669,8 @@ def _prepare_vtk_window() -> None:
         return
     raise RuntimeError(
         "render_cube_figure needs a display or an offscreen OpenGL library "
-        "(OSMesa or EGL). On headless Linux install the OSMesa package "
+        "(OSMesa or EGL) on Linux. Windows and macOS use the native VTK "
+        "window. On headless Linux install the OSMesa package "
         "(Debian/Ubuntu: libosmesa6). MatterVis does not install system "
         "libraries. Set VTK_DEFAULT_OPENGL_WINDOW to choose a window class "
         "this VTK build provides."
@@ -691,20 +727,7 @@ def _draw(
 
     cell_points = np.empty((0, 3))
     if cell_box is not None:
-        corner, lattice = cell_box
-        cell_points = np.array(
-            [
-                corner,
-                corner + lattice[0],
-                corner + lattice[1],
-                corner + lattice[2],
-                corner + lattice[0] + lattice[1],
-                corner + lattice[0] + lattice[2],
-                corner + lattice[1] + lattice[2],
-                corner + lattice[0] + lattice[1] + lattice[2],
-            ],
-            dtype=float,
-        )
+        cell_points = _cell_corners(*cell_box)
     center, radius = _scene_extent(
         np.vstack([np.asarray(mesh.points), cell_points])
         if len(cell_points)
