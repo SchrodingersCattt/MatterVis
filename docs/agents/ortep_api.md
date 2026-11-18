@@ -8,7 +8,12 @@ MatterVis supports two ORTEP-style paths:
   Dash viewer this path includes a hidden Plotly 3D camera anchor; orbit events
   are converted back to the flat renderer's `view_direction`/`up` basis and
   refresh the embedded image. Static Matplotlib export remains unchanged.
-  derived from the camera projection.
+  The anchor's `layout.scene.camera` is a Plotly camera (`eye`, `center`,
+  `up`, and optional `projection`). A stored legacy `position` /
+  `focal_point` camera is converted before that layout is built. A
+  zero-length look vector uses the existing finite eye fallback. Non-finite
+  components are left for Plotly to reject. The stored scene camera is not
+  rewritten by the figure build.
 
 The CIF parser reads `_atom_site_aniso_U_*` into `atom["U"]`; missing
 anisotropic data falls back to `_atom_site_U_iso_or_equiv`.

@@ -530,7 +530,7 @@ class _CameraBackendMixin:
                 zaxis=dict(visible=False),
                 bgcolor="white",
                 dragmode="orbit",
-                camera=camera or _plotly_camera(scene.get("camera")),
+                camera=_flat_ortep_layout_camera(camera, scene),
                 uirevision=style.get("uirevision", "flat-ortep"),
             ),
             xaxis=dict(visible=False, range=[0, 1]),

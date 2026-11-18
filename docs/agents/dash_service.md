@@ -141,6 +141,10 @@ Notes for callers:
   figure still belongs to another scene receives the selected scene's
   complete frame instead. Flat ORTEP still rebuilds its image when the
   camera changes, because the camera basis is rasterized into that image.
+  That figure's Plotly scene camera is `eye` / `center` / `up`. A stored
+  `position` / `focal_point` camera is converted before the layout is
+  built; the stored mapping itself is left unchanged. A zero-length look
+  vector uses the existing finite eye fallback.
 - `pending_state` is armed for a broadcast write to the active scene
   (REST `POST /state`, WebSocket `set_state`, and external `/intent`
   calls). The existing agent-state poll writes the matching page's

@@ -138,6 +138,71 @@ def _plotly_camera(camera: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
     return converted
 
 
+_PLOTLY_SCENE_CAMERA_KEYS = ("eye", "center", "up", "projection")
+
+
+def _finite_camera_vector(raw: Any) -> bool:
+    if isinstance(raw, dict):
+        try:
+            values = (float(raw["x"]), float(raw["y"]), float(raw["z"]))
+        except (KeyError, TypeError, ValueError):
+            return False
+    else:
+        try:
+            values = tuple(float(value) for value in raw)
+        except (TypeError, ValueError):
+            return False
+        if len(values) != 3:
+            return False
+    return all(bool(np.isfinite(value)) for value in values)
+
+
+def _plotly_scene_camera(camera: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Return a Plotly ``layout.scene.camera`` mapping.
+
+    ``_plotly_camera`` turns a legacy ``position`` / ``focal_point`` camera
+    into ``eye`` / ``center`` / ``up``. Plotly rejects those legacy keys, so
+    the mapping copied here keeps only the scene-camera properties. A
+    zero-length look vector stays on the finite fallback inside
+    ``_plotly_camera``. A present non-finite component raises ``ValueError``
+    instead of being replaced with another camera.
+    """
+    if not isinstance(camera, dict):
+        return None
+    for key in ("position", "focal_point", "eye", "center", "up"):
+        if key not in camera or camera[key] is None:
+            continue
+        if not _finite_camera_vector(camera[key]):
+            raise ValueError(f"camera {key} must be a finite 3-vector")
+    converted = _plotly_camera(camera)
+    if not isinstance(converted, dict) or "eye" not in converted:
+        return None
+    if not _finite_camera_vector(converted["eye"]):
+        raise ValueError("camera eye must be a finite 3-vector")
+    return {
+        key: copy.deepcopy(converted[key])
+        for key in _PLOTLY_SCENE_CAMERA_KEYS
+        if key in converted
+    }
+
+
+def _flat_ortep_layout_camera(
+    camera: Optional[dict[str, Any]],
+    scene: Optional[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """Plotly camera for the flat ORTEP anchor.
+
+    Prefer the caller's camera, then the scene camera. Legacy
+    position/focal mappings are converted. ``None`` means the figure
+    should omit the camera rather than forward an unusable mapping.
+    """
+    chosen = _plotly_scene_camera(camera)
+    if chosen is not None:
+        return chosen
+    scene_camera = scene.get("camera") if isinstance(scene, dict) else None
+    return _plotly_scene_camera(scene_camera if isinstance(scene_camera, dict) else None)
+
+
 def _relayout_touches_camera(relayout_data: Optional[dict[str, Any]]) -> bool:
     if not isinstance(relayout_data, dict):
         return False
