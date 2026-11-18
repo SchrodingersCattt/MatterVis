@@ -217,12 +217,18 @@ Not strictly a *score* but a very useful geometric summary for visualisation:
 | `vertices` | `list[list[float]]` | Cartesian coordinates of every shell atom |
 | `simplices` | `list[list[int]]` | triangle indices of the convex hull |
 | `edges` | `list[list[int]]` | unique undirected edges of the hull |
+| `degenerate` | bool, optional | present when the points do not span a 3D polyhedron |
+| `reason` | str, optional | `not_a_3d_polyhedron` for that flat shell |
 
 The renderer draws `hull.simplices` as a translucent mesh and `hull.edges` as
 a thick line trace to produce the purple polyhedra in the README screenshots.
 If `scipy.spatial.ConvexHull` is unavailable the hull gracefully falls back
 to `{vertices: [...], simplices: [], edges: []}` and only the vertices are
-shown.
+shown. Coplanar or collinear ligands make Qhull raise `QhullError` instead.
+MatterVis then returns the same empty face list with `degenerate: true` and
+does not assign a 3D shape label. The coordination number and ligand
+coordinates stay as MolCrysKit reported them. A hull Qhull accepts is
+unchanged.
 
 ---
 

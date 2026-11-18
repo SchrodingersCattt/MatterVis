@@ -418,10 +418,21 @@ def compute_topology_geometry(
                 }
             )
             if atom_centers and not any(_overlay_drawable_hull_size(item) for item in overlays):
-                warnings.append(
-                    f"{spec.get('name') or center_species}: no drawable polyhedron for "
-                    f"{center_species} -> {ligand}; need at least 4 non-coplanar ligand points."
+                max_shell = max(
+                    (len(item.get("shell_coords") or []) for item in overlays),
+                    default=0,
                 )
+                if max_shell >= 4:
+                    warnings.append(
+                        f"{spec.get('name') or center_species}: no 3D polyhedron for "
+                        f"{center_species} -> {ligand}; {max_shell} ligand positions "
+                        "are coplanar or collinear, so no faces were generated."
+                    )
+                else:
+                    warnings.append(
+                        f"{spec.get('name') or center_species}: no drawable polyhedron for "
+                        f"{center_species} -> {ligand}; need at least 4 non-coplanar ligand points."
+                    )
             continue
         candidate_fragments = [
             frag
@@ -537,11 +548,19 @@ def compute_topology_geometry(
         if center_fragments and drawable_count == 0:
             max_shell = max((len(overlay.get("shell_coords") or []) for overlay in overlays), default=0)
             mode = "Gap + enclosure" if enforce_enclosure else "Gap only"
-            warnings.append(
-                f"{spec.get('name') or center_species}: no drawable polyhedron for "
-                f"{center_species} -> {ligand or '(auto)'} ({mode}); "
-                f"largest shell has {max_shell} ligand point(s), need at least 4 non-coplanar points."
-            )
+            if max_shell >= 4:
+                warnings.append(
+                    f"{spec.get('name') or center_species}: no 3D polyhedron for "
+                    f"{center_species} -> {ligand or '(auto)'} ({mode}); "
+                    f"{max_shell} ligand positions are coplanar or collinear, "
+                    "so no faces were generated."
+                )
+            else:
+                warnings.append(
+                    f"{spec.get('name') or center_species}: no drawable polyhedron for "
+                    f"{center_species} -> {ligand or '(auto)'} ({mode}); "
+                    f"largest shell has {max_shell} ligand point(s), need at least 4 non-coplanar points."
+                )
         elif len(center_fragments) < len(candidate_fragments):
             warnings.append(
                 f"{spec.get('name') or center_species}: collapsed "

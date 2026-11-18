@@ -141,6 +141,17 @@ If the chosen policy still has fewer than four non-coplanar ligand points,
 returns the empty shell and `gap_info.rejection_reason` instead of raising,
 so an analysis card can show the miss.
 
+Four or more ligands can still fail to be a polyhedron when they are
+coplanar or collinear. MolCrysKit `convex_hull_payload` asks Qhull for a
+volume and raises `QhullError` (QH6154) on that flat set. MatterVis keeps
+the ligand coordinates and coordination number MolCrysKit reported, stores
+`hull.simplices = []` and `hull.edges = []`, and sets `hull.degenerate` plus
+`hull.reason = "not_a_3d_polyhedron"`. `gap_info.rejection_reason` is
+`not_a_3d_polyhedron` when MolCrysKit did not already record a rejection.
+The shape card does not assign a 3D catalogue label. The analysis text says
+that no faces were generated. A shell Qhull accepts, including an
+octahedron with continuous shape measure 0, is unchanged.
+
 A JSON `disorder_policy` on one CLI `--polyhedron` object overrides
 `--polyhedron-disorder` for that overlay. Unknown values are rejected.
 
