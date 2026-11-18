@@ -392,6 +392,8 @@ def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
     Supports today:
     - ``{"all": True}`` -- match every atom in the scene.
     - ``{"elements": ["O", "S"]}`` -- element symbol filter.
+    - ``{"elements": []}`` -- in-progress by-element edit. Matches nothing
+      and is kept so the picker can be filled in.
     - ``{"is_minor": True/False}`` -- disorder major/minor flag.
     - ``{"labels": ["Pb1", "Cl3"]}`` -- exact atom label list (post-Phase 4
       AI API affordance: the selector that survived a structure transform
@@ -471,6 +473,12 @@ def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
                 continue
         if cleaned_mi:
             selector["molecule_indices"] = cleaned_mi
+    # ``{"elements": []}`` is the in-progress "by element" edit. Keeping it
+    # leaves the picker on screen and matches no atoms. A list that still
+    # has symbols was stored above. Empty lists beside another real key
+    # stay dropped so they cannot AND-exclude that key.
+    if not selector and isinstance(raw.get("elements"), (list, tuple)):
+        selector["elements"] = []
     return selector or None
 
 
@@ -481,6 +489,8 @@ def _coerce_bond_selector(raw: Any) -> Optional[dict[str, Any]]:
     - ``{"all": True}`` -- every bond.
     - ``{"between_elements": ["O", "H"]}`` -- bonds whose endpoint
       elements form an unordered match against the listed pair / triple.
+    - ``{"between_elements": []}`` -- in-progress endpoint edit. Matches
+      nothing and is not rewritten to ``{"all": True}``.
       A length-2 list matches O-H or H-O; a length-1 list (e.g. ``["O"]``)
       matches O-X for any second element. Length 3+ uses a "both ends in
       the set" rule (useful for picking out e.g. M-X bonds where X is
@@ -513,6 +523,11 @@ def _coerce_bond_selector(raw: Any) -> Optional[dict[str, Any]]:
             selector["labels"] = cleaned
     if "is_minor" in raw:
         selector["is_minor"] = bool(raw["is_minor"])
+    # ``{"between_elements": []}`` is the in-progress endpoint edit. It must
+    # not collapse to ``{"all": True}``. Empty lists beside another real key
+    # stay dropped, matching the atom-selector rule above.
+    if not selector and isinstance(raw.get("between_elements"), (list, tuple)):
+        selector["between_elements"] = []
     return selector or None
 
 
