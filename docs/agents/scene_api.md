@@ -78,7 +78,14 @@ statistics. The caller owns any temporal continuity rule that selects entries.
 ### `mat_viewer.scene.build_scene_from_cif(...)`
 
 Parses a CIF and returns a scene dict consumable by
-`mat_viewer.renderer.build_figure`. Honours `display_mode`:
+`mat_viewer.renderer.build_figure`. When the preset does not supply a
+camera or `view_direction`, `mat_viewer.viewpoint.auto_view_dir` chooses
+the initial direction. A scored coordinate set with fewer than three
+singular vectors, including one point, keeps the vectors that exist and
+fills the missing axes with the coordinate axes so scoring can finish.
+Fewer than three non-hydrogen major atoms keep the fixed fallback
+direction `(0.174, 0.985, 0)` and up `(0, 0, 1)`. This is a geometric
+limit of the decomposition, not an element rule. Honours `display_mode`:
 
 - `formula_unit` (default) — single formula unit centred in the cell.
   Per-species counts come from MolCrysKit's
