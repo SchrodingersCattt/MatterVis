@@ -49,18 +49,22 @@ def _eye(figure: dict) -> dict:
     return figure["layout"]["scene"]["camera"]["eye"]
 
 
-def test_delivered_figure_keeps_a_drag_that_does_not_bump_revision(tmp_path: Path):
+def test_published_figure_is_not_rewritten_by_a_later_orbit(tmp_path: Path):
+    """The journal returns the camera that was broadcast.
+
+    An orbit stores a new eye without a new revision. That must not
+    replace the published snapshot. The browser paints the later eye
+    from ``camera-state-store``.
+    """
     backend = _backend(tmp_path)
     try:
         scene_id = backend.active_scene_id()
         state = backend.get_state(scene_id)
-        figure, topology = backend.figure_for_state(state)
-        backend.broadcast_figure(
-            scene_id=scene_id,
-            figure=figure.to_plotly_json(),
-            topology_data=topology,
-            state=state,
-        )
+        published = {
+            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+            "layout": {"scene": {"camera": {"eye": {"x": 1, "y": 1, "z": 1}}}},
+        }
+        backend.broadcast_figure(scene_id=scene_id, figure=published, state=state)
         revision = int(state.get("camera_revision", 0) or 0)
         backend.patch_state({"camera": FRAMED}, scene_id=scene_id, broadcast=False)
         stored = backend.get_state(scene_id)
@@ -68,9 +72,8 @@ def test_delivered_figure_keeps_a_drag_that_does_not_bump_revision(tmp_path: Pat
         assert stored["camera"]["eye"]["x"] == FRAMED["eye"]["x"]
         delivered = backend.latest_figure_broadcast(scene_id)
         assert delivered is not None
-        assert _eye(delivered["figure"])["x"] == FRAMED["eye"]["x"]
-        assert _eye(delivered["figure"])["y"] == FRAMED["eye"]["y"]
-        assert delivered["figure"]["layout"]["scene"]["camera"]["center"]["y"] == FRAMED["center"]["y"]
+        assert _eye(delivered["figure"])["x"] == 1
+        assert delivered["figure"] == published
     finally:
         backend.close()
 

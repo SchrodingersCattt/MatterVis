@@ -35,52 +35,11 @@ class _JournalBackendMixin:
     def _copy_current(self, refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         snapshot = [copy.deepcopy(payload) for payload in refs]
         states = self._journal_current_states(snapshot)
-        current = [
+        return [
             payload
             for payload in snapshot
             if self._journal_payload_is_current(payload, states)
         ]
-        for payload in current:
-            self._stamp_delivered_camera(payload, states)
-        return current
-
-    def _stamp_delivered_camera(
-        self,
-        payload: dict[str, Any],
-        states: dict[str, Optional[dict[str, Any]]],
-    ) -> None:
-        """Put the stored camera on a journal copy before it is delivered.
-
-        An ordinary drag writes ``state["camera"]`` and leaves
-        ``camera_revision`` unchanged, so the journaled figure still
-        carries the camera from the last complete frame. Returning to
-        the scene paints that figure. The copy is already detached from
-        the journal. A camera that does not frame the scene is replaced
-        here the same way ``figure_for_state`` replaces it; the tab
-        switch persists that replacement separately.
-        """
-        figure = payload.get("figure")
-        if not isinstance(figure, dict):
-            return
-        scene_id = payload.get("scene_id")
-        state = states.get(str(scene_id)) if scene_id else None
-        if not isinstance(state, dict):
-            return
-        try:
-            scene = self.scene_for_state(state)
-            style = self.style_for_state(state, scene=scene)
-            camera = self._layout_camera(state, scene, style)
-        except (KeyError, ValueError, OSError, TypeError):
-            return
-        if not isinstance(camera, dict):
-            return
-        layout = figure.get("layout")
-        if not isinstance(layout, dict):
-            return
-        scene_layout = layout.get("scene")
-        if not isinstance(scene_layout, dict):
-            return
-        scene_layout["camera"] = copy.deepcopy(camera)
 
     def _journal_current_states(
         self, payloads: list[dict[str, Any]]
