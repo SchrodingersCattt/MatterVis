@@ -1322,6 +1322,26 @@
     return false;
   }
 
+  function selectCommittedScene(status) {
+    // The committing page receives the operate status. A catalog with
+    // focus:false must not move every other open page onto the result.
+    var text = status === null || status === undefined ? "" : String(status);
+    var matched = /in scene (scene_[0-9a-f]{12})/.exec(text);
+    if (!matched) {
+      return window.dash_clientside ? window.dash_clientside.no_update : undefined;
+    }
+    var nextId = matched[1];
+    if (typeof window.MatterVisSelectScene === "function") window.MatterVisSelectScene(nextId);
+    if (typeof flushQueuedSceneFigure === "function") {
+      flushQueuedSceneFigure(nextId);
+      [0, 50, 250].forEach(function (delay) {
+        setTimeout(function () { flushQueuedSceneFigure(nextId); }, delay);
+      });
+    }
+    return nextId;
+  }
+  window.MatterVisSelectCommittedScene = selectCommittedScene;
+
   function claimOwnDuplicatedScene(message) {
     // Catalog publication uses focus:false so other open pages keep their
     // tab. The page that clicked Duplicate still has to land on the new

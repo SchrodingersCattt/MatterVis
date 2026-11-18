@@ -75,6 +75,12 @@ must not change scene B, and a stale revision must not replace a newer one.
   pages keep their selected tab. The page that clicked Duplicate selects
   that catalog's `active_id` and flushes the copy's parked frame. The
   catalog flag is not turned on, so the selection stays on that page.
+- Committing a structural supercell also leaves the catalog at `focus: false`.
+  The page that clicked Commit reads the result scene id from its own
+  operate status and selects that scene. A later catalog does not move a
+  page that did not click Commit. The status names the shared-history
+  operand. A visible scene whose revision is not that operand is refused
+  instead of multiplying the current revision while the old scene stays open.
 
 ## Root causes
 

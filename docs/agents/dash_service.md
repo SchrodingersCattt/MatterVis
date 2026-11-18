@@ -155,8 +155,12 @@ Notes for callers:
   display name comes from this catalog event; tab text is a projection. The
   selected tab stays put, except on the page that clicked Duplicate:
   that page selects the catalog `active_id` locally. `focus` stays
-  false for create, rename, delete, reorder, duplicate, and undo, so
-  other open pages do not move. `POST /scenes/active` and a
+  false for create, rename, delete, reorder, duplicate, undo, and a
+  structural supercell commit, so other open pages do not move. The
+  page that clicked Commit selects the result scene named in its
+  operate status. That status includes the shared-history operand
+  revision. An older visible revision is refused and names both
+  revisions. `POST /scenes/active` and a
   `set_active_scene` intent set `focus: true` and move every open tab.
   Deleting the selected scene moves the page to the scene that remains
   active.

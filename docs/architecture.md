@@ -109,9 +109,13 @@ those journal envelopes over the existing WebSocket, falling back to
 `GET /api/v2/view-updates`. Scene-list changes travel in the same snapshot
 and journal as `scene_catalog`. The page rebuilds the existing tab strip
 and keeps the selected tab unless the caller explicitly focuses a scene,
-the selected scene has been removed, or this page clicked Duplicate. That
-click selects the new scene on this page only. Other pages keep their tab
-because the catalog is published with `focus: false`. Control widgets follow the existing
+the selected scene has been removed, this page clicked Duplicate, or this
+page committed a structural supercell. Duplicate and Commit each select
+the new scene on this page only. Other pages keep their tab because the
+catalog is published with `focus: false`. Commit names the shared-history
+operand revision. When the visible scene is an older revision of that
+same structure, Commit does not run and the status names both revisions.
+Control widgets follow the existing
 agent-state poll, which re-reads the selected scene when its version clocks
 move. In-process GUI edits that already own the gesture do not echo that
 gesture back through the poll.

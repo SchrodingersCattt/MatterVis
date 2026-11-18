@@ -31,6 +31,11 @@ snapshot = session.snapshot(result.output_ref)
 
 `expected_revision` must match the current revision. A candidate built
 against an older revision is rejected and does not change history.
+Duplicate scenes share that structure id. The Dash Commit button passes
+the current revision only when the visible scene is that revision. The
+committing page then selects the new result scene. Other open pages keep
+their tab. A click on an older view names both revisions and does not
+commit.
 Revision numbers are monotonic for a structure frame. Undo does not
 make the next commit reuse a retired number, so two scientific
 structures never share one `StructureRef`.
