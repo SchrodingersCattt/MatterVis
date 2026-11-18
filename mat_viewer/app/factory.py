@@ -225,7 +225,10 @@ def _create_app(
                     dcc.Store(
                         id="camera-state-store",
                         data=_camera_store_payload(
-                            first_state.get("scene_id"), first_state.get("camera")
+                            first_state.get("scene_id"),
+                            first_state.get("camera"),
+                            camera_revision=first_state.get("camera_revision"),
+                            scene_generation=first_state.get("scene_generation"),
                         ),
                     ),
                     dcc.Store(id="camera-capture-store", data=None),
@@ -314,7 +317,10 @@ def _create_app(
                 dcc.Store(
                     id="camera-state-store",
                     data=_camera_store_payload(
-                        first_state.get("scene_id"), first_state.get("camera")
+                        first_state.get("scene_id"),
+                        first_state.get("camera"),
+                        camera_revision=first_state.get("camera_revision"),
+                        scene_generation=first_state.get("scene_generation"),
                     ),
                 ),
                 dcc.Store(id="camera-capture-store", data=None),
@@ -328,7 +334,10 @@ def _create_app(
                         backend,
                         first_state,
                         _camera_store_payload(
-                            first_state.get("scene_id"), first_state.get("camera")
+                            first_state.get("scene_id"),
+                            first_state.get("camera"),
+                            camera_revision=first_state.get("camera_revision"),
+                            scene_generation=first_state.get("scene_generation"),
                         ),
                     ),
                     style={"display": "none"},

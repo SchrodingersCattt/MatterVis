@@ -654,6 +654,46 @@
     window.__mvNoteInProgressDrag = noteInProgressDrag;
     window.__mvRestoreInProgressDrag = restoreInProgressDrag;
     window.__mvRetireDragSample = retireDragSample;
+    /* A drag stores the eye without a new camera_revision. The last full
+     * figure still has the previous pose, and a same-revision react keeps
+     * whatever camera was painted first. The store names the pose the
+     * server accepted, including a later refit of a clipped camera. */
+    function applyServerCamera(sceneId) {
+      const book = window.__mvServerCameraByScene;
+      const ack = book && book[String(sceneId || "")];
+      const gd = graphDiv();
+      if (!ack || !ack.camera || !gd || !window.Plotly || gd.__mvApplyingServerCamera) return Promise.resolve();
+      const render = renderMetadataFromLayout(gd.layout);
+      if (!render || String(render.scene_id || "") !== String(sceneId)) return Promise.resolve();
+      if (sameSceneDragInProgress(gd)) return Promise.resolve();
+      if (ack.scene_generation !== undefined && ack.scene_generation !== null &&
+          render.scene_generation !== undefined && render.scene_generation !== null &&
+          String(ack.scene_generation) !== String(render.scene_generation)) return Promise.resolve();
+      const ackRevision = Number(ack.camera_revision);
+      const shownRevision = Number(render.camera_revision || 0);
+      if (Number.isFinite(ackRevision) && ackRevision < shownRevision) return Promise.resolve();
+      const painted = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
+      if (painted && camerasClose(painted, ack.camera)) return Promise.resolve();
+      const patch = cameraOnlyPatch(ack.camera);
+      if (!patch) return Promise.resolve();
+      gd.__mvApplyingServerCamera = true;
+      window.__mvAllowCameraRelayout = true;
+      let pending = null;
+      try { pending = window.Plotly.relayout(gd, patch); }
+      catch (_) {
+        gd.__mvApplyingServerCamera = false;
+        window.__mvAllowCameraRelayout = false;
+        return Promise.resolve();
+      }
+      const clear = function () {
+        gd.__mvApplyingServerCamera = false;
+        window.__mvAllowCameraRelayout = false;
+      };
+      if (pending && typeof pending.then === "function") return pending.then(clear, clear);
+      clear();
+      return Promise.resolve();
+    }
+    window.__mvApplyServerCamera = applyServerCamera;
     /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
      * and calls setViewport. Dash keeps only the latest relayoutData, so that
      * size event can hide the offscreen camera payload and the replot can
@@ -826,7 +866,11 @@
               if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installCanvasRefit === "function") {
                 window.MatterVisViewCamera.installCanvasRefit(gd);
               }
-              return restoreInProgressDrag(gd).then(function () { return result; });
+              return restoreInProgressDrag(gd).then(function () {
+                const sceneId = render && render.scene_id ? String(render.scene_id) : "";
+                if (sceneId) return applyServerCamera(sceneId).then(function () { return result; });
+                return result;
+              });
             });
           };
           // Both Dash signatures and WS pass here. Retry after failures;
