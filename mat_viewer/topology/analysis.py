@@ -32,6 +32,7 @@ from .disorder_policy import (
     invoke_find_polyhedra,
     normalize_disorder_policy,
 )
+from .hull_payload import note_degenerate_hull, render_hull_payload
 from .mck_record import _mck_polyhedron_record
 
 # Dropdown and persisted rows may still carry the historical "(auto)" token.
@@ -127,44 +128,6 @@ def classify_fragments(bundle) -> list[dict[str, Any]]:
     return list(
         getattr(bundle, "topology_fragment_table", None) or bundle.fragment_table
     )
-
-
-def _render_hull_payload(shell_coords: Any) -> dict[str, Any]:
-    """Return a 3D hull, or an explicit non-polyhedron when Qhull rejects it.
-
-    MolCrysKit chooses the ligand coordinates. ``convex_hull_payload`` then
-    asks Qhull for a volume. Coplanar and collinear sets raise
-    ``QhullError`` (QH6154, the initial simplex is flat). That is a
-    geometric fact about the points already chosen, so the render payload
-    keeps those coordinates and emits no simplices or edges. It does not
-    invent a 3D polyhedron and it does not reclassify the chemistry.
-    """
-    coords = np.asarray(shell_coords, dtype=float)
-    if coords.size == 0:
-        coords = np.zeros((0, 3), dtype=float)
-    elif coords.ndim == 1:
-        coords = coords.reshape(1, -1)
-    try:
-        from scipy.spatial import QhullError
-    except ImportError:
-        return convex_hull_payload(coords)
-    try:
-        return convex_hull_payload(coords)
-    except QhullError:
-        vertices = coords.tolist() if coords.ndim == 2 and coords.shape[1:] == (3,) else []
-        return {
-            "vertices": vertices,
-            "simplices": [],
-            "edges": [],
-            "degenerate": True,
-            "reason": "not_a_3d_polyhedron",
-        }
-
-
-def _note_degenerate_hull(gap_info: dict[str, Any], hull: dict[str, Any]) -> None:
-    """Record a render rejection without erasing a chemistry rejection."""
-    if hull.get("degenerate") and not gap_info.get("rejection_reason"):
-        gap_info["rejection_reason"] = "not_a_3d_polyhedron"
 
 
 def _shift_hull_payload(
@@ -294,7 +257,7 @@ def extract_atom_coordination_shells(
             "distances": [
                 float(value) for value in record.get("shell_distances") or []
             ],
-            "source_hull": _render_hull_payload(shell_coords),
+            "source_hull": render_hull_payload(shell_coords),
         }
     return shells
 
@@ -415,7 +378,7 @@ def _extract_coordination_shell_static(
         source_center = np.array(center_fragment["center"], dtype=float)
         source_shell_coords = np.zeros((0, 3), dtype=float)
         shell_distances: list[float] = []
-        hull = _render_hull_payload(source_shell_coords)
+        hull = render_hull_payload(source_shell_coords)
         cn = 0
         # Empty-shell fallback: report the search radius MV asked for so
         # the analysis card can still render "search_cutoff: 10 Å, no
@@ -441,7 +404,7 @@ def _extract_coordination_shell_static(
         if source_shell_coords.size == 0:
             source_shell_coords = np.zeros((0, 3), dtype=float)
         shell_distances = [float(x) for x in record.get("shell_distances") or []]
-        hull = _render_hull_payload(source_shell_coords)
+        hull = render_hull_payload(source_shell_coords)
         cn = int(record.get("coordination_number", len(shell_distances)))
         # MCK PR #32 split the radial knobs at molecule level:
         # * ``record["search_cutoff"]`` is the candidate search radius
@@ -467,7 +430,7 @@ def _extract_coordination_shell_static(
             "disorder_policy": disorder_policy,
             "rejection_reason": record.get("rejection_reason"),
         }
-        _note_degenerate_hull(gap_info, hull)
+        note_degenerate_hull(gap_info, hull)
         extra_shells = []
         for extra in record.get("extra_shells") or []:
             coords = np.asarray(extra.get("shell_coords") or [], dtype=float)
@@ -482,7 +445,7 @@ def _extract_coordination_shell_static(
                     "distances": [
                         float(value) for value in extra.get("shell_distances") or []
                     ],
-                    "source_hull": _render_hull_payload(coords),
+                    "source_hull": render_hull_payload(coords),
                 }
             )
     # MolCrysKit reports shell members by source molecule index.  The
