@@ -204,15 +204,32 @@ async function main() {
     const pendingReset = page.waitForResponse((response) => response.url().includes("/api/v2/camera/action"), {timeout: 20000});
     await page.locator("#canvas-view-reset").click();
     await pendingReset;
-    await page.waitForFunction((fittedEye) => {
-      return fetch("/api/v2/state").then((response) => response.json()).then((state) => {
+    let stableReset = null;
+    let previousReset = null;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const shot = await page.evaluate(async (fittedEye) => {
+        const state = await fetch("/api/v2/state").then((response) => response.json());
+        const gd = document.querySelector("#crystal-graph .js-plotly-plot");
         const shot = window.__mvFitSnapshot();
-        if (!(Number(state.camera_aspect_scale || 1) === 1 && !state.fit_axis_ranges && shot)) return false;
+        if (!shot || !gd) return null;
+        if (!(Number(state.camera_aspect_scale || 1) === 1 && !state.fit_axis_ranges)) return null;
+        if (gd.__mvFittedRestoring) return null;
         const delta = Math.hypot(shot.eye[0] - fittedEye[0], shot.eye[1] - fittedEye[1], shot.eye[2] - fittedEye[2]);
         const length = Math.hypot(fittedEye[0], fittedEye[1], fittedEye[2]);
-        return delta / Math.max(length, 1e-6) > 0.02 && Math.abs(shot.aspect - 1) < 0.01 && shot.spans[0] > 1;
-      });
-    }, fitted.eye, {timeout: 20000});
+        if (!(delta / Math.max(length, 1e-6) > 0.02 && Math.abs(shot.aspect - 1) < 0.01 && shot.spans[0] > 1)) return null;
+        return shot;
+      }, fitted.eye);
+      if (shot && previousReset && JSON.stringify(shot) === JSON.stringify(previousReset)) {
+        stableReset = shot;
+        break;
+      }
+      previousReset = shot;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (!stableReset) fail("reset pose did not stay painted");
+    await page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
     const reset = await readLayout(page);
     const beforeShot = await page.evaluate(() => window.__mvFitSnapshot());
     await page.screenshot({path: `${outDir}/reset.png`});

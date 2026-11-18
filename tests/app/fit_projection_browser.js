@@ -286,6 +286,9 @@ async function main() {
         if (frame.projection !== projection) fail("painted projection " + frame.projection);
         if (!(frame.width > 200 && frame.height > 200)) fail("plot size " + frame.width + "x" + frame.height);
         const name = `${size.width}x${size.height}-${projection}.png`;
+        await page.evaluate(() => new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        }));
         const before = await page.evaluate(readCapture);
         await page.screenshot({ path: `${outDir}/${name}` });
         const after = await page.evaluate(readCapture);

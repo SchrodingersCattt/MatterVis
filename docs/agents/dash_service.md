@@ -367,8 +367,14 @@ Notes for callers:
   same ratio and data box, including a relayout echo that would otherwise
   leave the previous ratio on the layout.   A scene plot that finishes
   after that delivery, including a second Fit whose data box did not
-  change, still leaves this ratio on the layout. An older camera
-  revision for the same scene does not replace it. A new scene starts
+  change, still leaves this ratio on the layout.   A projection change
+  disposes the gl scene and assigns a new one before that plot's last
+  aspect write; the fitted ratio is applied on the replacement, so the
+  previous ratio is not the value that remains. A figure whose camera
+  revision is newer than the stored fit keeps that figure's ratio
+  instead of having the previous ratio stamped over it.   An older camera
+  revision for the same scene generation and server epoch does not
+  replace it. A new scene, scene generation, or server epoch starts
   its own camera clock. A state patch with a
   non-finite or non-positive aspect scale, or a fitted range that is not
   three finite non-empty intervals, does not change the stored Fit.

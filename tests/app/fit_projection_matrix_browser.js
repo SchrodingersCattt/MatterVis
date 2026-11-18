@@ -224,6 +224,9 @@ function readPaint() {
 async function capture(page, shots, name, projection, boundary, consoleErrors) {
   const frame = await fit(page, projection, boundary);
   if (frame.projection !== projection) fail(name + " projection " + frame.projection);
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   const before = await page.evaluate(readPaint);
   await page.screenshot({path: `${outDir}/${name}.png`});
   const after = await page.evaluate(readPaint);

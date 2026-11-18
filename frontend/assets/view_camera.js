@@ -254,13 +254,42 @@
     else front = 0.5 * (ax * Math.abs(dx) + ay * Math.abs(dy) + az * Math.abs(dz)) / dist;
     return front + PLOTLY_NEAR + PERSPECTIVE_ZOOM_FACE_MARGIN;
   }
-  function rememberFittedFrame(sceneId, ranges, aspectratio) {
+  function rememberFittedFrame(sceneId, ranges, aspectratio, revision) {
     if (!sceneId || !ranges) return;
     if (!root.__mvFittedFrames) root.__mvFittedFrames = {};
+    var revisionNumber = Number(revision);
     root.__mvFittedFrames[String(sceneId)] = {
       ranges: clone(ranges),
       aspectratio: aspectratio ? clone(aspectratio) : null,
+      revision: Number.isFinite(revisionNumber) ? revisionNumber : null,
     };
+  }
+  function noteFigureFrame(render, layout) {
+    /* A figure built for a newer Fit already carries that ratio. Stamping
+     * the previous frame over it is how an orthographic scale was lost
+     * when the camera message had not updated the frame yet. */
+    var sceneId = render && render.scene_id;
+    if (!sceneId || !root.__mvFittedFrames) return false;
+    var frame = root.__mvFittedFrames[String(sceneId)];
+    var incoming = Number(render && render.camera_revision);
+    var frameRevision = frame && Number(frame.revision);
+    var scene = layout && layout.scene;
+    var figureAspect = scene && scene.aspectratio;
+    if (!frame || !Number.isFinite(frameRevision) || !Number.isFinite(incoming) || !(incoming > frameRevision)) return false;
+    if (!figureAspect || !Number.isFinite(Number(figureAspect.x))) return false;
+    var ranges = frame.ranges;
+    if (scene) {
+      var next = {};
+      var complete = ["x", "y", "z"].every(function (axis) {
+        var pair = scene[axis + "axis"] && scene[axis + "axis"].range;
+        if (!pair || pair.length < 2 || !Number.isFinite(Number(pair[0])) || !Number.isFinite(Number(pair[1]))) return false;
+        next[axis] = [Number(pair[0]), Number(pair[1])];
+        return true;
+      });
+      if (complete) ranges = next;
+    }
+    rememberFittedFrame(sceneId, ranges, figureAspect, incoming);
+    return true;
   }
   function clearFittedFrame(sceneId) {
     if (sceneId && root.__mvFittedFrames) delete root.__mvFittedFrames[String(sceneId)];
@@ -502,15 +531,7 @@
       holder.aspectratio = {x: aspect.x, y: aspect.y, z: aspect.z};
     }
   }
-  function installAspectLock(gd) {
-    /* Plotly's scene plot computes the aspect, writes it onto the layout,
-     * then calls setAspectratio. A later fit's ratio is lost there: the
-     * plot puts the previous ratio back and the gl copy can diverge.
-     * The lock runs at that last write and puts the fitted ratio on both
-     * the layout object and the gl scene. A new glplot (projection
-     * changes dispose the old one) needs the lock installed again. */
-    var scene = gd && gd._fullLayout && gd._fullLayout.scene;
-    var gl = scene && scene._scene && scene._scene.glplot;
+  function wrapGlplot(gd, gl) {
     if (!gl || typeof gl.setAspectratio !== "function" || gl.__mvAspectLock) return;
     var original = gl.setAspectratio;
     gl.setAspectratio = function (aspect) {
@@ -525,6 +546,34 @@
       return original.call(this, use);
     };
     gl.__mvAspectLock = true;
+  }
+  function installAspectLock(gd) {
+    /* Plotly's scene plot writes the aspect, then calls setAspectratio.
+     * A projection change does that on a gl scene that does not exist
+     * yet: setViewport disposes the old one and initializeGLPlot assigns
+     * a new one before the plot's last aspect write. Wrapping only the
+     * current function misses that assignment. The property hook wraps
+     * the replacement before the last write. */
+    var holder = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    if (!holder) return;
+    if (!holder.__mvGlplotHook) {
+      var current = holder.glplot;
+      try {
+        Object.defineProperty(holder, "glplot", {
+          configurable: true,
+          enumerable: true,
+          get: function () { return current; },
+          set: function (gl) {
+            current = gl;
+            wrapGlplot(gd, gl);
+          },
+        });
+        holder.__mvGlplotHook = true;
+      } catch (_) {}
+      if (current) wrapGlplot(gd, current);
+      return;
+    }
+    wrapGlplot(gd, holder.glplot);
   }
   function clearFittedAspectListener(gd) {
     if (!gd || !gd.__mvFittedAspectListener) return;
@@ -556,6 +605,13 @@
       var drifted = !live || aspectOffContract(live, aspect, 0.01);
       if (painted && aspectOffContract(painted, aspect, 0.01)) drifted = true;
       if (!drifted) return;
+      /* The fit relayout is still inside this plot. A nested relayout is
+       * rejected and the rejection used to restore the camera and toast.
+       * Retry after that command releases the graph. */
+      if (gd.__mvFittedRestoring) {
+        setTimeout(recommitFittedAspect, 0);
+        return;
+      }
       /* A direct write is discarded by the next scene plot, which stores
        * the previous ratio as the user value. A new relayout is a user
        * edit, so that plot keeps this ratio. */
@@ -952,18 +1008,30 @@
     var revisionScope = String(options.scene_id || "") + ":" + String(options.scene_generation === undefined ? "" : options.scene_generation);
     if (!contextCurrent(gd, options)) return Promise.reject(new Error("stale camera command"));
     var sceneKey = String(options.scene_id || "");
-    if (sceneKey && gd.__mvCameraRevisionScene !== sceneKey) {
-      gd.__mvCameraRevisionScene = sceneKey;
-      gd.__mvCameraRevision = NaN;
-    }
-    var liveRevision = Number(gd.__mvCameraRevision);
-    if (sceneKey && Number.isFinite(liveRevision) && Number.isFinite(requestedRevision) && requestedRevision < liveRevision) {
-      return Promise.reject(new Error("stale camera command"));
-    }
-    if (gd.__mvCameraRevisionScope !== revisionScope || gd.__mvCameraRevisionEpoch !== revisionEpoch) {
+    var incomingGeneration = options.scene_generation;
+    var generationPresent = incomingGeneration !== undefined && incomingGeneration !== null && String(incomingGeneration) !== "";
+    var storedScope = String(gd.__mvCameraRevisionScope || "");
+    /* A delivery with no generation must not look like a new clock and
+     * wipe a newer Fit. A real generation or epoch change still restarts. */
+    var bareSceneScope = !generationPresent && !!sceneKey && storedScope.indexOf(sceneKey + ":") === 0 && storedScope !== revisionScope;
+    var sceneChanged = !!(sceneKey && gd.__mvCameraRevisionScene && gd.__mvCameraRevisionScene !== sceneKey);
+    var epochChanged = !!(revisionEpoch && gd.__mvCameraRevisionEpoch && revisionEpoch !== String(gd.__mvCameraRevisionEpoch));
+    var realScopeChange = storedScope !== "" && revisionScope !== storedScope && !bareSceneScope;
+    if (storedScope === "") {
+      if (sceneKey) gd.__mvCameraRevisionScene = sceneKey;
+      gd.__mvCameraRevisionScope = revisionScope;
+      gd.__mvCameraRevisionEpoch = revisionEpoch;
+    } else if (sceneChanged || epochChanged || realScopeChange) {
+      if (sceneKey) gd.__mvCameraRevisionScene = sceneKey;
       gd.__mvCameraRevisionScope = revisionScope;
       gd.__mvCameraRevisionEpoch = revisionEpoch;
       gd.__mvCameraRevision = NaN;
+    } else if (sceneKey) {
+      gd.__mvCameraRevisionScene = sceneKey;
+    }
+    var liveRevision = Number(gd.__mvCameraRevision);
+    if (!realScopeChange && !epochChanged && !sceneChanged && sceneKey && Number.isFinite(liveRevision) && Number.isFinite(requestedRevision) && requestedRevision < liveRevision) {
+      return Promise.reject(new Error("stale camera command"));
     }
     var previousRevision = Number(gd.__mvCameraRevision);
     if (Number.isFinite(requestedRevision) && (!Number.isFinite(previousRevision) || requestedRevision > previousRevision)) {
@@ -982,7 +1050,7 @@
     if (!current()) return Promise.reject(new Error("stale camera command"));
     gd.__mvLatestCamera = {snapshot: snapshot, patch: patch, replayed: false, command: String(options.command || "")};
     if (!/^reset$/i.test(String(options.command || "")) && options.ranges) {
-      rememberFittedFrame(options.scene_id, options.ranges, options.aspectratio);
+      rememberFittedFrame(options.scene_id, options.ranges, options.aspectratio, requestedRevision);
     }
     if (options.aspectratio && Number.isFinite(Number(options.aspectratio.x))) watchFittedAspect(gd, requestedRevision);
     var appliedEpoch;
@@ -991,7 +1059,7 @@
       appliedEpoch = queueEpoch(gd);
       gd.__mvFittedRestoring = true;
       if (!/^reset$/i.test(String(options.command || "")) && options.ranges) {
-        rememberFittedFrame(options.scene_id, options.ranges, options.aspectratio);
+        rememberFittedFrame(options.scene_id, options.ranges, options.aspectratio, requestedRevision);
       }
       /* Put the ratio on the layout objects the replot reads, and arm
        * the lock, without touching the gl scene yet. setAspectratio marks
@@ -1032,7 +1100,7 @@
     return enqueue(gd, run, {isCurrent: current, group: "camera"}).then(function () {
       return settledCurrent(gd, snapshot, appliedEpoch, current, options);
     }, function (error) {
-      if (error && /timeout/.test(String(error && error.message || error))) throw error;
+      if (error && /timeout|stale camera command/.test(String(error && error.message || error))) throw error;
       if (queueEpoch(gd) !== appliedEpoch || !current()) { diag("staleDrops"); throw new Error("stale camera command"); }
       var check = cameraCheck(options);
       diag("postconditionFailures");
@@ -1085,5 +1153,6 @@
       commitFittedAspect(gd);
       restoreFittedRanges(gd);
     },
+    noteFigureFrame: noteFigureFrame,
   };
 })(window);

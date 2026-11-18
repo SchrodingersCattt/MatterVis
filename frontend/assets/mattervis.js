@@ -773,9 +773,10 @@
               statusNode.setAttribute("data-level", "busy");
             }
             if (layout && layout.scene && render && render.scene_id && window.__mvFittedFrames) {
+              const superseded = window.MatterVisViewCamera && typeof window.MatterVisViewCamera.noteFigureFrame === "function" && window.MatterVisViewCamera.noteFigureFrame(render, layout);
               const fitted = window.__mvFittedFrames[String(render.scene_id)];
               const fittedAspect = fitted && fitted.aspectratio;
-              if (fittedAspect && Number.isFinite(Number(fittedAspect.x))) {
+              if (!superseded && fittedAspect && Number.isFinite(Number(fittedAspect.x))) {
                 /* A figure built before this fit, or a scene update that
                  * recomputes the ratio from the previous frame, must not
                  * replace the fitted aspect or the fitted data box. */
