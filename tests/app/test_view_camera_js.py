@@ -800,11 +800,24 @@ function previousRatioPlot() {
   assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - orthoAspect.x) / orthoAspect.x < 0.01);
   assert.ok(Math.abs(gd._fullLayout.scene._scene.glplot.getAspectratio().x - orthoAspect.x) / orthoAspect.x < 0.01);
   assert.equal(status.textContent, '');
+  await assert.rejects(api.applyAsync(cameraFor('orthographic'), {
+    scene_id: 'salt', scene_generation: '', camera_version: 1, command: 'state-confirmed',
+    aspectratio: {x: 9, y: 9, z: 9}, ranges,
+  }), /stale/);
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - orthoAspect.x) / orthoAspect.x < 0.01);
+  assert.equal(await api.applyAsync(cameraFor('perspective'), {
+    scene_id: 'salt', scene_generation: 1, camera_version: 3, command: 'fit',
+    aspectratio: {x: 1, y: 1, z: 1}, ranges,
+  }), true);
+  previousRatioPlot();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - 1) < 0.01, 'perspective fit kept the orthographic ratio');
   const beforeOrbit = gd._fullLayout.scene.aspectratio.x;
   await api.applyAsync({
     eye: {x: 0.4, y: 1.2, z: 0.5}, center, up: {x: 0, y: 0, z: 1},
     projection: {type: 'orthographic'},
-  }, {scene_id: 'salt', scene_generation: 1, camera_version: 3});
+  }, {scene_id: 'salt', scene_generation: 1, camera_version: 4});
   gd.emit('plotly_afterplot');
   assert.equal(gd.layout.scene.camera.eye.x, 0.4);
   assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - beforeOrbit) / beforeOrbit < 0.01);

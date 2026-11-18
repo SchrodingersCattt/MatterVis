@@ -207,6 +207,7 @@ function readPaint() {
     ranges: {x: layout.xaxis.range, y: layout.yaxis.range, z: layout.zaxis.range},
     status: status && !status.hidden ? String(status.textContent || "") : "",
     postcondition: (window.__mv_camera_diag && window.__mv_camera_diag.lastPostcondition) || null,
+    relayoutError: window.__mv_camera_diag && window.__mv_camera_diag.lastRelayoutError || "",
     plot: {x: canvas.x, y: canvas.y, width: canvas.width, height: Math.max(1, bottom - canvas.y)},
     canvas: {x: canvas.x, y: canvas.y, width: canvas.width, height: canvas.height},
     chrome: ["compact-toggle-left-panel", "canvas-view-reset", "canvas-view-fit", "mv-status-bar", "mv-render-status", "perf-log-panel"].map((id) => {
@@ -250,6 +251,9 @@ async function capture(page, shots, name, projection, boundary, consoleErrors) {
     canvas: round(sample.canvas),
     chrome: round(sample.chrome),
   });
+  if (after.status || (after.postcondition && after.postcondition.reason)) {
+    fs.writeFileSync(`${outDir}/${name}-status.json`, JSON.stringify({before, after}, null, 2));
+  }
   if (tag(before) !== tag(after)) fail(name + " shutter moved\n" + tag(before) + "\n" + tag(after));
   if (after.projection !== projection) fail(name + " painted projection " + after.projection);
   if (after.boundaryChecked !== boundary) fail(name + " boundary checkbox " + after.boundaryChecked);

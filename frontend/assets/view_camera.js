@@ -951,6 +951,15 @@
     var revisionEpoch = String(options.server_started_at || "");
     var revisionScope = String(options.scene_id || "") + ":" + String(options.scene_generation === undefined ? "" : options.scene_generation);
     if (!contextCurrent(gd, options)) return Promise.reject(new Error("stale camera command"));
+    var sceneKey = String(options.scene_id || "");
+    if (sceneKey && gd.__mvCameraRevisionScene !== sceneKey) {
+      gd.__mvCameraRevisionScene = sceneKey;
+      gd.__mvCameraRevision = NaN;
+    }
+    var liveRevision = Number(gd.__mvCameraRevision);
+    if (sceneKey && Number.isFinite(liveRevision) && Number.isFinite(requestedRevision) && requestedRevision < liveRevision) {
+      return Promise.reject(new Error("stale camera command"));
+    }
     if (gd.__mvCameraRevisionScope !== revisionScope || gd.__mvCameraRevisionEpoch !== revisionEpoch) {
       gd.__mvCameraRevisionScope = revisionScope;
       gd.__mvCameraRevisionEpoch = revisionEpoch;
