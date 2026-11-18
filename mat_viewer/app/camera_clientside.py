@@ -15,8 +15,8 @@ def register_camera_clientside(app) -> None:
     if not hasattr(app, "clientside_callback"):
         return
     app.clientside_callback(
-        """
-        function(relayout) {
+            """
+            function(relayout) {
           if (!relayout || typeof relayout !== "object") return window.dash_clientside.no_update;
           var keys = Object.keys(relayout);
           var touches = false;
@@ -57,7 +57,7 @@ def register_camera_clientside(app) -> None:
             seq: Date.now(),
           };
         }
-        """,
+            """,
         Output("camera-capture-store", "data"),
         Input("crystal-graph", "relayoutData"),
         prevent_initial_call=True,
