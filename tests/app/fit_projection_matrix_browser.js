@@ -125,6 +125,8 @@ async function fit(page, projection, boundary) {
         revision: render ? Number(render.camera_revision) : null,
         status: status && !status.hidden ? String(status.textContent || "") : "",
         postcondition: (window.__mv_camera_diag && window.__mv_camera_diag.lastPostcondition) || null,
+        repairs: window.__mv_camera_diag && window.__mv_camera_diag.repairs || 0,
+        lastApply: window.__mv_camera_diag && window.__mv_camera_diag.lastApply || null,
       };
     }, expected);
     if (last.ok) { matched = true; break; }

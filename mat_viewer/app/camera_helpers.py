@@ -842,6 +842,46 @@ def fitted_camera_payload(state: dict[str, Any] | None) -> dict[str, Any]:
     return payload
 
 
+def accepted_aspect_scale(value: Any) -> float | None:
+    """Finite positive Fit scale. Malformed input does not become 1."""
+
+    try:
+        scale = float(value)
+    except (TypeError, ValueError):
+        return None
+    if scale != scale or scale <= 0.0 or scale == float("inf"):
+        return None
+    return scale
+
+
+def accepted_fit_axis_ranges(value: Any) -> dict[str, list[float]] | None | bool:
+    """Parse a fitted data box.
+
+    ``None`` clears the box. A dict of three finite intervals is stored.
+    Any other shape, including a short pair, returns ``False`` so the
+    previous box stays and ``patch_state`` does not raise.
+    """
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return False
+    parsed: dict[str, list[float]] = {}
+    for axis in ("x", "y", "z"):
+        pair = value.get(axis)
+        if isinstance(pair, (str, bytes)) or not isinstance(pair, (list, tuple)) or len(pair) < 2:
+            return False
+        try:
+            lo = float(pair[0])
+            hi = float(pair[1])
+        except (TypeError, ValueError):
+            return False
+        if lo != lo or hi != hi or lo == float("inf") or hi == float("inf") or not hi > lo:
+            return False
+        parsed[axis] = [lo, hi]
+    return parsed
+
+
 def confirmed_camera_fields(backend, state: dict[str, Any]) -> dict[str, Any]:
     """Fields a confirmed-state camera envelope must carry.
 

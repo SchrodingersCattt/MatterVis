@@ -310,22 +310,13 @@ class _StateBackendMixin:
             except (TypeError, ValueError):
                 pass
         if "camera_aspect_scale" in patch and patch["camera_aspect_scale"] is not None:
-            try:
-                scale = float(patch["camera_aspect_scale"])
-            except (TypeError, ValueError):
-                scale = 1.0
-            if scale != scale or scale <= 0.0:
-                scale = 1.0
-            state["camera_aspect_scale"] = scale
+            scale = accepted_aspect_scale(patch["camera_aspect_scale"])
+            if scale is not None:
+                state["camera_aspect_scale"] = scale
         if "fit_axis_ranges" in patch:
-            raw_ranges = patch["fit_axis_ranges"]
-            if raw_ranges is None:
-                state["fit_axis_ranges"] = None
-            elif isinstance(raw_ranges, dict) and all(axis in raw_ranges for axis in ("x", "y", "z")):
-                state["fit_axis_ranges"] = {
-                    axis: [float(raw_ranges[axis][0]), float(raw_ranges[axis][1])]
-                    for axis in ("x", "y", "z")
-                }
+            parsed_ranges = accepted_fit_axis_ranges(patch["fit_axis_ranges"])
+            if parsed_ranges is not False:
+                state["fit_axis_ranges"] = parsed_ranges
         # Phase 4 (view tools): top-level ``projection`` is a v2 state
         # key that mirrors ``camera.projection.type``. Accept either
         # spelling so AI callers don't have to dig into the camera

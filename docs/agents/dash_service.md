@@ -363,10 +363,14 @@ Notes for callers:
   rebuild, and a return to the scene.   The same delivery keeps the fitted
   aspect on the layout and on the gl scene: a scene plot after the camera
   move writes that ratio, and the next figure for the scene is delivered
-  with it. A later camera delivery while that fit is active carries the
+  with it.   A later camera delivery while that fit is active carries the
   same ratio and data box, including a relayout echo that would otherwise
-  leave the previous ratio on the layout. Reset restores aspect scale 1 and
-  drops that fitted box.
+  leave the previous ratio on the layout. A scene plot that finishes
+  after that delivery, including a second Fit whose data box did not
+  change, still leaves this ratio on the layout. A state patch with a
+  non-finite or non-positive aspect scale, or a fitted range that is not
+  three finite non-empty intervals, does not change the stored Fit.
+  Reset restores aspect scale 1 and drops that fitted box.
   `{"action": "align", "axis": "c"}`  (VESTA-style "look down lattice
   axis ``c``"; valid axes are `a`, `b`, `c`, `a*`, `b*`, `c*`),
   `{"action": "projection", "type": "orthographic"}`  (toggle the

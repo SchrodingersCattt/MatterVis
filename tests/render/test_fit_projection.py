@@ -404,3 +404,42 @@ def test_confirmed_camera_delivery_keeps_the_fitted_aspect(tmp_path: Path):
         assert abs(span - 6.944) / 6.944 < 0.02
     finally:
         backend.close(wait=False)
+
+
+def test_patch_state_keeps_the_previous_fit_when_the_patch_is_malformed(tmp_path: Path):
+    """A short range must not raise, and NaN must not be stored as scale 1."""
+    backend = _backend(tmp_path, "nacl", NACL)
+    try:
+        scene_id = backend.active_scene_id()
+        backend.patch_state(
+            {
+                "camera_aspect_scale": 1.25,
+                "fit_axis_ranges": {"x": [0.0, 2.0], "y": [0.0, 2.0], "z": [0.0, 2.0]},
+            },
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        short = {"x": [0.0], "y": [0.0, 1.0], "z": [0.0, 1.0]}
+        backend.patch_state({"fit_axis_ranges": short}, scene_id=scene_id, broadcast=False)
+        state = backend.get_state(scene_id)
+        assert state["fit_axis_ranges"]["x"] == [0.0, 2.0]
+        backend.patch_state(
+            {"fit_axis_ranges": {"x": [0.0, 1.0], "y": ["wide", 1.0], "z": [0.0, 1.0]}},
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        assert backend.get_state(scene_id)["fit_axis_ranges"]["y"] == [0.0, 2.0]
+        backend.patch_state(
+            {"fit_axis_ranges": {"x": [1.0, 0.0], "y": [0.0, 1.0], "z": [0.0, 1.0]}},
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        assert backend.get_state(scene_id)["fit_axis_ranges"]["x"] == [0.0, 2.0]
+        backend.patch_state({"camera_aspect_scale": float("nan")}, scene_id=scene_id, broadcast=False)
+        backend.patch_state({"camera_aspect_scale": "wide"}, scene_id=scene_id, broadcast=False)
+        backend.patch_state({"camera_aspect_scale": -2}, scene_id=scene_id, broadcast=False)
+        assert backend.get_state(scene_id)["camera_aspect_scale"] == 1.25
+        backend.patch_state({"fit_axis_ranges": None}, scene_id=scene_id, broadcast=False)
+        assert backend.get_state(scene_id)["fit_axis_ranges"] is None
+    finally:
+        backend.close(wait=False)

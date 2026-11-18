@@ -201,17 +201,18 @@ async function main() {
       return expected.every((span, index) => Math.abs(shot.spans[index] - span) / Math.max(Math.abs(span), 1e-6) < 0.01);
     }, fitted.spans, {timeout: 20000});
     const returned = await readLayout(page);
-    const beforeReset = await page.evaluate(() => window.__mvAfterPlot || 0);
     const pendingReset = page.waitForResponse((response) => response.url().includes("/api/v2/camera/action"), {timeout: 20000});
     await page.locator("#canvas-view-reset").click();
     await pendingReset;
-    await page.waitForFunction((previousPlot) => {
+    await page.waitForFunction((fittedEye) => {
       return fetch("/api/v2/state").then((response) => response.json()).then((state) => {
         const shot = window.__mvFitSnapshot();
-        return Number(state.camera_aspect_scale || 1) === 1 && !state.fit_axis_ranges
-          && shot && shot.spans[0] > 1 && (window.__mvAfterPlot || 0) > previousPlot;
+        if (!(Number(state.camera_aspect_scale || 1) === 1 && !state.fit_axis_ranges && shot)) return false;
+        const delta = Math.hypot(shot.eye[0] - fittedEye[0], shot.eye[1] - fittedEye[1], shot.eye[2] - fittedEye[2]);
+        const length = Math.hypot(fittedEye[0], fittedEye[1], fittedEye[2]);
+        return delta / Math.max(length, 1e-6) > 0.02 && Math.abs(shot.aspect - 1) < 0.01 && shot.spans[0] > 1;
       });
-    }, beforeReset, {timeout: 20000});
+    }, fitted.eye, {timeout: 20000});
     const reset = await readLayout(page);
     const beforeShot = await page.evaluate(() => window.__mvFitSnapshot());
     await page.screenshot({path: `${outDir}/reset.png`});

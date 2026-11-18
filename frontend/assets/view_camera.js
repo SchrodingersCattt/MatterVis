@@ -526,34 +526,57 @@
     };
     gl.__mvAspectLock = true;
   }
-  function holdFittedAspect(gd, aspect, token) {
-    /* A scene plot can replace the ratio after the relayout promise
-     * resolves and without another plotly_afterplot. Watch the layout
-     * until it has held the commanded ratio, and put that ratio back
-     * if a late plot writes the previous one. */
-    if (!gd || !aspect || !Number.isFinite(Number(aspect.x))) return;
-    var stable = 0;
-    var ticks = 0;
-    function tick() {
-      if (Number.isFinite(token) && Number(gd.__mvCameraRevision) !== token) return;
-      ticks += 1;
+  function clearFittedAspectListener(gd) {
+    if (!gd || !gd.__mvFittedAspectListener) return;
+    if (gd.removeListener) gd.removeListener("plotly_afterplot", gd.__mvFittedAspectListener);
+    gd.__mvFittedAspectListener = null;
+  }
+  function watchFittedAspect(gd, token) {
+    /* A figure or confirmed-state plot can finish after Fit's relayout
+     * promise. The perspective Fit already owns this data box, so that
+     * late plot writes the previous ratio and leaves the new eye in
+     * place. plotly_afterplot is the end of that plot. Stay subscribed
+     * until a newer camera revision replaces this Fit. A timer would
+     * miss the plot that arrives after it. */
+    if (!gd || typeof gd.on !== "function") return;
+    clearFittedAspectListener(gd);
+    var attempts = 0;
+    function recommitFittedAspect() {
+      if (gd.__mvFittedAspectRelayout) return;
+      if (Number.isFinite(token) && Number(gd.__mvCameraRevision) !== token) {
+        clearFittedAspectListener(gd);
+        return;
+      }
+      var frame = fittedFrame(gd);
+      var aspect = frame && frame.aspectratio;
+      if (!aspect || !Number.isFinite(Number(aspect.x))) return;
       var scene = gd._fullLayout && gd._fullLayout.scene;
       var live = scene && scene.aspectratio;
       var painted = glAspect(gd);
       var drifted = !live || aspectOffContract(live, aspect, 0.01);
       if (painted && aspectOffContract(painted, aspect, 0.01)) drifted = true;
-      if (drifted) {
-        stable = 0;
-        installAspectLock(gd);
-        commitFittedAspect(gd, aspect);
-      } else {
-        stable += 1;
-      }
-      if (stable >= 90 || ticks >= 600) return;
-      var schedule = root.requestAnimationFrame || root.setTimeout;
-      if (typeof schedule === "function") schedule(tick, 32);
+      if (!drifted) return;
+      /* A direct write is discarded by the next scene plot, which stores
+       * the previous ratio as the user value. A new relayout is a user
+       * edit, so that plot keeps this ratio. */
+      attempts += 1;
+      if (attempts > 8 || !root.Plotly || typeof root.Plotly.relayout !== "function") return;
+      var patch = {
+        "scene.aspectmode": "manual",
+        "scene.aspectratio.x": Number(aspect.x),
+        "scene.aspectratio.y": Number(aspect.y),
+        "scene.aspectratio.z": Number(aspect.z),
+      };
+      root.__mv_camera_diag = root.__mv_camera_diag || {};
+      root.__mv_camera_diag.repairs = (root.__mv_camera_diag.repairs || 0) + 1;
+      gd.__mvFittedAspectRelayout = true;
+      Promise.resolve(root.Plotly.relayout(gd, patch)).finally(function () {
+        gd.__mvFittedAspectRelayout = false;
+        recommitFittedAspect();
+      });
     }
-    tick();
+    gd.__mvFittedAspectListener = recommitFittedAspect;
+    try { gd.on("plotly_afterplot", recommitFittedAspect); } catch (_) { gd.__mvFittedAspectListener = null; }
   }
   function commitFittedAspect(gd, aspect) {
     /* A scene relayout updates the camera and the axis ranges, and can
@@ -881,7 +904,10 @@
     installWheelZoom(gd);
     installContextLoss(gd);
     installFittedRangeGuard();
-    if (/^reset$/i.test(String(options.command || ""))) clearFittedFrame(options.scene_id);
+    if (/^reset$/i.test(String(options.command || ""))) {
+      clearFittedFrame(options.scene_id);
+      clearFittedAspectListener(gd);
+    }
     var snapshot = clone(camera);
     var patch = requestedPatch(snapshot);
     var requestedRevision = Number(options.camera_version);
@@ -946,29 +972,10 @@
     var current = function () { return contextCurrent(gd, options); };
     if (!current()) return Promise.reject(new Error("stale camera command"));
     gd.__mvLatestCamera = {snapshot: snapshot, patch: patch, replayed: false, command: String(options.command || "")};
-    if (options.aspectratio && Number.isFinite(Number(options.aspectratio.x)) && gd && typeof gd.on === "function") {
-      /* The scene plot can write the previous ratio back after the
-       * relayout promise resolves. Recommit on the plots that follow
-       * this fit, then drop the listener. A permanent listener would
-       * change the settle-wait listener count. */
-      var aspectToken = requestedRevision;
-      var commandedAspect = options.aspectratio;
-      var aspectPlots = 0;
-      function recommitFittedAspect() {
-        if (Number.isFinite(aspectToken) && Number(gd.__mvCameraRevision) !== aspectToken) {
-          if (gd.removeListener) gd.removeListener("plotly_afterplot", recommitFittedAspect);
-          return;
-        }
-        commitFittedAspect(gd, commandedAspect);
-        restoreFittedRanges(gd);
-        aspectPlots += 1;
-        if (aspectPlots >= 4 && gd.removeListener) gd.removeListener("plotly_afterplot", recommitFittedAspect);
-      }
-      try { gd.on("plotly_afterplot", recommitFittedAspect); } catch (_) {}
-      setTimeout(function () {
-        if (gd.removeListener) gd.removeListener("plotly_afterplot", recommitFittedAspect);
-      }, 2000);
+    if (!/^reset$/i.test(String(options.command || "")) && options.ranges) {
+      rememberFittedFrame(options.scene_id, options.ranges, options.aspectratio);
     }
+    if (options.aspectratio && Number.isFinite(Number(options.aspectratio.x))) watchFittedAspect(gd, requestedRevision);
     var appliedEpoch;
     var run = function () {
       if (!current()) { diag("staleDrops"); throw new Error("stale camera command"); }
@@ -1000,7 +1007,6 @@
           gd.layout.meta.mattervis_render.camera_revision = requestedRevision;
         }
         commitFittedAspect(gd, options.aspectratio);
-        holdFittedAspect(gd, options.aspectratio, requestedRevision);
         /* A drag relayout can resolve after Reset already replaced the queue.
          * Re-apply the newest command so the late Plotly write cannot stick. */
         if (Number.isFinite(requestedRevision) && Number(gd.__mvCameraRevision) !== requestedRevision) {
