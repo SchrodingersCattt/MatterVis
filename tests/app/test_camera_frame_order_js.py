@@ -137,6 +137,42 @@ def _run_node(scenario: str, *args: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_same_revision_frame_paints_the_acknowledged_camera_not_the_baked_pose():
+    """A frame copied before the drag still carries the reset eye.
+
+    The server accepted the orbit without bumping camera_revision. The
+    painted Plotly camera has to become that orbit, and a newer revision
+    has to beat the remembered orbit.
+    """
+    _run_node(r"""
+  const h = harness();
+  h.root.__mvServerCameraByScene = {
+    a: {camera: camera('perspective', 4), camera_revision: 1, scene_generation: 1},
+  };
+  await h.submitFrame(h.frame({}, camera('perspective', 1)), 'positional');
+  assert.equal(h.live().eye.x, 4, 'stale frame stayed on the baked eye');
+  const newer = h.frame({camera_revision: 2}, camera('perspective', 1));
+  newer.scene.uirevision = 'same_name__2__same_viewport';
+  await h.submitFrame(newer, 'positional');
+  assert.equal(h.live().eye.x, 1, 'older acknowledged pose replaced a newer revision');
+""")
+
+
+def test_in_progress_drag_is_not_replaced_by_the_stored_camera():
+    _run_node(r"""
+  const h = harness();
+  h.drag(camera('perspective', 9));
+  h.root.__mvGestureSceneId = 'a';
+  h.root.__mvGestureSceneGeneration = 1;
+  h.root.__mvGestureServerEpoch = '2026-10-25T10:00:00Z';
+  h.root.__mvServerCameraByScene = {
+    a: {camera: camera('perspective', 2), camera_revision: 1, scene_generation: 1},
+  };
+  await h.submitFrame(h.frame({}, camera('perspective', 1)), 'positional');
+  assert.equal(h.live().eye.x, 9, 'stored camera replaced an in-progress drag');
+""")
+
+
 @pytest.mark.parametrize("signature", ["object", "positional"])
 def test_stale_dash_frame_cannot_undo_a_newer_projection(signature):
     _run_node(r"""

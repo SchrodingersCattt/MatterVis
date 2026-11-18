@@ -144,7 +144,12 @@ def register_state_callbacks(app, backend):
             *values,
             _scene_controls_stamp(state, values),
             state,
-            _camera_store_payload(scene_id, state.get("camera")),
+            _camera_store_payload(
+                scene_id,
+                state.get("camera"),
+                camera_revision=state.get("camera_revision"),
+                scene_generation=state.get("scene_generation"),
+            ),
         )
 
     @app.callback(

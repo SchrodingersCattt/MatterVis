@@ -11,8 +11,28 @@ class StaleCameraWrite(Exception):
 _CAMERA_FENCE_UNSET = object()
 
 
-def _camera_store_payload(scene_id: Optional[str], camera: Optional[dict[str, Any]]) -> dict[str, Any]:
-    return {"scene_id": scene_id, "camera": copy.deepcopy(camera)}
+def _camera_store_payload(
+    scene_id: Optional[str],
+    camera: Optional[dict[str, Any]],
+    *,
+    camera_revision: Any = None,
+    scene_generation: Any = None,
+) -> dict[str, Any]:
+    """Camera the browser may paint, with the clocks that accepted it.
+
+    ``camera_revision`` stays put for an ordinary drag. The browser uses
+    that clock to ignore an older store after Reset or a refit, and
+    ``scene_generation`` so a remount cannot reuse the previous pose.
+    """
+    payload: dict[str, Any] = {"scene_id": scene_id, "camera": copy.deepcopy(camera)}
+    if camera_revision is not None:
+        try:
+            payload["camera_revision"] = int(camera_revision)
+        except (TypeError, ValueError):
+            pass
+    if scene_generation is not None and scene_generation != "":
+        payload["scene_generation"] = scene_generation
+    return payload
 
 
 def _camera_figure_patch(
@@ -322,7 +342,12 @@ def _persist_relayout_camera(
         ), state=state)
     return {
         "scene_id": str(scene_id),
-        "camera_store": _camera_store_payload(scene_id, state.get("camera")),
+        "camera_store": _camera_store_payload(
+            scene_id,
+            state.get("camera"),
+            camera_revision=state.get("camera_revision"),
+            scene_generation=state.get("scene_generation"),
+        ),
         "agent_state": copy.deepcopy(state) if flat_ortep else None,
         "refit": replaced,
         "view_update": view_update,

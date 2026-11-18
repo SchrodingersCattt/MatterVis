@@ -308,6 +308,17 @@ def test_visible_mesh_and_bfdh_faces_share_native_picking(fresh_mattervis_url):
     _run(fresh_mattervis_url, "surface-pick", structure="DAP-4")
 
 
+@pytest.mark.timeout(240)
+def test_acknowledged_camera_stays_painted_after_a_tab_roundtrip(mattervis_url):
+    """Reset, drag, pan, zoom, and projection survive leaving the scene.
+
+    The drag does not bump camera_revision. The painted Plotly camera and
+    the server camera are both the acknowledged pose. An off-screen camera
+    is still replaced on the way back.
+    """
+    _run(mattervis_url, "camera-roundtrip", timeout=220)
+
+
 @pytest.mark.timeout(180)
 def test_projection_radio_follows_scene_and_rejects_stale_store(mattervis_url):
     _run(mattervis_url, "projection-radio")

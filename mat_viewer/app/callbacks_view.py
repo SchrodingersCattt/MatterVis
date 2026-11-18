@@ -524,7 +524,12 @@ def register_view_callbacks(app, backend):
         except Exception:  # pragma: no cover - best-effort, surface in console
             return no_update, no_update, no_update
         state = backend.get_state(scene_id)
-        camera_payload = _camera_store_payload(scene_id, camera)
+        camera_payload = _camera_store_payload(
+            scene_id,
+            camera,
+            camera_revision=state.get("camera_revision"),
+            scene_generation=state.get("scene_generation"),
+        )
         update = make_update(
             state,
             operation="camera",
@@ -570,7 +575,12 @@ def register_view_callbacks(app, backend):
         except Exception:  # pragma: no cover
             return (no_update,) * 4
         state = backend.get_state(scene_id)
-        camera_payload = _camera_store_payload(scene_id, camera)
+        camera_payload = _camera_store_payload(
+            scene_id,
+            camera,
+            camera_revision=state.get("camera_revision"),
+            scene_generation=state.get("scene_generation"),
+        )
         update = make_update(
             state,
             operation="camera",
@@ -631,6 +641,37 @@ def register_view_callbacks(app, backend):
             """,
             Output("camera-capture-store", "data"),
             Input("crystal-graph", "relayoutData"),
+            prevent_initial_call=True,
+        )
+        app.clientside_callback(
+            """
+            function(data) {
+              if (!data || !data.scene_id || !data.camera) return window.dash_clientside.no_update;
+              var id = String(data.scene_id);
+              var book = window.__mvServerCameraByScene || (window.__mvServerCameraByScene = {});
+              var previous = book[id];
+              var revision = data.camera_revision;
+              if (previous && revision !== undefined && revision !== null &&
+                  Number(revision) < Number(previous.camera_revision || 0)) {
+                return window.dash_clientside.no_update;
+              }
+              book[id] = {
+                camera: data.camera,
+                camera_revision: revision === undefined || revision === null
+                  ? (previous ? previous.camera_revision : 0)
+                  : Number(revision),
+                scene_generation: data.scene_generation !== undefined && data.scene_generation !== null
+                  ? data.scene_generation
+                  : (previous ? previous.scene_generation : null)
+              };
+              if (typeof window.__mvApplyServerCamera === "function") {
+                window.__mvApplyServerCamera(id);
+              }
+              return window.dash_clientside.no_update;
+            }
+            """,
+            Output("fast-view-metadata", "children", allow_duplicate=True),
+            Input("camera-state-store", "data"),
             prevent_initial_call=True,
         )
 
@@ -854,11 +895,14 @@ def register_view_callbacks(app, backend):
         # deduplicates that case after successful Plotly completion.
         current_layout = (current_figure or {}).get("layout") or {}
         layout = fig.get("layout") or {}
+        current_camera = (current_layout.get("scene") or {}).get("camera")
+        delivered_camera = (layout.get("scene") or {}).get("camera")
         if (
             (current_layout.get("meta") or {}).get("mattervis_render")
             == (layout.get("meta") or {}).get("mattervis_render")
             and (current_layout.get("scene") or {}).get("uirevision")
             == (layout.get("scene") or {}).get("uirevision")
+            and current_camera == delivered_camera
         ):
             fig = no_update
 
