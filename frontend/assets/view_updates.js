@@ -168,9 +168,22 @@
     var generation = present(generationOf(update, null)) ? String(generationOf(update, null)) : "";
     if (sameScene && generation && render.scene_generation !== undefined && generation !== String(render.scene_generation)) return false;
     var display = Number(v.display_version || 0), currentDisplay = Math.max(Number(render.display_version || 0), seen.display);
-    var camera = Number(v.camera_version || v.camera_revision || 0), currentCamera = Math.max(Number(render.camera_version || render.camera_revision || 0), seen.camera);
+    /* Revision 0 is the first figure. ``0 &&`` used to skip the
+     * comparison, so that cell box could be painted again after Fit
+     * had moved the camera to revision 1. */
+    function finiteRevision(value) {
+      if (value === undefined || value === null || value === "") return null;
+      var number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    }
+    var incomingCamera = finiteRevision(v.camera_version);
+    if (incomingCamera === null) incomingCamera = finiteRevision(v.camera_revision);
+    var renderedCamera = finiteRevision(render.camera_version);
+    if (renderedCamera === null) renderedCamera = finiteRevision(render.camera_revision);
+    var seenCamera = finiteRevision(seen.camera);
+    var currentCamera = renderedCamera === null ? seenCamera : (seenCamera === null ? renderedCamera : Math.max(renderedCamera, seenCamera));
     if (sameScene && display && currentDisplay && display < currentDisplay) return false;
-    if (sameScene && camera && currentCamera && camera < currentCamera) return false;
+    if (sameScene && incomingCamera !== null && currentCamera !== null && incomingCamera < currentCamera) return false;
     if (updateKind(update) === "camera" && !cameraIsCurrent(update, gd)) return false;
     var key = deliveryKey(update, gd);
     if (!delivered[key]) return true;
@@ -336,12 +349,20 @@
         root.__mv_view_diag.lastCameraMissingPayload = {key: cameraKey, revision: revision, scene: snapshot.scene_id};
         return "camera-missing";
       }
+      root.__mv_camera_diag = root.__mv_camera_diag || {};
+      root.__mv_camera_diag.lastApply = {
+        command: String(camera.command || snapshot.reason || ""),
+        aspect: camera.aspectratio || null,
+        revision: revision,
+      };
       var cameraOptions = {
         scene_id: snapshot.scene_id,
         scene_generation: generationOf(snapshot, gd),
         camera_version: revision,
         server_started_at: snapshot.server_started_at,
         command: String(camera.command || snapshot.reason || ""),
+        aspectratio: camera.aspectratio || null,
+        ranges: camera.ranges || null,
         graph_generation: Number(gd.__mvGraphGeneration || 0),
         isCurrent: function () {
           /* A camera command may outlive a Plotly remount. Resolve the graph

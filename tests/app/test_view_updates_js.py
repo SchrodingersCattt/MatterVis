@@ -508,3 +508,36 @@ const update = {
         check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_revision_zero_is_a_real_camera_revision():
+    """The first figure is revision 0. The same revision is stale after Fit."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_updates.js"
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const gd={layout:{meta:{mattervis_render:{scene_id:'a',scene_generation:1,camera_revision:0,camera_version:0,render_revision:1,geometry_version:1,display_version:1}}},data:[]};
+const sandbox={console,Promise,Number,String,Object,Array,JSON,window:{
+  MatterVisViewCamera:{graph:()=>gd,applyAsync:()=>Promise.resolve(true)}, Plotly:{},
+}};
+vm.createContext(sandbox); vm.runInContext(source,sandbox);
+const api=sandbox.window.MatterVisViewUpdates;
+const frame=(camera)=>({
+  type:'view_update', update_kind:'full', scene_id:'a', scene_generation:1,
+  geometry_version:1, display_version:1, camera_version:camera, camera_revision:camera,
+  figure:{data:[], layout:{meta:{mattervis_render:{scene_id:'a', camera_revision:camera}}}},
+});
+assert.equal(api.applicable(frame(0), gd), true, 'the initial revision-0 figure was rejected');
+const fit={
+  type:'view_update', update_kind:'camera', scene_id:'a', scene_generation:1,
+  geometry_version:1, display_version:1, camera_version:1,
+  payload:{camera:{eye:{x:1,y:1,z:1},center:{x:0,y:0,z:0},up:{x:0,y:0,z:1},projection:{type:'orthographic'}}, command:'fit'},
+};
+assert.equal(api.submit(fit) instanceof Promise, true);
+assert.equal(api.applicable(frame(0), gd), false, 'revision 0 replaced a Fit');
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr or result.stdout

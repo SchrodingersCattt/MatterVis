@@ -324,7 +324,49 @@ Notes for callers:
   `{"action": "orbit", "yaw_deg": 12, "pitch_deg": -6}`,
   `{"action": "pan", "dx": 0.05, "dy": -0.03, "dz": 0.0}`,
   `{"action": "reset"}`,
-  `{"action": "fit"}`,
+  `{"action": "fit", "width": 939, "height": 750, "visible_height": 682}`,
+  Fit frames the displayed target inside an 8% margin of the shorter
+  side of the clear WebGL viewport. `width` and `height` are the
+  canvas CSS box in pixels. `visible_height` is that box cut off where
+  the status bar or the Fit button covers it. Omitted sizes use
+  939×800. The same update replaces the axis ranges with the data box
+  that was framed. Plotly normalizes that range onto the aspect box,
+  and the default perspective view widens it so a diagonal camera does
+  not clip a corner; leaving that wider range in place makes the cell
+  a small fraction of the box. Perspective moves the eye along its
+  current direction. Orthographic pixel size does not follow eye
+  length, so Fit scales the manual scene aspect ratio and leaves the
+  eye distance unchanged. Perspective uses that same aspect scale only
+  when eye distance alone leaves the target smaller than the margin.
+  The cell boundary selects unit-cell corners as the target, expanded by
+  the cell-edge tube radius so the stroke is inside the margin. With the
+  boundary off, the target is the drawn atom extent. Orthographic extent
+  is the sphere's silhouette in the camera plane. Perspective extent is
+  the tangent cone of that sphere, recomputed at the solved eye, so a
+  close sphere is not clipped past its equator. The stored camera is
+  that eye, center, and up. A position/focal pair
+  is not kept beside it, and an eye present on the same dict does not
+  widen the axis range. Fit pans the eye and the center together so the
+  target box is centered in the clear viewport, which is shorter than
+  the canvas where the status bar covers it. The uniform aspect search
+  runs up to 48 so a molecule that occupies a small part of its cell
+  can still reach the margin.   A Fit or Reset that sends an aspect is
+  checked against that aspect, within 1% on each component, rather than
+  against the canonical viewport. The canonical viewport still uses its
+  8% check when the command did not send an aspect. A failed check records the live eye,
+  center, ranges, and aspect before the restore status is shown.
+  The first figure's camera revision is 0. A later figure whose camera
+  revision is older than the Fit that is already on the canvas is not
+  applied, so that first cell box cannot replace the fitted ranges.
+  A later figure delivery rewrites the axis
+  ranges from that same data box, including a cache hit, a display-option
+  rebuild, and a return to the scene.   The same delivery keeps the fitted
+  aspect on the layout and on the gl scene: a scene plot after the camera
+  move writes that ratio, and the next figure for the scene is delivered
+  with it. A later camera delivery while that fit is active carries the
+  same ratio and data box, including a relayout echo that would otherwise
+  leave the previous ratio on the layout. Reset restores aspect scale 1 and
+  drops that fitted box.
   `{"action": "align", "axis": "c"}`  (VESTA-style "look down lattice
   axis ``c``"; valid axes are `a`, `b`, `c`, `a*`, `b*`, `c*`),
   `{"action": "projection", "type": "orthographic"}`  (toggle the

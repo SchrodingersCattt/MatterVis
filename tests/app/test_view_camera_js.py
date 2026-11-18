@@ -611,3 +611,95 @@ Promise.race([
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_fit_aspect_survives_a_scene_plot_that_writes_the_previous_ratio():
+    """A scene plot that puts the previous ratio back must leave the fit ratio."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+function glplot() {
+  return {
+    aspect: {x: 1, y: 1, z: 1},
+    setAspectratio(aspect) { this.aspect = {x: aspect.x, y: aspect.y, z: aspect.z}; },
+    getAspectratio() { return this.aspect; },
+  };
+}
+const gd = {
+  layout: {
+    scene: {aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: 1}, camera: {projection: {type: 'orthographic'}}},
+    meta: {mattervis_render: {scene_id: 'salt', scene_generation: 1, camera_revision: 1}},
+  },
+  data: [{type: 'scatter3d', x: [0], y: [0], z: [0]}],
+  _fullLayout: {scene: {aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: 1}, _scene: {}}},
+};
+gd._fullLayout.scene._scene.glplot = glplot();
+gd._fullLayout.scene._scene.getCamera = () => ({
+  eye: {x: 1.076, y: 1.076, z: 0.965},
+  center: {x: 0.037, y: 0.037, z: -0.074},
+  up: {x: 0, y: 0, z: 1},
+  projection: {type: 'orthographic'},
+});
+const reacted = [];
+const sandbox = {
+  Promise, Object, Array, JSON, Number, String, Date, Math, setTimeout, clearTimeout,
+  window: {Plotly: {
+    relayout(graph) {
+      const scene = graph._fullLayout.scene;
+      const fresh = glplot();
+      scene._scene.glplot = fresh;
+      scene.aspectratio.x = 1;
+      scene.aspectratio.y = 1;
+      scene.aspectratio.z = 1;
+      fresh.setAspectratio({x: 1, y: 1, z: 1});
+      return Promise.resolve();
+    },
+    react(_gd, _data, layout) { reacted.push(layout); return Promise.resolve(); },
+  }},
+  document: {getElementById: (id) => id === 'crystal-graph' ? {querySelector: () => gd} : null},
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const api = sandbox.window.MatterVisViewCamera;
+const commanded = {x: 1.0857835859060287, y: 1.0857835859060287, z: 1.0857835859060287};
+const fittedRanges = {x: [-0.652, 6.292], y: [-0.652, 6.292], z: [-0.652, 6.292]};
+const camera = {
+  eye: {x: 1.0762449962100558, y: 1.0762449962100558, z: 0.9652014612038681},
+  center: {x: 0.03701451166872919, y: 0.03701451166872919, z: -0.07402902333745838},
+  up: {x: 0, y: 0, z: 1},
+  projection: {type: 'orthographic'},
+};
+(async () => {
+  assert.equal(await api.applyAsync(camera, {
+    scene_id: 'salt', scene_generation: 1, camera_version: 2, command: 'fit',
+    aspectratio: commanded, ranges: fittedRanges,
+  }), true);
+  const layout = gd._fullLayout.scene.aspectratio;
+  const painted = gd._fullLayout.scene._scene.glplot.getAspectratio();
+  for (const axis of ['x', 'y', 'z']) {
+    assert.ok(Math.abs(layout[axis] - commanded[axis]) / commanded[axis] < 0.01, 'layout ' + axis);
+    assert.ok(Math.abs(painted[axis] - commanded[axis]) / commanded[axis] < 0.01, 'gl ' + axis);
+  }
+  gd._fullLayout.scene._scene.glplot.setAspectratio({x: 1, y: 1, z: 1});
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - commanded.x) / commanded.x < 0.01);
+  gd.layout.scene.xaxis = {range: [-2.682, 8.322], autorange: true};
+  await api.recover(gd, camera, {command: 'fit', aspectratio: commanded, ranges: fittedRanges, requireEye: true, restoreViewport: true});
+  const recovered = reacted.at(-1).scene;
+  assert.ok(Math.abs(recovered.aspectratio.x - commanded.x) / commanded.x < 0.01);
+  assert.equal(Number(recovered.xaxis.range[0]), fittedRanges.x[0]);
+  assert.equal(Number(recovered.xaxis.range[1]), fittedRanges.x[1]);
+  assert.equal(recovered.xaxis.autorange, false);
+  assert.equal(await api.applyAsync(camera, {
+    scene_id: 'salt', scene_generation: 1, camera_version: 3, command: 'reset',
+    aspectratio: {x: 1, y: 1, z: 1},
+  }), true);
+  gd._fullLayout.scene._scene.glplot.setAspectratio({x: 1, y: 1, z: 1});
+  assert.equal(gd._fullLayout.scene.aspectratio.x, 1);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr or result.stdout

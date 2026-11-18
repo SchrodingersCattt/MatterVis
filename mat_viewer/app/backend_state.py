@@ -309,6 +309,23 @@ class _StateBackendMixin:
                 state["camera_revision"] = int(patch["camera_revision"])
             except (TypeError, ValueError):
                 pass
+        if "camera_aspect_scale" in patch and patch["camera_aspect_scale"] is not None:
+            try:
+                scale = float(patch["camera_aspect_scale"])
+            except (TypeError, ValueError):
+                scale = 1.0
+            if scale != scale or scale <= 0.0:
+                scale = 1.0
+            state["camera_aspect_scale"] = scale
+        if "fit_axis_ranges" in patch:
+            raw_ranges = patch["fit_axis_ranges"]
+            if raw_ranges is None:
+                state["fit_axis_ranges"] = None
+            elif isinstance(raw_ranges, dict) and all(axis in raw_ranges for axis in ("x", "y", "z")):
+                state["fit_axis_ranges"] = {
+                    axis: [float(raw_ranges[axis][0]), float(raw_ranges[axis][1])]
+                    for axis in ("x", "y", "z")
+                }
         # Phase 4 (view tools): top-level ``projection`` is a v2 state
         # key that mirrors ``camera.projection.type``. Accept either
         # spelling so AI callers don't have to dig into the camera
@@ -533,7 +550,10 @@ class _StateBackendMixin:
             }:
                 update_payload = {}
                 if change_kind == UpdateKind.CAMERA:
-                    update_payload["camera"] = copy.deepcopy(state.get("camera"))
+                    update_payload.update(fitted_camera_payload(state))
+                    aspect = framed_aspectratio(self, state)
+                    if aspect is not None:
+                        update_payload["aspectratio"] = aspect
                 elif change_kind in {UpdateKind.OVERLAY, UpdateKind.DISPLAY}:
                     update_payload.update(
                         {
@@ -656,6 +676,10 @@ class _StateBackendMixin:
             include_boundary_replicas=not wrap_into_cell,
             include_cross_boundary_bond_endpoints=not wrap_into_cell,
         )
+        fit_ranges = state.get("fit_axis_ranges")
+        if isinstance(fit_ranges, dict) and all(axis in fit_ranges for axis in ("x", "y", "z")):
+            scene = dict(scene)
+            scene["viewport"] = {axis: list(fit_ranges[axis]) for axis in ("x", "y", "z")}
         if "geometry_entities" in state:
             scene = dict(scene)
             scene["geometry_entities"] = copy.deepcopy(state["geometry_entities"])
@@ -892,6 +916,12 @@ class _StateBackendMixin:
         # onto the style dict so the renderer's
         # ``_plotly_camera_from_scene`` picks orthographic vs.
         # perspective without rebuilding the scene.
+        try:
+            aspect_scale = float(state.get("camera_aspect_scale") or 1.0)
+        except (TypeError, ValueError):
+            aspect_scale = 1.0
+        if aspect_scale == aspect_scale and aspect_scale > 0.0:
+            style["camera_aspect_scale"] = aspect_scale
         style["projection"] = _coerce_projection(
             state.get("projection", style.get("projection", "perspective")),
             fallback=str(style.get("projection", "perspective")),

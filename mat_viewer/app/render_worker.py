@@ -233,6 +233,22 @@ class AsyncRenderWorker:
                 error=f"{type(exc).__name__}: {exc}",
             )
 
+    def _same_figure_body_ignoring_fit_frame(self, state: dict[str, Any], current: dict[str, Any]) -> bool:
+        """Fit stores its box and aspect scale beside the camera revision.
+
+        Those fields change the published frame, but a Fit that arrives
+        during a build is still the same scene body and must be requeued
+        like any other camera command.
+        """
+
+        def stripped(snapshot: dict[str, Any]) -> str:
+            key_state = json.loads(self.backend._figure_state_cache_key(snapshot))
+            key_state.pop("fit_axis_ranges", None)
+            key_state.pop("camera_aspect_scale", None)
+            return json.dumps(key_state, sort_keys=True, separators=(",", ":"))
+
+        return stripped(state) == stripped(current)
+
     def _camera_advanced_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
         """Return the live state when only the camera changed mid-build.
 
@@ -273,9 +289,7 @@ class AsyncRenderWorker:
                 current.get("material") == "flat"
                 and current.get("style") == "ortep"
             )
-            if not flat_ortep and self.backend._figure_state_cache_key(state) != self.backend._figure_state_cache_key(
-                current
-            ):
+            if not flat_ortep and not self._same_figure_body_ignoring_fit_frame(state, current):
                 return None
             if int(current.get("camera_revision", 0) or 0) == int(
                 state.get("camera_revision", 0) or 0
