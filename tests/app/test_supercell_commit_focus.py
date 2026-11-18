@@ -196,8 +196,9 @@ assert.equal(typeof otherPage, 'function');
 
 def test_commit_callback_does_not_focus_the_catalog():
     source = (ROOT / "mat_viewer" / "app" / "callbacks_operations.py").read_text(encoding="utf-8")
-    assert 'Output("scene-tabs", "value", allow_duplicate=True)' in source
+    assert 'Output("operate-scene-focus", "data")' in source
     assert 'Input("operate-status", "children")' in source
+    assert 'set_props("scene-tabs"' in source
     assert "MatterVisSelectCommittedScene" in source
     assert "focus_clients" not in source
     assert "_publish_scene_catalog(focus=True)" not in source

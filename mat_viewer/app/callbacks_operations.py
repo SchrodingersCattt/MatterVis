@@ -516,13 +516,20 @@ def register_operations_callbacks(app, backend):
         app.clientside_callback(
             """
             function(status) {
-              if (typeof window.MatterVisSelectCommittedScene === "function") {
-                return window.MatterVisSelectCommittedScene(status);
+              if (typeof window.MatterVisSelectCommittedScene !== "function") {
+                return window.dash_clientside.no_update;
               }
-              return window.dash_clientside.no_update;
+              var selected = window.MatterVisSelectCommittedScene(status);
+              if (!selected || selected === window.dash_clientside.no_update) {
+                return window.dash_clientside.no_update;
+              }
+              if (window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
+                window.dash_clientside.set_props("scene-tabs", {value: selected});
+              }
+              return selected;
             }
             """,
-            Output("scene-tabs", "value", allow_duplicate=True),
+            Output("operate-scene-focus", "data"),
             Input("operate-status", "children"),
             prevent_initial_call=True,
         )
