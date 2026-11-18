@@ -188,14 +188,15 @@ Notes for callers:
   camera do not keep one WebGL camera. Clients preserve the live camera only
   for the same scene, scene generation, server epoch, and `uirevision`
   while a gesture on that scene is still in progress. A settled drag,
-  pan, or zoom leaves `camera_revision` unchanged. Returning to the
-  scene paints the camera in `camera-state-store` for that same
-  revision and scene generation, not the pose baked into the last
-  complete frame. The store carries `camera_revision` and
-  `scene_generation` beside `scene_id` and `camera`. A store older than
-  the mounted revision is ignored. A clipped or off-screen camera is
-  still replaced by the scene refit before the store is what the canvas
-  paints. A transient camera revision is read back only for that same generation and
+  pan, or zoom leaves `camera_revision` unchanged. The published figure
+  snapshot is not rewritten from that later camera.
+  `camera-state-store` carries the accepted pose, `camera_revision`, and
+  `scene_generation`. Every writer of that store uses `allow_duplicate`.
+  Returning to the scene paints the store camera for that same revision
+  and generation, not the pose baked into the last complete frame. A
+  store older than the mounted revision is ignored. A clipped or
+  off-screen camera is still replaced by the scene refit before the
+  store is what the canvas paints. A transient camera revision is read back only for that same generation and
   epoch. A width/height replot during an in-progress drag restores the live
   drag camera only when that drag's scene generation and, when both sides
   have one, server session still match the mounted figure. A frame or

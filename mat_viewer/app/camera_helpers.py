@@ -35,6 +35,21 @@ def _camera_store_payload(
     return payload
 
 
+def _camera_store_for_state(
+    state: Optional[dict[str, Any]],
+    camera: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Store payload for one scene, including the clocks that accepted it."""
+    state = state or {}
+    chosen = state.get("camera") if camera is None else camera
+    return _camera_store_payload(
+        state.get("scene_id"),
+        chosen,
+        camera_revision=state.get("camera_revision"),
+        scene_generation=state.get("scene_generation"),
+    )
+
+
 def _camera_figure_patch(
     scene: dict[str, Any],
     style: dict[str, Any],
@@ -342,12 +357,7 @@ def _persist_relayout_camera(
         ), state=state)
     return {
         "scene_id": str(scene_id),
-        "camera_store": _camera_store_payload(
-            scene_id,
-            state.get("camera"),
-            camera_revision=state.get("camera_revision"),
-            scene_generation=state.get("scene_generation"),
-        ),
+        "camera_store": _camera_store_for_state(state),
         "agent_state": copy.deepcopy(state) if flat_ortep else None,
         "refit": replaced,
         "view_update": view_update,
