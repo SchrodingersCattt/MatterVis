@@ -401,6 +401,28 @@ def _validate_render_options(args: argparse.Namespace) -> None:
         raise ValueError("--sphere-detail must be at least 2 3")
     if args.cylinder_sides < 3:
         raise ValueError("--cylinder-sides must be at least 3")
+    if getattr(args, "periodic_isosurface", None) is True:
+        raise ValueError(
+            "--periodic-isosurface is not applied by mat-vis render. "
+            "CPU isosurface meshes do not close the scalar grid across cell "
+            "faces. Pass --no-periodic-isosurface or omit the flag. "
+            "Style key isosurface_periodic is read only by the legacy Plotly "
+            "trace path."
+        )
+    if args.isosurface_density_mask:
+        if not args.isosurface_density_cube or not str(args.isosurface_density_cube).strip():
+            raise ValueError(
+                "--isosurface-density-mask requires --isosurface-density-cube. "
+                "The isosurface was not masked and no cutoff was chosen "
+                "automatically."
+            )
+        cutoff = args.isosurface_density_cutoff
+        if cutoff is None or not math.isfinite(cutoff) or cutoff <= 0.0:
+            raise ValueError(
+                "--isosurface-density-mask requires --isosurface-density-cutoff "
+                "ρ_cut > 0 in e/Bohr^3. Values in e/Å^3 are not accepted or "
+                "converted, and 0.05 is not a default."
+            )
     from .fast_cli import validate_batch_render_options
 
     validate_batch_render_options(args, animation=animation)
@@ -488,13 +510,20 @@ def add_isosurface_arguments(parser: argparse.ArgumentParser) -> None:
         dest="periodic_isosurface",
         action="store_true",
         default=None,
-        help="Close cube scalar values across opposite unit-cell faces.",
+        help=(
+            "Rejected by mat-vis render. CPU meshes do not close the scalar "
+            "grid across cell faces. Pass --no-periodic-isosurface or omit "
+            "the flag."
+        ),
     )
     parser.add_argument(
         "--no-periodic-isosurface",
         dest="periodic_isosurface",
         action="store_false",
-        help="Do not close cube scalar values across unit-cell faces.",
+        help=(
+            "CPU meshes already omit cell-face closure. This flag records "
+            "that choice."
+        ),
     )
     parser.add_argument(
         "--isosurface-positive-color",
@@ -559,6 +588,45 @@ def add_isosurface_arguments(parser: argparse.ArgumentParser) -> None:
             "use Matplotlib."
         ),
     )
+    parser.add_argument(
+        "--isosurface-density-mask",
+        action="store_true",
+        help=(
+            "Opt-in high-density ceiling for an interaction isosurface. Off "
+            "by default, and ignored for orbital and electron-density "
+            "isosurfaces unless you set it on that render. Requires "
+            "--isosurface-density-cube and --isosurface-density-cutoff. "
+            "Does not choose a cutoff and does not default to 0.05."
+        ),
+    )
+    parser.add_argument(
+        "--isosurface-density-cube",
+        default=None,
+        help=(
+            "Electron-density cube sampled at isosurface vertices when "
+            "--isosurface-density-mask is set. Ignored when the mask is off, "
+            "even if a path is present. Scalar values must be atomic units, "
+            "e/Bohr^3. e/Å^3 is not converted."
+        ),
+    )
+    parser.add_argument(
+        "--isosurface-density-cutoff",
+        type=float,
+        default=None,
+        help=(
+            "User cutoff ρ_cut > 0 in e/Bohr^3 (1 a.u. ≈ 6.748 e/Å^3; "
+            "0.05 a.u. ≈ 0.337 e/Å^3). Not a default and not converted from "
+            "e/Å^3. Triangles with any vertex above ρ_cut are dropped. "
+            "0.05 is a weak-interaction NCI/RDG starting point only: it is "
+            "not an IRI default, not shared across descriptors, and not "
+            "transferable from a DFT/NCI convention onto a promolecular "
+            "field. Do not copy a geometric bond-midpoint density. On a "
+            "promolecular formic acid cyclic-dimer field the H···O midpoint "
+            "was ρ ≈ 0.09 and would erase the RDG sheets "
+            "(ρ ≈ 0.037–0.051). Inspect ρ on the isosurface you draw, and "
+            "state the mask and cutoff in the figure caption."
+        ),
+    )
 
 
 def isosurface_render_fields(args: argparse.Namespace) -> dict[str, object]:
@@ -583,4 +651,7 @@ def isosurface_render_fields(args: argparse.Namespace) -> dict[str, object]:
         ),
         "isosurface_color_center": args.isosurface_color_center,
         "isosurface_colormap": args.isosurface_colormap,
+        "isosurface_density_mask": bool(args.isosurface_density_mask),
+        "isosurface_density_cube": args.isosurface_density_cube,
+        "isosurface_density_cutoff": args.isosurface_density_cutoff,
     }

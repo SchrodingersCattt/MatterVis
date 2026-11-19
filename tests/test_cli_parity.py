@@ -70,6 +70,9 @@ def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
             "isosurface_color_range": "isosurface_color_range",
             "isosurface_color_center": "isosurface_color_center",
             "isosurface_colormap": "isosurface_colormap",
+            "isosurface_density_mask": "isosurface_density_mask",
+            "isosurface_density_cube": "isosurface_density_cube",
+            "isosurface_density_cutoff": "isosurface_density_cutoff",
         },
         AtomPropertyColorSpec: {
             "fields": "color_by",

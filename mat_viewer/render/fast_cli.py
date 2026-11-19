@@ -262,6 +262,10 @@ def render_batch_if_selected(
                 "--cell-overlays",
                 getattr(args, "cell_overlays", None) is not None,
             ),
+            (
+                "--isosurface-density-mask",
+                bool(getattr(args, "isosurface_density_mask", False)),
+            ),
         )
         if present
     ]
