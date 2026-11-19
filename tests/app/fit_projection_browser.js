@@ -159,7 +159,6 @@ function sampleMatches(sample, target) {
 function sameSample(left, right) {
   if (!left || !right) return false;
   return left.revision === right.revision
-    && left.renderRevision === right.renderRevision
     && left.sceneId === right.sceneId
     && left.span === right.span
     && left.status === right.status

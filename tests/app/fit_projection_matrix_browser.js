@@ -240,9 +240,10 @@ async function capture(page, shots, name, projection, boundary, consoleErrors) {
     if (typeof value === "number") return Math.round(value * 1e8) / 1e8;
     return value;
   };
+  /* render_revision can advance when the worker republishes the same
+   * fitted camera. The shutter is the camera, the data box, and the plot. */
   const tag = (sample) => JSON.stringify({
     revision: sample.revision,
-    renderRevision: sample.renderRevision,
     sceneId: sample.sceneId,
     eye: round(sample.eye),
     center: round(sample.center),
