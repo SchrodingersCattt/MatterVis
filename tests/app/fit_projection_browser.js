@@ -142,6 +142,19 @@ function readCapture() {
     const pad = id === "perf-log-panel" ? 24 : 0;
     return {id, x: rect.x - pad, y: rect.y - pad, width: rect.width + 2 * pad, height: rect.height + 2 * pad};
   }).filter(Boolean);
+  const compass = document.getElementById("mv-compass-svg");
+  const axes = document.querySelector("#display-options input[value='axes']");
+  const compassRect = compass ? compass.getBoundingClientRect() : null;
+  const statusRect = status ? status.getBoundingClientRect() : null;
+  sample.overlays = {
+    devicePixelRatio: window.devicePixelRatio || 1,
+    axesChecked: !!(axes && axes.checked),
+    axesEnabled: window.__mv_axes_enabled,
+    compassChildren: compass ? compass.childElementCount : 0,
+    compass: compassRect ? {x: compassRect.x, y: compassRect.y, width: compassRect.width, height: compassRect.height} : null,
+    statusHidden: status ? !!status.hidden : null,
+    status: statusRect ? {x: statusRect.x, y: statusRect.y, width: statusRect.width, height: statusRect.height} : null,
+  };
   return sample;
 }
 

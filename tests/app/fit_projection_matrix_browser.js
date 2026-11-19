@@ -208,6 +208,24 @@ function readPaint() {
     geometryVersion: render && render.geometry_version != null && render.geometry_version !== "" ? Number(render.geometry_version) : null,
     coordinateDigest: window.MatterVisFitShutter ? window.MatterVisFitShutter.coordinateDigest(gd.data) : "",
     boundaryChecked: !!(boundaryBox && boundaryBox.checked),
+    overlays: (function () {
+      function box(node) {
+        if (!node) return null;
+        const rect = node.getBoundingClientRect();
+        return {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
+      }
+      const compass = document.getElementById("mv-compass-svg");
+      const axes = document.querySelector("#display-options input[value='axes']");
+      return {
+        devicePixelRatio: window.devicePixelRatio || 1,
+        axesChecked: !!(axes && axes.checked),
+        axesEnabled: window.__mv_axes_enabled,
+        compassChildren: compass ? compass.childElementCount : 0,
+        compass: box(compass),
+        statusHidden: status ? !!status.hidden : null,
+        status: box(status),
+      };
+    })(),
     aspect: {x: layout.aspectratio.x, y: layout.aspectratio.y, z: layout.aspectratio.z},
     ranges: {x: layout.xaxis.range, y: layout.yaxis.range, z: layout.zaxis.range},
     status: status && !status.hidden ? String(status.textContent || "") : "",

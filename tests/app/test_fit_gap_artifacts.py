@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from tests.app.fit_gap_artifacts import measure_gap, write_gap_artifacts
+from tests.app.fit_gap_artifacts import measure_gap, preserve_browser_files, write_gap_artifacts
 from tests.app.test_fit_projection_browser import _assert_painted_gaps
 
 
@@ -89,3 +89,45 @@ def test_assert_writes_the_ci_artifact_directory(tmp_path: Path):
     assert payload["after"]["sceneGeneration"] == "3"
     assert (saved / "elongated-1280-perspective.png").is_file()
     assert (saved / "elongated-1280-perspective-mask.png").is_file()
+
+
+def test_empty_ink_keeps_the_png_and_fails(tmp_path: Path):
+    shots_dir = tmp_path / "shots"
+    shots_dir.mkdir()
+    Image.new("RGB", (80, 40), (255, 255, 255)).save(shots_dir / "blank.png")
+    shot = {
+        "file": "blank.png",
+        "plot": {"x": 0, "y": 0, "width": 80, "height": 40},
+        "chrome": [],
+        "eye": [1, 1, 1],
+        "sceneGeneration": "1",
+        "geometryVersion": 0,
+        "coordinateDigest": "",
+    }
+    record = measure_gap(shot, shots_dir)
+    assert record["failed"] is True
+    assert record["empty_ink"] is True
+    saved = write_gap_artifacts(tmp_path / "out", [shot], shots_dir, [record])
+    assert (saved / "blank.png").read_bytes() == (shots_dir / "blank.png").read_bytes()
+    payload = json.loads((saved / "blank.json").read_text(encoding="utf-8"))
+    assert payload["empty_ink"] is True
+    assert payload["gaps_left_right_top_bottom"] is None
+    assert payload["after"]["sceneGeneration"] == "1"
+
+
+def test_node_failure_keeps_partial_screenshots(tmp_path: Path):
+    shots_dir = tmp_path / "shots"
+    shots_dir.mkdir()
+    (shots_dir / "partial.png").write_bytes(b"png")
+    (shots_dir / "matrix-fit-timeout.json").write_text("{}", encoding="utf-8")
+    saved = preserve_browser_files(
+        tmp_path / "out",
+        shots_dir,
+        reason="node",
+        stdout="stdout",
+        stderr="stderr",
+    )
+    assert (saved / "partial.png").read_bytes() == b"png"
+    assert (saved / "matrix-fit-timeout.json").read_text(encoding="utf-8") == "{}"
+    assert json.loads((saved / "reason.json").read_text(encoding="utf-8"))["reason"] == "node"
+    assert (saved / "stderr.txt").read_text(encoding="utf-8") == "stderr"

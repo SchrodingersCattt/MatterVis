@@ -11,7 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.app.fit_gap_artifacts import ink_box, measure_gap, write_gap_artifacts
+from tests.app.fit_gap_artifacts import (
+    ink_box,
+    measure_gap,
+    preserve_browser_files,
+    write_gap_artifacts,
+)
 from tests.app.real_app_server import start_mattervis
 from tests.app.test_camera_browser_regression import (
     _chrome,
@@ -108,15 +113,23 @@ def _gap_records(shots, shots_dir: Path) -> list[dict]:
 
 
 def _assert_painted_gaps(shots, shots_dir: Path) -> None:
+    toasts = _toast_problems(shots)
     records = _gap_records(shots, shots_dir)
     problems = [record["problem"] for record in records if record["failed"]]
     artifact = None
-    if problems:
-        artifact = write_gap_artifacts(_fit_artifact_dir(), shots, shots_dir, records)
-    message = "\n".join(str(item) for item in problems)
+    if problems or toasts:
+        artifact = _fit_artifact_dir()
+        if problems:
+            write_gap_artifacts(artifact, shots, shots_dir, records)
+        preserve_browser_files(
+            artifact,
+            shots_dir,
+            reason="painted margin" if problems else "toast",
+        )
+    message = "\n".join(str(item) for item in [*toasts, *problems])
     if artifact is not None:
         message = f"{message}\nartifacts: {artifact}"
-    assert not problems, message
+    assert not toasts and not problems, message
 
 
 def _run_browser(tmp_path, runner: Path, cifs: list[str]):
@@ -130,19 +143,43 @@ def _run_browser(tmp_path, runner: Path, cifs: list[str]):
     shots_dir.mkdir()
     running = start_mattervis(str(tmp_path), cifs)
     try:
-        result = subprocess.run(
-            [node, str(runner), playwright, chrome, running.url, str(shots_dir)],
-            capture_output=True,
-            text=True,
-            timeout=180,
-            check=False,
-            cwd=str(ROOT),
-            env={**os.environ, "NODE_PATH": str(ROOT / "node_modules")},
-        )
+        try:
+            result = subprocess.run(
+                [node, str(runner), playwright, chrome, running.url, str(shots_dir)],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+                cwd=str(ROOT),
+                env={**os.environ, "NODE_PATH": str(ROOT / "node_modules")},
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", "replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", "replace")
+            saved = preserve_browser_files(
+                _fit_artifact_dir(),
+                shots_dir,
+                reason="timeout",
+                stdout=stdout,
+                stderr=stderr,
+            )
+            pytest.fail(f"fit browser test timed out\nartifacts: {saved}")
     finally:
         running.stop()
     if result.returncode != 0:
-        pytest.fail((result.stderr or result.stdout or "fit browser test failed")[-4000:])
+        saved = preserve_browser_files(
+            _fit_artifact_dir(),
+            shots_dir,
+            reason="node",
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+        )
+        tail = (result.stderr or result.stdout or "fit browser test failed")[-4000:]
+        pytest.fail(f"{tail}\nartifacts: {saved}")
     return json.loads(result.stdout.strip().splitlines()[-1]), shots_dir
 
 
@@ -150,7 +187,6 @@ def test_painted_fit_frames_the_cell(tmp_path):
     shots, shots_dir = _run_browser(tmp_path, RUNNER, [str(NACL)])
     assert len(shots) == 6
     assert all(shot.get("boundaryChecked") is True for shot in shots)
-    assert not _toast_problems(shots), _toast_problems(shots)
     _assert_painted_gaps(shots, shots_dir)
 
 
@@ -166,7 +202,6 @@ def test_painted_fit_frames_elongated_triclinic_and_water(tmp_path):
     )
     assert len(shots) == 9
     assert all(shot.get("boundaryChecked") is shot["boundary"] for shot in shots)
-    assert not _toast_problems(shots), _toast_problems(shots)
     _assert_painted_gaps(shots, shots_dir)
     elongated = [shot for shot in shots if shot["file"].startswith("elongated-")]
     assert elongated
@@ -211,6 +246,7 @@ def test_fit_readback_survives_figure_react_tab_roundtrip_and_reset(tmp_path):
     assert report["reset"]["spans"][0] < 9.0
     shot = {"file": report["file"], "plot": report["plot"], "chrome": report["chrome"]}
     x0, y0, x1, y1, visible = _ink_box(shots_dir / shot["file"], shot["plot"], shot["chrome"])
+    assert x0 is not None, shot["file"]
     gaps = (
         x0 - visible["x"],
         visible["x"] + visible["width"] - x1,

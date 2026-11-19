@@ -33,6 +33,7 @@ _IDENTITY = (
     "plot",
     "canvas",
     "chrome",
+    "overlays",
 )
 
 
@@ -74,7 +75,7 @@ def ink_box(
                     xs.append(x)
                     ys.append(y)
     if not xs:
-        raise AssertionError(path)
+        return None, None, None, None, visible
     return min(xs), min(ys), max(xs), max(ys), visible
 
 
@@ -110,6 +111,26 @@ def measure_gap(shot: Mapping[str, Any], shots_dir: Path) -> dict[str, Any]:
     chrome = list(shot.get("chrome") or [])
     path = shots_dir / str(shot["file"])
     x0, y0, x1, y1, visible = ink_box(path, shot["plot"], chrome)
+    if x0 is None:
+        with Image.open(path) as opened:
+            image_size = [opened.width, opened.height]
+        return {
+            "file": shot["file"],
+            "path": path,
+            "failed": True,
+            "empty_ink": True,
+            "gaps": None,
+            "pad": None,
+            "inside": False,
+            "tight": False,
+            "centered": False,
+            "spans": None,
+            "aspect": shot.get("aspect"),
+            "ink_bbox": None,
+            "visible": visible,
+            "image_size": image_size,
+            "problem": (shot["file"], "no counted ink", visible),
+        }
     short = min(visible["width"], visible["height"])
     pad = _MARGIN * short
     gaps = (
@@ -148,6 +169,7 @@ def measure_gap(shot: Mapping[str, Any], shots_dir: Path) -> dict[str, Any]:
         "ink_bbox": [x0, y0, x1, y1],
         "visible": visible,
         "image_size": image_size,
+        "empty_ink": False,
         "problem": (
             shot["file"],
             [round(gap, 1) for gap in gaps],
@@ -193,11 +215,26 @@ def _bottom_pixels(
     return found[::step][:64]
 
 
+def _outline(draw: ImageDraw.ImageDraw, rect: Mapping[str, Any], color: tuple[int, int, int]) -> None:
+    if not rect or rect.get("width") in (None, 0) or rect.get("height") in (None, 0):
+        return
+    draw.rectangle(
+        (
+            float(rect["x"]),
+            float(rect["y"]),
+            float(rect["x"]) + float(rect["width"]) - 1,
+            float(rect["y"]) + float(rect["height"]) - 1,
+        ),
+        outline=color,
+    )
+
+
 def _write_mask(
     image: Image.Image,
     record: Mapping[str, Any],
     chrome: list[Mapping[str, Any]],
     destination: Path,
+    shot: Mapping[str, Any],
 ) -> None:
     mask = Image.new("RGB", image.size, (0, 0, 0))
     target = mask.load()
@@ -215,39 +252,30 @@ def _write_mask(
             target[x, y] = (255, 140, 0) if covered(x, y, chrome) else (255, 0, 255)
     draw = ImageDraw.Draw(mask)
     draw.rectangle((left, top, right - 1, bottom - 1), outline=(0, 255, 255))
-    pad = float(record["pad"])
-    draw.rectangle(
-        (
-            left + pad,
-            top + pad,
-            right - 1 - pad,
-            bottom - 1 - pad,
-        ),
-        outline=(0, 255, 0),
-    )
-    canvas = record.get("canvas")
+    if record.get("pad") is not None:
+        pad = float(record["pad"])
+        draw.rectangle(
+            (
+                left + pad,
+                top + pad,
+                right - 1 - pad,
+                bottom - 1 - pad,
+            ),
+            outline=(0, 255, 0),
+        )
+    canvas = shot.get("canvas")
     if isinstance(canvas, Mapping):
-        draw.rectangle(
-            (
-                float(canvas["x"]),
-                float(canvas["y"]),
-                float(canvas["x"]) + float(canvas["width"]) - 1,
-                float(canvas["y"]) + float(canvas["height"]) - 1,
-            ),
-            outline=(255, 255, 255),
-        )
+        _outline(draw, canvas, (255, 255, 255))
     for item in chrome:
-        draw.rectangle(
-            (
-                float(item["x"]),
-                float(item["y"]),
-                float(item["x"]) + float(item["width"]) - 1,
-                float(item["y"]) + float(item["height"]) - 1,
-            ),
-            outline=(255, 140, 0),
-        )
-    x0, y0, x1, y1 = record["ink_bbox"]
-    draw.rectangle((x0, y0, x1, y1), outline=(255, 255, 0))
+        _outline(draw, item, (255, 140, 0))
+    overlays = shot.get("overlays") if isinstance(shot.get("overlays"), Mapping) else {}
+    for key in ("compass", "status"):
+        node = overlays.get(key) if isinstance(overlays, Mapping) else None
+        if isinstance(node, Mapping):
+            _outline(draw, node, (80, 160, 255))
+    if record.get("ink_bbox"):
+        x0, y0, x1, y1 = record["ink_bbox"]
+        draw.rectangle((x0, y0, x1, y1), outline=(255, 255, 0))
     mask.save(destination)
 
 
@@ -270,21 +298,24 @@ def write_gap_artifacts(
         source = Path(record["path"])
         stem = Path(str(record["file"])).stem
         shutil.copyfile(source, directory / f"{stem}.png")
+        lowest: list[dict[str, Any]] = []
         with Image.open(source) as opened:
             image = opened.convert("RGB")
-            _write_mask(image, record, chrome, directory / f"{stem}-mask.png")
-            _x0, _y0, _x1, y1 = record["ink_bbox"]
-            visible = record["visible"]
-            crop = image.crop(
-                (
-                    int(visible["x"]),
-                    max(0, int(y1) - 47),
-                    int(visible["x"]) + int(visible["width"]),
-                    min(image.height, int(y1) + 1),
+            _write_mask(image, record, chrome, directory / f"{stem}-mask.png", shot)
+            if record.get("ink_bbox"):
+                _x0, _y0, _x1, y1 = record["ink_bbox"]
+                visible = record["visible"]
+                crop = image.crop(
+                    (
+                        int(visible["x"]),
+                        max(0, int(y1) - 47),
+                        int(visible["x"]) + int(visible["width"]),
+                        min(image.height, int(y1) + 1),
+                    )
                 )
-            )
-            crop.save(directory / f"{stem}-bottom.png")
-            lowest = _bottom_pixels(image, record, chrome)
+                crop.save(directory / f"{stem}-bottom.png")
+                lowest = _bottom_pixels(image, record, chrome)
+        gaps = record.get("gaps")
         payload = {
             "legend": {
                 "mask_magenta": "counted ink (not white, outside control rectangles)",
@@ -293,13 +324,15 @@ def write_gap_artifacts(
                 "mask_green": "8% inset of the shorter plot side",
                 "mask_white": "canvas rectangle, when the shot recorded one",
                 "mask_orange_outline": "control rectangle without the 4px pad",
+                "mask_blue": "compass or render-status rectangle, recorded and not excluded",
                 "mask_yellow": "counted ink bounding box",
                 "original": f"{stem}.png",
                 "bottom": f"{stem}-bottom.png is the original pixels along the lowest counted ink",
             },
             "file": record["file"],
             "image_size": record["image_size"],
-            "gaps_left_right_top_bottom": [round(gap, 4) for gap in record["gaps"]],
+            "empty_ink": bool(record.get("empty_ink")),
+            "gaps_left_right_top_bottom": None if gaps is None else [round(gap, 4) for gap in gaps],
             "pad": record["pad"],
             "inside": record["inside"],
             "tight": record["tight"],
@@ -324,6 +357,37 @@ def write_gap_artifacts(
             },
             indent=2,
         ),
+        encoding="utf-8",
+    )
+    return directory
+
+
+def preserve_browser_files(
+    directory: Path,
+    shots_dir: Path,
+    *,
+    reason: str,
+    stdout: str = "",
+    stderr: str = "",
+) -> Path:
+    """Copy screenshots and logs when the runner stops before the margin check.
+
+    Empty ink, a Node failure, a timeout, and a toast still fail. This only
+    keeps the files those exits used to delete with the temporary directory.
+    """
+
+    directory.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    if shots_dir.is_dir():
+        for path in sorted(shots_dir.iterdir()):
+            if path.suffix.lower() not in {".png", ".json", ".txt"}:
+                continue
+            shutil.copyfile(path, directory / path.name)
+            copied.append(path.name)
+    (directory / "stdout.txt").write_text(stdout or "", encoding="utf-8")
+    (directory / "stderr.txt").write_text(stderr or "", encoding="utf-8")
+    (directory / "reason.json").write_text(
+        json.dumps({"reason": reason, "files": copied}, indent=2),
         encoding="utf-8",
     )
     return directory
