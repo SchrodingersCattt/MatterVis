@@ -79,6 +79,7 @@ The same routing as a quick table:
 | Draw unit-cell ball-and-stick sticks from MolCrysKit bond role and connectivity regime | [`scene_api.md`](scene_api.md) |
 | Audit which backend-neutral render controls are available from the CLI | [`cli-api-parity.md`](cli-api-parity.md) |
 | Use the optional native offscreen GPU PNG backend | [`gpu_backend.md`](gpu_backend.md) |
+| Choose CPU lighting (`studio_soft`, `unlit`) without changing the mesh/flat technique | [`lighting.md`](lighting.md) |
 | Read or override global Atomaestro defaults | [`config_api.md`](config_api.md) |
 | Select atoms/fragments in the live viewer and promote a selection to a group | [`selection_api.md`](selection_api.md) |
 | Pick visible atoms, bonds, polyhedron/mesh faces and BFDH facets; edit selected appearance with per-property inheritance | [`selection_api.md`](selection_api.md) |

@@ -23,6 +23,7 @@ except ImportError:  # pragma: no cover - exercised by the legacy fallback path
 
 
 NUMBA_AVAILABLE = njit is not None
+# studio_soft camera-space direction. Do not retune. See render/lighting.py.
 _LIGHT = np.asarray([-0.32, 0.42, 1.0], dtype=np.float32)
 _LIGHT /= np.linalg.norm(_LIGHT)
 

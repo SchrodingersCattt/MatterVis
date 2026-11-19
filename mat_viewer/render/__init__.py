@@ -48,6 +48,8 @@ _LAZY_EXPORTS = {
     "vector_overlay_bounds": (".overlay.vectors", "vector_overlay_bounds"),
     "ViewportSpec": (".viewport", "ViewportSpec"),
     "resolve_viewport": (".viewport", "resolve_viewport"),
+    "LightingRig": (".lighting", "LightingRig"),
+    "get_lighting_rig": (".lighting", "get_lighting_rig"),
 }
 
 
@@ -95,6 +97,7 @@ __all__ = [
     "CameraSpec",
     "DENSE_COORDINATION_PRESET",
     "LinePrimitive",
+    "LightingRig",
     "RenderPlan",
     "RenderResult",
     "RenderSpec",
@@ -107,6 +110,7 @@ __all__ = [
     "build_row_figure",
     "build_static_publication_figure",
     "cpu_render",
+    "get_lighting_rig",
     "gpu_render",
     "normalize_cell_overlays",
     "normalize_vector_overlays",

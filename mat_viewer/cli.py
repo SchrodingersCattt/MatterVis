@@ -716,6 +716,7 @@ def _render_check_payload(args: argparse.Namespace) -> dict:
         "render": {
             "representation": args.style,
             "shading": args.shading,
+            "lighting": args.lighting,
             "sphere_detail": list(args.sphere_detail),
             "cylinder_sides": args.cylinder_sides,
         },
@@ -1163,6 +1164,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 ortep_hydrogen_radius=args.ortep_hydrogen_radius, missing_adp_policy=args.missing_adp_policy,
                 sphere_detail=tuple(args.sphere_detail),
                 cylinder_sides=args.cylinder_sides,
+                lighting=args.lighting,
                 **isosurface_render_fields(args),
             )
             atom_groups, bond_groups = _style_groups(args)

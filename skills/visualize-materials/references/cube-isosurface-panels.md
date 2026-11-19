@@ -15,6 +15,10 @@ isosurfaces, and any multi-panel comparison of scalar fields.
   contract across comparable panels.
 - State whether periodic scalar closure is enabled. If a surface is split across
   opposite boundaries, verify image placement before enabling closure.
+- Orbitals, electron density, and Hirshfeld surfaces use the default
+  `studio_soft` light. Do not switch them to `--lighting unlit` for a journal
+  figure; unlit is for color-critical NCI/IRI where shading can distort
+  sign(λ2)ρ. `studio_three_point` is not a CPU isosurface light.
 
 ## Required rendering workflow
 

@@ -262,6 +262,11 @@ def render_batch_if_selected(
                 "--cell-overlays",
                 getattr(args, "cell_overlays", None) is not None,
             ),
+            (
+                "--lighting",
+                getattr(args, "lighting", "studio_soft")
+                not in {None, "studio_soft"},
+            ),
         )
         if present
     ]

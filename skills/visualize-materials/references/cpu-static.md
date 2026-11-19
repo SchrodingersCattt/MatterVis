@@ -33,6 +33,12 @@ mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --json \
   an SVG containing a full-canvas `<image>` raster substitute.
 - `ortep` is a representation; `flat` is shading; `cpu` is the backend. Do not
   treat those as interchangeable selector names.
+- `--lighting studio_soft` is the default camera-space light and matches
+  omitting the flag. `--lighting unlit` disables CPU shading. Do not pass
+  `studio_three_point` on this path; the CPU renderer rejects it instead of
+  drawing a fake three-light figure. A surface preset such as `hard_plastic`
+  or `metal_like` does not change the rig. `--publication-style` is rejected
+  and is not a lighting alias.
 - Missing ADPs default to an error. `sphere` is an explicit visual placeholder,
   not a fabricated displacement measurement; record its use.
 - Aromatic rings default to ordinary bonds. Select circle/disk only when the

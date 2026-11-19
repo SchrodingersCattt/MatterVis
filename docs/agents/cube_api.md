@@ -180,3 +180,7 @@ If marching cubes reports that the level does not cross the data, choose an
 explicit isovalue inside the scalar range. If isolated noise components remain,
 use the component-size and atom-mask controls deliberately; absence of their
 optional implementation is an error rather than a visual fallback.
+
+Publication orbitals, density, and Hirshfeld surfaces stay on `studio_soft`.
+`unlit` is for color-critical NCI/IRI plots, not the journal default for
+those surfaces. See [`lighting.md`](lighting.md).

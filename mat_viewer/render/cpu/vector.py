@@ -21,6 +21,14 @@ from ..contracts import (
     ViewportPlan,
 )
 from ..compass_overlay import draw_matplotlib_compass
+from ..lighting import (
+    cpu_shader_id,
+    get_lighting_rig,
+    keeps_legacy_response,
+    lighting_id_for_cpu,
+    read_surface_response,
+    shade_with_rig,
+)
 from ..property_colorbar import draw_matplotlib_colorbar
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
 from .raster_lines import _clipped_endpoint_rgb, endpoint_screen_weight
@@ -145,6 +153,7 @@ def render_vector(
     ).lower()
     if output_format not in {"svg", "pdf"}:
         raise ValueError("vector format must be svg or pdf")
+    lighting = lighting_id_for_cpu(plan.metadata)
     if int(dpi) <= 0:
         raise ValueError("dpi must be positive")
 
@@ -191,7 +200,9 @@ def render_vector(
             axes.set_ylim(float(local_height), 0.0)
             axes.set_aspect("equal", adjustable="box")
             axes.axis("off")
-            polygons, pieces = vector_scene(viewport, local_width, local_height)
+            polygons, pieces = vector_scene(
+                viewport, local_width, local_height, lighting=lighting
+            )
             buckets: dict[int, list[VectorLinePiece]] = {}
             for piece in pieces:
                 buckets.setdefault(piece.insertion_index, []).append(piece)
@@ -270,10 +281,12 @@ def vector_scene(
     viewport: ViewportPlan,
     width: int,
     height: int,
+    *,
+    lighting: str = "studio_soft",
 ) -> tuple[list[ProjectedPolygon], list[VectorLinePiece]]:
     """Return BSP-ordered polygons and visibility-split line pieces."""
     transform = CameraTransform(viewport.camera, width, height)
-    bsp_polygons = _mesh_polygons(viewport, transform)
+    bsp_polygons = _mesh_polygons(viewport, transform, lighting=lighting)
     tree = build_bsp(bsp_polygons, epsilon=_scene_epsilon(bsp_polygons))
     if viewport.camera.projection == "orthographic":
         ordered = traverse_back_to_front(
@@ -299,7 +312,10 @@ def visible_line_segments(
 def _mesh_polygons(
     viewport: ViewportPlan,
     transform: CameraTransform,
+    *,
+    lighting: str = "studio_soft",
 ) -> list[BSPPolygon]:
+    lighting = cpu_shader_id(lighting)
     result: list[BSPPolygon] = []
     rotation = transform.view_matrix[:3, :3]
     light = np.asarray([-0.32, 0.42, 1.0])
@@ -317,6 +333,14 @@ def _mesh_polygons(
         material = primitive.metadata.get("material", {})
         ambient = float(material.get("ambient", 0.68))
         diffuse = float(material.get("diffuse", 0.32))
+        surface = read_surface_response(primitive.metadata)
+        apply_surface = (
+            surface is not None
+            and lighting != "unlit"
+            and primitive.metadata.get("kind") != "polyhedron"
+            and not keeps_legacy_response(surface)
+        )
+        surface_rig = get_lighting_rig(lighting) if apply_surface else None
         for triangle_index, indices in enumerate(primitive.triangles):
             world_triangle = primitive.vertices[indices]
             normal = np.cross(
@@ -340,10 +364,25 @@ def _mesh_polygons(
                 base_rgb = primitive.rgba[:3]
             else:
                 base_rgb = np.mean(primitive.vertex_colors[indices], axis=0)
+            if lighting == "unlit":
+                shaded_rgb = base_rgb
+            elif apply_surface:
+                shaded_rgb = shade_with_rig(
+                    np.asarray(base_rgb, dtype=float),
+                    shading_normal,
+                    surface,
+                    surface_rig,
+                )
+            else:
+                shaded_rgb = (
+                    float(base_rgb[0]) * illumination,
+                    float(base_rgb[1]) * illumination,
+                    float(base_rgb[2]) * illumination,
+                )
             rgba = (
-                float(base_rgb[0]) * illumination,
-                float(base_rgb[1]) * illumination,
-                float(base_rgb[2]) * illumination,
+                float(shaded_rgb[0]),
+                float(shaded_rgb[1]),
+                float(shaded_rgb[2]),
                 float(primitive.rgba[3]),
             )
             clipped = transform.clip_polygon_camera(camera_vertices[indices])

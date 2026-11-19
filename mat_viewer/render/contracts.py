@@ -214,6 +214,9 @@ class RenderSpec:
     isosurface_color_range: tuple[float, float] | None = None
     isosurface_color_center: float | None = None
     isosurface_colormap: str = "bgr"
+    # Lighting rig. This is not style["material"] (mesh versus flat) and not
+    # a surface-material preset. studio_soft is the historical camera light.
+    lighting: str = "studio_soft"
 
     def __post_init__(self) -> None:
         if self.backend not in ("cpu", "matplotlib", "plotly", "gpu"):
@@ -302,6 +305,9 @@ class RenderSpec:
             or int(self.cylinder_sides) < 3
         ):
             raise ValueError("cylinder_sides must be at least 3")
+        from .lighting import get_lighting_rig
+
+        object.__setattr__(self, "lighting", get_lighting_rig(self.lighting).id)
 
 
 @dataclass(frozen=True, slots=True)
