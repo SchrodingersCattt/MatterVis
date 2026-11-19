@@ -678,13 +678,22 @@ class _IOBackendMixin:
                     # envelopes whose scene payload belongs to the replaced
                     # store.  Their IDs may be identical to the new scenes.
                     self._figure_broadcasts.clear()
+                    sizes = getattr(self, "_figure_broadcast_bytes", None)
+                    if isinstance(sizes, dict):
+                        sizes.clear()
+                    drop_ids = getattr(self, "_journal_drop_scene_ids", None)
+                    if isinstance(drop_ids, set):
+                        drop_ids.clear()
                 self.scene_store.save()
                 scenes_replaced = True
             else:
                 scenes_replaced = False
         else:
             scenes_replaced = False
+        from ..render.retention import clear_bundle_render_caches
+
         for bundle in self.bundles.values():
+            clear_bundle_render_caches(bundle)
             bundle.scene_cache.clear()
             cache = getattr(bundle, "_topology_state_cache", None)
             if cache:

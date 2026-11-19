@@ -1,6 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+from .retention import ensure_budgeted_cache
 from .common import *
 from .picking import ensure_polyhedron_instance_ids, pick_trace_metadata, polyhedron_instance_id
 from .meshes import *
@@ -561,13 +562,15 @@ def topology_background_traces(
     style = style or {}
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
     viewport_ranges = _viewport_ranges_from_style(style)
-    cache = topology_data.setdefault("_background_dict_cache", {})
+    cache = ensure_budgeted_cache(topology_data.get("_background_dict_cache"), "painter")
+    topology_data["_background_dict_cache"] = cache
     cache_key = (
         _multi_spec_cache_key(topology_data, fallback_color),
         _viewport_cache_key(style),
         include_face_ids,
     )
     if cache_key in cache:
+        cache.touch(cache_key)
         return cache[cache_key]
     default_opacity = 0.55
 
@@ -640,7 +643,7 @@ def topology_background_traces(
         )
         traces.extend(_merged_hull_edges([overlay for overlay, _ in overlays_with_opacity], color=fallback_color))
 
-    cache[cache_key] = [_trace_to_json_safe_dict(tr) for tr in traces]
+    cache.remember(cache_key, [_trace_to_json_safe_dict(tr) for tr in traces])
     return cache[cache_key]
 
 
@@ -659,9 +662,11 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
     style = style or {}
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
     viewport_ranges = _viewport_ranges_from_style(style)
-    cache = topology_data.setdefault("_foreground_dict_cache", {})
+    cache = ensure_budgeted_cache(topology_data.get("_foreground_dict_cache"), "painter")
+    topology_data["_foreground_dict_cache"] = cache
     cache_key = (_multi_spec_cache_key(topology_data, fallback_color), _viewport_cache_key(style))
     if cache_key in cache:
+        cache.touch(cache_key)
         return cache[cache_key]
 
     traces: list = []
@@ -757,7 +762,7 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
             if extra_marker is not None:
                 traces.append(extra_marker)
 
-    cache[cache_key] = [_trace_to_json_safe_dict(tr) for tr in traces]
+    cache.remember(cache_key, [_trace_to_json_safe_dict(tr) for tr in traces])
     return cache[cache_key]
 
 

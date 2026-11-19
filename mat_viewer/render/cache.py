@@ -1,12 +1,13 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+from .retention import ensure_budgeted_cache
+from ..style.bond_groups import bond_groups_cache_key
 from .common import *
 from .style import *
 from .traces_atoms import *
 from .traces_overlays import _minor_outline_traces
 from .serialize import _round_coord_arrays
-from ..style.bond_groups import bond_groups_cache_key
 from .style.resolver import apply_scene_style_overrides
 
 
@@ -128,7 +129,8 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     style["show_minor_only"] = False
     atom_groups = style.get("atom_groups") or []
     bond_groups = style.get("bond_groups") or []
-    cache = scene.setdefault("_mesh_trace_cache", {})
+    cache = ensure_budgeted_cache(scene.get("_mesh_trace_cache"), "mesh")
+    scene["_mesh_trace_cache"] = cache
     # mesh_lighting as a hashable tuple (or None) for caching.
     _ml = style.get("mesh_lighting")
     _ml_key = tuple(sorted(_ml.items())) if isinstance(_ml, dict) else None
@@ -184,6 +186,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         _property_key,
     )
     if key in cache:
+        cache.touch(key)
         return cache[key]
 
     # Phase 4: bond_groups go through ``tag_bonds_with_groups`` BEFORE
@@ -308,7 +311,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
                     _round_coord_arrays(_trace_to_dict(tr)) for tr in minor_bonds
                 ],
             }
-            cache[key] = payload
+            cache.remember(key, payload)
             return payload
         finally:
             scene["draw_atoms"] = original_atoms
@@ -401,7 +404,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
             _round_coord_arrays(_trace_to_dict(tr)) for tr in minor_bonds
         ],
     }
-    cache[key] = payload
+    cache.remember(key, payload)
     if original_bonds is not None:
         scene["bonds"] = original_bonds
     return payload

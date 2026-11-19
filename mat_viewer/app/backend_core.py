@@ -2,10 +2,13 @@ from __future__ import annotations
 
 # ruff: noqa: F401
 import atexit
-from collections import OrderedDict
 
 from ..cache_keys import figure_state_cache_key
 from ..config import current_config
+from ..render.retention import (
+    FIGURE_CACHE_MAX_ENTRIES as FIGURE_CACHE_MAX,
+    BudgetedCache,
+)
 from ..structure.bonds import inorganic_solid_profile
 from ..topology.analysis import _MAX_REGISTERED_CN
 from .camera_helpers import *
@@ -27,12 +30,11 @@ from .view_updates import (
 )
 from .wire import json_safe_wire
 
-# Maximum number of distinct figure cache entries.  A bounded LRU
-# (least-recently-used) eviction policy kicks in when the cache
-# exceeds this limit; the oldest entry is dropped.  16 entries
-# comfortably covers typical tab-switch + display-mode + slider
-# patterns without unbounded memory growth.
-FIGURE_CACHE_MAX = 16
+# Entry cap for ``ViewerBackend._figure_cache``. The byte cap lives in
+# ``mat_viewer.render.retention``; both apply, and the newest entry is kept
+# even when it alone exceeds the byte budget. 16 entries still covers
+# a normal tab / display-mode / slider set of small figures.
+
 # Ionic and extended inorganic lattices are read more clearly with a thin
 # coordination stroke.  Keep the value in state construction so callers can
 # still override it through a preset or an explicit state patch.
@@ -146,7 +148,9 @@ class _CoreBackendMixin:
         self._first_figure_ready = threading.Event()
         self.version = 0
         self._figure_cache_lock = threading.Lock()
-        self._figure_cache: OrderedDict[str, tuple[Any, Any]] = OrderedDict()
+        self._figure_cache: BudgetedCache = BudgetedCache("figure")
+        self._figure_broadcast_bytes: dict[int, int] = {}
+        self._journal_drop_scene_ids: set[str] = set()
         self._figure_broadcast_lock = threading.Lock()
         self._figure_broadcast_seq = 0
         self._figure_broadcasts: list[dict[str, Any]] = []
@@ -553,8 +557,7 @@ class _CoreBackendMixin:
             versions = state_versions(state or (self.get_state(scene_id) if scene_id in self.scene_store.scenes else {}))
             payload.update(versions.to_dict())
             payload["update_kind"] = UpdateKind.GEOMETRY.value
-            self._figure_broadcasts.append(payload)
-            self._figure_broadcasts = self._figure_broadcasts[-32:]
+            self._note_journal_locked(payload)
             return payload
 
     def broadcast_view_update(
@@ -581,8 +584,7 @@ class _CoreBackendMixin:
             payload["version"] = self.version
             payload["state"] = json_safe_wire(copy.deepcopy(current))
             payload["scene_generation"] = self.scene_generation(scene_id)
-            self._figure_broadcasts.append(payload)
-            self._figure_broadcasts = self._figure_broadcasts[-32:]
+            self._note_journal_locked(payload)
         return payload
 
     @staticmethod
@@ -751,8 +753,7 @@ class _CoreBackendMixin:
                 "error": error,
             }
             payload.update(state_versions(state).to_dict())
-            self._figure_broadcasts.append(payload)
-            self._figure_broadcasts = self._figure_broadcasts[-32:]
+            self._note_journal_locked(payload)
             return payload
 
     def figure_broadcasts_since(self, seq: int = 0) -> list[dict[str, Any]]:

@@ -100,6 +100,47 @@ Target key: JSON-safe resolved state excluding only:
 The figure body cache may reuse mesh and layout body data across camera drags,
 but must refresh camera-dependent overlays such as compass annotations.
 
+The stored value is `fig.to_plotly_json()` plus the topology wrapper. A
+Mesh3d supercell makes one entry much larger than a molecule, so the cache
+is an LRU with both an entry cap and a byte cap (`FIGURE_CACHE_MAX_ENTRIES`
+and `FIGURE_CACHE_MAX_BYTES` in `mat_viewer.render.retention`). The newest entry
+stays even when it alone exceeds the byte cap, which keeps a repeat of the
+current style from rebuilding. Older slider ticks and idle tabs are the
+entries that go first.
+
+### Retention budgets
+
+Entry count alone does not bound a long-lived server. The broadcast journal
+used to keep 32 full figure bodies, the per-scene mesh map kept every style
+key, and the base/transform scene maps kept every display mode and repeat.
+Those layers now share the policy in `mat_viewer.render.retention`:
+
+| Layer | Where | Caps |
+| --- | --- | --- |
+| Atom/bond mesh traces | `scene["_mesh_trace_cache"]` | 8 entries and 32 MiB per scene, plus a 96 MiB process pool shared with painter traces |
+| Label traces | `scene["_label_trace_cache"]` | 8 entries and 4 MiB per scene |
+| Polyhedron painter traces | `_background_dict_cache`, `_foreground_dict_cache` | 4 entries and 24 MiB per map, inside the same 96 MiB pool |
+| Figure body | `ViewerBackend._figure_cache` | 16 entries and 128 MiB |
+| Figure journal | `ViewerBackend._figure_broadcasts` | 32 envelopes and 64 MiB of figure bodies; the newest figure is kept |
+| Base scene | `LoadedCrystal.scene_cache` | 8 entries and 64 MiB of geometry |
+| Transformed scene | `LoadedCrystal._transformed_scene_cache` | 6 entries and 96 MiB of geometry |
+| Fragment table | `LoadedCrystal.fragment_table_cache` | 8 entries and 32 MiB |
+| Topology analysis memo | `LoadedCrystal._analyze_topology_cache` | 512 entries and 48 MiB |
+| Topology geometry | `LoadedCrystal._topology_state_cache` | 8 entries (existing) |
+
+`build_figure` attaches the mesh and label maps to the caller's scene
+before its shallow copy, so label and axis toggles reuse one bounded map
+instead of building a cache that dies with the temporary copy. Eviction
+drops whole entries. It does not change the vertices of a style that is
+still cached, and a cache miss rebuilds that same style.
+
+Closing a scene drops figure-cache and journal bodies for that scene id.
+When no open scene still displays the structure, the bundle's mesh maps,
+transformed-scene cache, and topology trace caches are cleared too.
+Replacing a scene's structure does the same for the structure that was
+just detached. The loaded `bundle.scene` geometry itself stays, so opening
+the structure again does not reparse the file.
+
 ### Callback Memo Caches
 
 Current callback-local caches should disappear or be promoted to declared cache

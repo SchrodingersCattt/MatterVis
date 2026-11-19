@@ -147,8 +147,7 @@ class _SceneBackendMixin:
             broadcasts = getattr(self, "_figure_broadcasts", None)
             if broadcasts is None:
                 broadcasts = self._figure_broadcasts = []
-            broadcasts.append(copy.deepcopy(payload))
-            del broadcasts[:-32]
+            self._note_journal_locked(copy.deepcopy(payload))
         return payload
 
     def scene_catalog_selection(self, event: dict[str, Any], browser_scene: Any) -> tuple[str, Any]:
@@ -284,6 +283,7 @@ class _SceneBackendMixin:
         """
         scene = self.scene_store.get(scene_id)
         before = self.scene_state(scene_id)
+        previous_structure = str(scene.structure_name)
         target = str(structure or scene.structure_name)
         if target != scene.structure_name:
             scene.structure_name = target
@@ -299,6 +299,10 @@ class _SceneBackendMixin:
         self._bump_version()
         self._request_scene_store_save()
         self._schedule_scene_render(scene_id, before, after)
+        # Replacing the scene state invalidates figures cached for the old
+        # body. Meshes of the previous structure are dropped when no open
+        # scene still displays it.
+        self._queue_scene_render_release(str(scene_id), previous_structure)
         return after
 
     def active_scene_id(self) -> Optional[str]:
@@ -354,6 +358,7 @@ class _SceneBackendMixin:
     @_scene_transaction
     def update_scene(self, scene_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         scene = self.scene_store.get(scene_id)
+        structure_before = str(scene.structure_name)
         state_before = self.scene_state(scene_id)
         if "label" in payload and len(payload) == 1:
             scene = self.scene_store.rename(scene_id, payload["label"], save=False)
@@ -384,6 +389,9 @@ class _SceneBackendMixin:
         if state_before.get("scene_label") != state_after.get("scene_label"):
             self._publish_scene_catalog(focus=False)
         self._schedule_scene_render(scene_id, state_before, state_after)
+        structure_after = str(self.scene_store.get(scene_id).structure_name)
+        if structure_before != structure_after:
+            self._queue_scene_render_release(str(scene_id), structure_before)
         return scene.to_dict()
 
     @_scene_transaction
@@ -397,6 +405,7 @@ class _SceneBackendMixin:
         self._render_revisions.pop(str(scene_id), None)
         self._scene_generations.pop(str(scene_id), None)
         self._camera_revisions.pop(str(scene_id), None)
+        self._queue_scene_render_release(str(scene_id), str(removed.structure_name))
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
         self.pending_state = self._state_snapshot(
@@ -426,10 +435,14 @@ class _SceneBackendMixin:
         for scene_id in [
             sid for sid in list(self.scene_store.scenes.keys()) if sid != keep_id
         ]:
-            removed.append(self.scene_store.remove(scene_id, save=False).to_dict())
+            removed_scene = self.scene_store.remove(scene_id, save=False)
+            removed.append(removed_scene.to_dict())
             self._render_revisions.pop(str(scene_id), None)
             self._scene_generations.pop(str(scene_id), None)
             self._camera_revisions.pop(str(scene_id), None)
+            self._queue_scene_render_release(
+                str(scene_id), str(removed_scene.structure_name)
+            )
         self.scene_store.active_id = keep_id
         self.current_state = self.scene_state(keep_id)
         self.pending_state = self._state_snapshot(self.current_state, keep_id)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 
+from .retention import retain_scene_render_caches
 from .compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,
@@ -337,6 +338,7 @@ def build_row_figure(
 
     all_trace_dicts: list[dict] = []
     for col_idx, (scene, style) in enumerate(scene_style_pairs):
+        retain_scene_render_caches(scene)
         scene = dict(scene)
         if vector_overlays_by_scene is not None:
             if len(vector_overlays_by_scene) != n:
@@ -439,6 +441,7 @@ def build_figure(
 ) -> "go.Figure":
     from plotly.graph_objects import Figure as go_Figure
 
+    retain_scene_render_caches(scene)
     scene = dict(scene)
     if vector_overlays is not None:
         scene["vector_overlays"] = vector_overlays

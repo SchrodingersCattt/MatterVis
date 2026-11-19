@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 from .shared import *
 from .camera_helpers import *
 from .style_helpers import *
-from .backend_core import FIGURE_CACHE_MAX
 
 
 def _figure_from_cached_dict(cached_dict: dict) -> go.Figure:
@@ -247,7 +246,7 @@ class _CameraBackendMixin:
             with self._figure_cache_lock:
                 cached_entry = self._figure_cache.get(cache_key)
                 if cached_entry is not None:
-                    self._figure_cache.move_to_end(cache_key)
+                    self._figure_cache.touch(cache_key)
         if cached_entry is not None:
             cached_fig_dict, cached_topology = cached_entry
             fig = _figure_from_cached_dict(cached_fig_dict)
@@ -411,10 +410,9 @@ class _CameraBackendMixin:
                 existing = self._figure_cache.get(cache_key)
                 if existing is None:
                     existing = (fig.to_plotly_json(), topology_data)
-                    self._figure_cache[cache_key] = existing
-                    while len(self._figure_cache) > FIGURE_CACHE_MAX:
-                        self._figure_cache.popitem(last=False)
-                self._figure_cache.move_to_end(cache_key)
+                    self._figure_cache.remember(cache_key, existing)
+                else:
+                    self._figure_cache.touch(cache_key)
             if existing[1] is not topology_data:
                 fig = _figure_from_cached_dict(existing[0])
                 topology_data = existing[1]

@@ -11,9 +11,17 @@ class _VectorBackendMixin:
         return state
 
     def scene_for_state(self, state=None) -> dict:
-        """Return a tab-local scene copy carrying scientific vector content."""
+        """Return a tab-local scene copy carrying scientific vector content.
+
+        Trace caches are created on the stored scene first. The shallow
+        copy then shares those maps, so style changes accumulate in one
+        bounded cache instead of a map that dies with the copy.
+        """
         state = self.current_state if state is None else state
         scene = super().scene_for_state(state)
+        from ..render.retention import retain_scene_render_caches
+
+        retain_scene_render_caches(scene)
         local = dict(scene)
         local["vector_overlays"] = copy.deepcopy(state.get("vector_overlays") or [])
         return local
