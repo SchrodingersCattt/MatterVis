@@ -31,14 +31,29 @@ def test_shifted_drawing_still_holds():
     assert picture_holds(paper, shifted)
 
 
+def _filled(width: int, height: int, color: tuple[int, int, int]) -> bytes:
+    image = Image.new("RGB", (width, height), color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def test_matching_drawing_holds_and_chrome_does_not():
     paper = _png(1000, 700, lambda draw: draw.ellipse((300, 180, 700, 520), fill=(180, 40, 40)))
     assert picture_holds(paper, paper)
     frame = _png(1000, 700, lambda draw: draw.rectangle((0, 0, 999, 699), outline=(0, 0, 0), width=2))
     title = _png(1000, 700, lambda draw: draw.rectangle((20, 8, 460, 32), fill=(20, 20, 20)))
+
+    def dense(draw: ImageDraw.ImageDraw) -> None:
+        for top in range(30, 670, 24):
+            for left in range(30, 970, 30):
+                draw.rectangle((left, top, left + 14, top + 10), fill=(20, 20, 20))
+
     assert not picture_holds(paper, frame)
     assert not picture_holds(paper, title)
-    assert not picture_holds(paper, _png(1000, 700, lambda draw: None))
+    assert not picture_holds(paper, _filled(1000, 700, (255, 255, 255)))
+    assert not picture_holds(paper, _filled(1000, 700, (0, 0, 0)))
+    assert not picture_holds(paper, _png(1000, 700, dense))
 
 
 def test_watcher_rejects_a_later_loss_and_a_single_good_frame():

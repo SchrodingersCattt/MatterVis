@@ -23,7 +23,11 @@ MatterVis supports two ORTEP-style paths:
   array-length check does not see. The camera geometry check counts that
   payload. Marker opacity is not part of the check. A layout image does
   not stand in for missing coordinates, and its source is not compared
-  with the scene, generation, or revision. The earlier parent-session
+  with the scene, generation, or revision. A screenshot that matches the
+  layout image currently on screen shows that this image is the visible
+  picture. It does not show that the image belongs to the current scene,
+  generation, or revision, so a visible but stale image is not evidence
+  of the latest intent. The earlier parent-session
   camera toast was not captured with its live graph. A later parent
   session that did not report the toast does not assign that toast to
   this clause and does not clear it.

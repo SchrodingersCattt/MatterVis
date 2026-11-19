@@ -1,7 +1,10 @@
 """Compare a publication drawing with the picture on screen.
 
-The screenshot has to contain the paper image's own ink. A dark border or a
-title bar can pass a pixel-count threshold without containing that drawing.
+The paper image's ink has to land on ink, and its white cells have to stay
+white. A black screen covers the ink and also covers the white, so overlap
+of the ink alone is not enough. The pixels are the layout image currently
+displayed. This does not identify that image with a scene, generation, or
+revision.
 """
 
 from __future__ import annotations
@@ -56,26 +59,33 @@ def _resize(mask: np.ndarray, height: int, width: int) -> np.ndarray:
     return out
 
 
-def _best_fraction(paper: np.ndarray, shot: np.ndarray) -> float:
-    paper_cells = int(paper.sum())
-    if paper_cells == 0:
-        return 0.0
+def _best_agreement(paper: np.ndarray, shot: np.ndarray) -> float:
+    """Best placement where ink and the paper's own white both agree.
+
+    Ink overlap alone accepts a black screen: every paper ink cell lands on
+    dark pixels. The white cells of the paper have to stay white in that
+    same window, or the screen is a filled field rather than the drawing.
+    """
     best = 0.0
     shot_h, shot_w = shot.shape
     for numerator in range(12, 21):
-        scale = numerator / 20
-        height = max(1, int(round(paper.shape[0] * scale)))
-        width = max(1, int(round(paper.shape[1] * scale)))
+        height = max(1, int(round(paper.shape[0] * numerator / 20)))
+        width = max(1, int(round(paper.shape[1] * numerator / 20)))
         if height < 4 or width < 4:
             continue
         scaled = paper if (height, width) == paper.shape else _resize(paper, height, width)
-        scaled_cells = int(scaled.sum())
-        if scaled_cells == 0:
+        ink_cells = int(scaled.sum())
+        white_cells = int((~scaled).sum())
+        if ink_cells == 0 or white_cells == 0:
             continue
         for y0 in range(shot_h - height + 1):
             for x0 in range(shot_w - width + 1):
-                overlap = int(np.logical_and(shot[y0 : y0 + height, x0 : x0 + width], scaled).sum())
-                best = max(best, overlap / scaled_cells)
+                window = shot[y0 : y0 + height, x0 : x0 + width]
+                ink_hit = int(np.logical_and(window, scaled).sum()) / ink_cells
+                white_hit = int(np.logical_and(~window, ~scaled).sum()) / white_cells
+                agreement = min(ink_hit, white_hit)
+                if agreement > best:
+                    best = agreement
                 if best >= _OVERLAP:
                     return best
     return best
@@ -85,10 +95,11 @@ def picture_report(paper_png: bytes, shot_png: bytes) -> dict[str, float | bool]
     paper = _pool(_ink(Image.open(io.BytesIO(paper_png))))
     shot = _pool(_ink(Image.open(io.BytesIO(shot_png))))
     paper_cells = int(paper.sum())
-    fraction = _best_fraction(paper, shot)
+    white_cells = int((~paper).sum())
+    agreement = _best_agreement(paper, shot) if paper_cells >= 2 and white_cells >= 2 else 0.0
     return {
-        "holds": bool(paper_cells >= 2 and fraction >= _OVERLAP),
-        "overlap": fraction,
+        "holds": bool(agreement >= _OVERLAP),
+        "overlap": agreement,
         "paper_cells": paper_cells,
     }
 
