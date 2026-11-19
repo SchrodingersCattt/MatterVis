@@ -62,6 +62,72 @@ async function selectDropdown(page, id, label) {
   await option.click();
 }
 
+function sceneBackgroundIsClear(value) {
+  const text = String(value || "").replace(/\s+/g, "").toLowerCase();
+  return text === "transparent" || text === "rgba(0,0,0,0)";
+}
+
+async function publicationRaster(page) {
+  return page.evaluate(() => new Promise((resolve) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const scene = gd && gd.layout && gd.layout.scene;
+    const image = gd && gd.layout && gd.layout.images && gd.layout.images[0];
+    const source = image && image.source;
+    if (!source) {
+      resolve({ error: "no image", bg: scene && scene.bgcolor });
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const context = canvas.getContext("2d");
+      context.drawImage(img, 0, 0);
+      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let ink = 0;
+      const step = 16;
+      for (let i = 0; i < data.length; i += step) {
+        if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) ink += 1;
+      }
+      resolve({
+        bg: scene && scene.bgcolor,
+        ink,
+        width: img.width,
+        height: img.height,
+      });
+    };
+    img.onerror = () => resolve({ error: "image decode", bg: scene && scene.bgcolor });
+    img.src = source;
+  }));
+}
+
+function publicationReady(raster) {
+  return !!(raster && !raster.error && sceneBackgroundIsClear(raster.bg) && raster.ink);
+}
+
+async function assertPublicationVisible(page, label) {
+  const deadline = Date.now() + 90000;
+  let previous = null;
+  let ready = false;
+  while (Date.now() < deadline) {
+    const raster = await publicationRaster(page);
+    if (ready && !publicationReady(raster)) {
+      fail(label + " publication raster disappeared " + JSON.stringify({ previous, raster }));
+    }
+    if (publicationReady(raster)) {
+      const again = await publicationRaster(page);
+      if (!publicationReady(again)) {
+        fail(label + " publication raster disappeared " + JSON.stringify({ raster, again }));
+      }
+      return;
+    }
+    previous = raster;
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  }
+  fail(label + " publication raster did not stay visible " + JSON.stringify(previous));
+}
+
 async function drag(page) {
   const box = await page.locator("#crystal-graph .js-plotly-plot").boundingBox();
   if (!box) fail("graph has no box");
@@ -96,34 +162,37 @@ async function main() {
     }, null, { timeout: 90000 });
     const flat = await readCamera(page);
     assertHealthy(flat, "flat ortep");
-    if (!flat.images) fail("flat ortep image missing");
+    await assertPublicationVisible(page, "flat ortep");
 
     await drag(page);
-    await page.waitForTimeout(500);
+    await assertPublicationVisible(page, "after drag");
     const dragged = await readCamera(page);
     assertHealthy(dragged, "after drag");
     await drag(page);
-    await page.waitForTimeout(500);
-    assertHealthy(await readCamera(page), "second drag");
+    await assertPublicationVisible(page, "second drag");
 
     await page.locator("#view-reset").click();
-    await page.waitForTimeout(800);
-    assertHealthy(await readCamera(page), "after reset");
+    await assertPublicationVisible(page, "after reset");
+    await page.locator("#view-projection input[value='orthographic']").click();
+    await assertPublicationVisible(page, "orthographic flat ortep");
+    await page.locator("#view-projection input[value='perspective']").click();
+    await assertPublicationVisible(page, "perspective flat ortep");
     await page.locator("#view-reset").click();
-    await page.waitForTimeout(400);
-    assertHealthy(await readCamera(page), "second reset");
+    await assertPublicationVisible(page, "second reset");
 
     const tabs = page.locator("#scene-tabs .tab");
     const tabCount = await tabs.count();
     if (tabCount < 2) fail("expected two scenes, saw " + tabCount);
     await tabs.nth(1).click();
     await graphReady(page);
-    await page.waitForTimeout(400);
-    const other = await readCamera(page);
-    assertHealthy(other, "second scene");
+    await selectDropdown(page, "material-selector", "Flat shading (fast 3D)");
+    await selectDropdown(page, "style-selector", "ORTEP");
+    await assertPublicationVisible(page, "second scene flat ortep");
+    await page.locator("#view-reset").click();
+    await assertPublicationVisible(page, "second scene reset");
     await tabs.nth(0).click();
     await graphReady(page);
-    assertHealthy(await readCamera(page), "returned scene");
+    await assertPublicationVisible(page, "returned scene");
 
     await selectDropdown(page, "material-selector", "3D Mesh");
     await selectDropdown(page, "style-selector", "Ball-stick");
@@ -136,11 +205,17 @@ async function main() {
     assertHealthy(await readCamera(page), "mesh ball-stick");
 
     await page.locator("#view-projection input[value='orthographic']").click();
-    await page.waitForTimeout(400);
-    assertHealthy(await readCamera(page), "orthographic");
+    await page.waitForFunction(() => {
+      const radio = document.querySelector("#view-projection input:checked");
+      return radio && radio.value === "orthographic";
+    }, null, { timeout: 20000 });
+    assertHealthy(await readCamera(page), "orthographic mesh");
     await page.locator("#view-projection input[value='perspective']").click();
-    await page.waitForTimeout(400);
-    assertHealthy(await readCamera(page), "perspective");
+    await page.waitForFunction(() => {
+      const radio = document.querySelector("#view-projection input:checked");
+      return radio && radio.value === "perspective";
+    }, null, { timeout: 20000 });
+    assertHealthy(await readCamera(page), "perspective mesh");
   } catch (error) {
     await page.screenshot({ path: "/tmp/flat-ortep-fail.png", fullPage: true }).catch(() => {});
     const info = await page.evaluate(() => {

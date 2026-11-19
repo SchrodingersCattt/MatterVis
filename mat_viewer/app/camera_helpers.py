@@ -186,6 +186,11 @@ def _plotly_scene_camera(camera: Optional[dict[str, Any]]) -> Optional[dict[str,
     }
 
 
+# The publication drawing is a paper image underneath the orbit scene.
+# An opaque scene background covers that image and leaves only the caption.
+FLAT_ORTEP_SCENE_BACKGROUND = "rgba(0,0,0,0)"
+
+
 def _flat_ortep_layout_camera(
     camera: Optional[dict[str, Any]],
     scene: Optional[dict[str, Any]],

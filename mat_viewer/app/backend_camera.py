@@ -528,7 +528,7 @@ class _CameraBackendMixin:
                 xaxis=dict(visible=False),
                 yaxis=dict(visible=False),
                 zaxis=dict(visible=False),
-                bgcolor="white",
+                bgcolor=FLAT_ORTEP_SCENE_BACKGROUND,
                 dragmode="orbit",
                 camera=_flat_ortep_layout_camera(camera, scene),
                 uirevision=style.get("uirevision", "flat-ortep"),

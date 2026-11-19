@@ -144,7 +144,9 @@ Notes for callers:
   That figure's Plotly scene camera is `eye` / `center` / `up`. A stored
   `position` / `focal_point` camera is converted before the layout is
   built; the stored mapping itself is left unchanged. A zero-length look
-  vector uses the existing finite eye fallback.
+  vector uses the existing finite eye fallback. The orbit scene background
+  is transparent so its paper image stays visible; an opaque background
+  covers the raster and leaves the caption.
 - `pending_state` is armed for a broadcast write to the active scene
   (REST `POST /state`, WebSocket `set_state`, and external `/intent`
   calls). The existing agent-state poll writes the matching page's

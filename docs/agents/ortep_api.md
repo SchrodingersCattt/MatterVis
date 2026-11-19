@@ -14,6 +14,9 @@ MatterVis supports two ORTEP-style paths:
   zero-length look vector uses the existing finite eye fallback. Non-finite
   components are left for Plotly to reject. The stored scene camera is not
   rewritten by the figure build.
+  The publication raster is a paper image under that orbit scene. The scene
+  background is transparent so the raster stays visible. An opaque scene
+  background covers the drawing and leaves only the caption.
 
 The CIF parser reads `_atom_site_aniso_U_*` into `atom["U"]`; missing
 anisotropic data falls back to `_atom_site_U_iso_or_equiv`.
