@@ -57,8 +57,11 @@ All endpoints live under `/api/v2` and accept optional `scene_id`.
 
 - A plain click replaces the set. `Shift`/`Ctrl`/`Cmd` clicks add or toggle
   the exact target under the pointer. `Esc` clears the set and closes the
-  context menu. Clicking empty scene space follows the same clear rule for
-  every target kind.
+  context menu. A plain click on empty scene space clears every target kind.
+  A `Shift`/`Ctrl`/`Cmd` click that does not hit a target leaves the set
+  unchanged. A click that arrives while a frame is still being applied waits
+  until that frame settles before the pointer is treated as empty space, so
+  the replacement cannot erase the set the gesture is editing.
 - A browser gesture carries a numeric `ts`. An older gesture does not
   overwrite a newer one for the same scene. Callers that omit `ts` still
   commit, which is how REST selection edits behave.

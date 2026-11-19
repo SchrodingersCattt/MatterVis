@@ -31,6 +31,11 @@ def test_hover_and_context_menu_have_no_server_coordinate_fallback():
     assert "gesture.gd" not in pointerup
     assert "selection_gesture_ts" in controller
     assert "selectionGestureTsByScene" in controller
+    select = controller[controller.index("function select("):controller.index('addEventListener("pointerup"')]
+    assert 'mode==="replace"' in select
+    assert "mv-status-busy" in select
+    assert "mv-render-status" in select
+    assert "FRAME_SETTLE_MS" in select
 
 
 def test_appearance_undo_rejects_obsolete_target_revision():

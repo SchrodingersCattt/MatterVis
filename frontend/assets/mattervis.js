@@ -1751,25 +1751,34 @@
     },{passive:true});
     function select(e){
       const mode=e.ctrlKey||e.metaKey?"toggle":e.shiftKey?"add":"replace";
-      function apply(target){
-        publishSemanticSelection(target,target?mode:"clear");
+      const started=Date.now();
+      // A selection edit rebuilds the figure. While that frame is still
+      // landing, the same pixel can miss and must not wipe the set. The
+      // bound waits out that in-progress frame; it is not the caller's
+      // settle timeout.
+      const FRAME_SETTLE_MS=15000;
+      function rendering(){
+        const busy=document.getElementById("mv-status-busy");
+        if(busy && !busy.classList.contains("is-hidden")) return true;
+        const node=document.getElementById("mv-render-status");
+        return !!(node && !node.hidden);
       }
-      function attempt(allowRetry){
+      function attempt(){
         const gd=graphDiv();
         const indexed=gd && window.MatterVisScenePicking && window.MatterVisScenePicking.index
           ? window.MatterVisScenePicking.index(gd) : null;
         const target=resolve(e,!!e.altKey);
-        if(target){apply(target);return;}
-        // A rebuild can replace the plot before its pick index exists. An
-        // empty hit on a ready index still clears; an unready index does not.
+        if(target){publishSemanticSelection(target,mode);return;}
         const unready=!indexed || !indexed.primitives || !indexed.primitives.length;
-        if(unready && allowRetry){
-          requestAnimationFrame(function(){attempt(false);});
+        if((unready || rendering()) && Date.now()-started<FRAME_SETTLE_MS){
+          requestAnimationFrame(attempt);
           return;
         }
-        if(!unready) apply(null);
+        // Empty space clears only a plain click. Shift/Ctrl keep the set
+        // when the pointer is not on a target.
+        if(!unready && mode==="replace") publishSemanticSelection(null,"clear");
       }
-      attempt(true);
+      attempt();
     }
     container.addEventListener("pointerup",function(e){
       if(secondary){const gesture=secondary;secondary=null;if(pendingContext && !gesture.moved && gesture.scene===currentSceneId()) openContext(e);pendingContext=false;return;}
