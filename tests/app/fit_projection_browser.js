@@ -2,6 +2,8 @@
  * Args: playwright module, chrome path, base url.
  */
 const fs = require("node:fs");
+const path = require("node:path");
+const shutter = require("./fit_shutter");
 const { chromium } = require(process.argv[2]);
 const chrome = process.argv[3];
 const base = process.argv[4];
@@ -76,6 +78,9 @@ function liveSample() {
     revision: render ? Number(render.camera_revision) : null,
     renderRevision: render ? Number(render.render_revision) : null,
     sceneId: render ? render.scene_id : null,
+    sceneGeneration: render && render.scene_generation != null ? String(render.scene_generation) : null,
+    geometryVersion: render && render.geometry_version != null && render.geometry_version !== "" ? Number(render.geometry_version) : null,
+    coordinateDigest: window.MatterVisFitShutter ? window.MatterVisFitShutter.coordinateDigest(gd.data) : "",
     status: status && !status.hidden ? String(status.textContent || "") : "",
     postcondition: (window.__mv_camera_diag && window.__mv_camera_diag.lastPostcondition) || null,
     boundaryChecked: !!(boundary && boundary.checked),
@@ -113,6 +118,9 @@ function readCapture() {
     revision: render ? Number(render.camera_revision) : null,
     renderRevision: render ? Number(render.render_revision) : null,
     sceneId: render ? render.scene_id : null,
+    sceneGeneration: render && render.scene_generation != null ? String(render.scene_generation) : null,
+    geometryVersion: render && render.geometry_version != null && render.geometry_version !== "" ? Number(render.geometry_version) : null,
+    coordinateDigest: window.MatterVisFitShutter ? window.MatterVisFitShutter.coordinateDigest(gd.data) : "",
     status: status && !status.hidden ? String(status.textContent || "") : "",
     postcondition: (window.__mv_camera_diag && window.__mv_camera_diag.lastPostcondition) || null,
     boundaryChecked: !!(boundary && boundary.checked),
@@ -138,10 +146,7 @@ function readCapture() {
 }
 
 function sameCapture(left, right) {
-  return sameSample(left, right)
-    && JSON.stringify(left.plot) === JSON.stringify(right.plot)
-    && JSON.stringify(left.canvas) === JSON.stringify(right.canvas)
-    && JSON.stringify(left.chrome) === JSON.stringify(right.chrome);
+  return shutter.sameStableFrame(left, right);
 }
 
 function sampleMatches(sample, target) {
@@ -258,6 +263,7 @@ async function main() {
     args: ["--use-gl=angle", "--use-angle=swiftshader", "--ignore-gpu-blocklist"],
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await page.addInitScript({path: path.join(__dirname, "fit_shutter.js")});
   const shots = [];
   const consoleErrors = [];
   page.on("console", (msg) => {

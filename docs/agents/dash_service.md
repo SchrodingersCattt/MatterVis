@@ -380,9 +380,14 @@ Notes for callers:
   command, including camera version 0; a higher version from an older
   generation does not replace it. A later committed figure with a
   higher camera revision drops the held command. A rejected react
-  leaves the command held. A new server epoch clears it. Leaving the
+  leaves the command held.   A new server epoch clears it. Leaving the
   scene does not apply it; returning, once that geometry is current,
-  does.   An older camera
+  does. A painted sample may keep the same eye, center, aspect, and
+  data box while `render_revision` advances. That sample also carries
+  the scene generation, the geometry version, and a digest of the
+  finite coordinates on the visible traces. Those three have to match
+  on both sides of the screenshot. The same camera and data box with a
+  different digest is not the same geometry.   An older camera
   revision for the same scene generation and server epoch does not
   replace it. A new scene, scene generation, or server epoch starts
   its own camera clock. A state patch with a

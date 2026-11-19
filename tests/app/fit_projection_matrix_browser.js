@@ -2,6 +2,8 @@
  * Args: playwright module, chrome path, base url, screenshot directory.
  */
 const fs = require("node:fs");
+const path = require("node:path");
+const shutter = require("./fit_shutter");
 const { chromium } = require(process.argv[2]);
 const chrome = process.argv[3];
 const base = process.argv[4];
@@ -202,6 +204,9 @@ function readPaint() {
     revision: render ? Number(render.camera_revision) : null,
     renderRevision: render ? Number(render.render_revision) : null,
     sceneId: render ? render.scene_id : null,
+    sceneGeneration: render && render.scene_generation != null ? String(render.scene_generation) : null,
+    geometryVersion: render && render.geometry_version != null && render.geometry_version !== "" ? Number(render.geometry_version) : null,
+    coordinateDigest: window.MatterVisFitShutter ? window.MatterVisFitShutter.coordinateDigest(gd.data) : "",
     boundaryChecked: !!(boundaryBox && boundaryBox.checked),
     aspect: {x: layout.aspectratio.x, y: layout.aspectratio.y, z: layout.aspectratio.z},
     ranges: {x: layout.xaxis.range, y: layout.yaxis.range, z: layout.zaxis.range},
@@ -240,11 +245,14 @@ async function capture(page, shots, name, projection, boundary, consoleErrors) {
     if (typeof value === "number") return Math.round(value * 1e8) / 1e8;
     return value;
   };
-  /* render_revision can advance when the worker republishes the same
-   * fitted camera. The shutter is the camera, the data box, and the plot. */
-  const tag = (sample) => JSON.stringify({
+  const rounded = (sample) => ({
     revision: sample.revision,
+    renderRevision: sample.renderRevision,
     sceneId: sample.sceneId,
+    sceneGeneration: sample.sceneGeneration,
+    geometryVersion: sample.geometryVersion,
+    coordinateDigest: sample.coordinateDigest,
+    projection: sample.projection,
     eye: round(sample.eye),
     center: round(sample.center),
     aspect: round(sample.aspect),
@@ -255,10 +263,19 @@ async function capture(page, shots, name, projection, boundary, consoleErrors) {
     canvas: round(sample.canvas),
     chrome: round(sample.chrome),
   });
+  const left = rounded(before);
+  const right = rounded(after);
   if (after.status || (after.postcondition && after.postcondition.reason)) {
-    fs.writeFileSync(`${outDir}/${name}-status.json`, JSON.stringify({before, after}, null, 2));
+    fs.writeFileSync(`${outDir}/${name}-status.json`, JSON.stringify({before: left, after: right}, null, 2));
   }
-  if (tag(before) !== tag(after)) fail(name + " shutter moved\n" + tag(before) + "\n" + tag(after));
+  if (!shutter.sameStableFrame(left, right)) {
+    fail(name + " shutter moved " + JSON.stringify({
+      camera: shutter.sameCamera(left, right),
+      geometry: shutter.sameGeometry(left, right),
+      before: left,
+      after: right,
+    }));
+  }
   if (after.projection !== projection) fail(name + " painted projection " + after.projection);
   if (after.boundaryChecked !== boundary) fail(name + " boundary checkbox " + after.boundaryChecked);
   shots.push({file: `${name}.png`, boundary, console: consoleErrors.slice(), before, ...after});
@@ -271,6 +288,7 @@ async function main() {
     args: ["--use-gl=angle", "--use-angle=swiftshader", "--ignore-gpu-blocklist"],
   });
   const page = await browser.newPage({viewport: {width: 1280, height: 800}});
+  await page.addInitScript({path: path.join(__dirname, "fit_shutter.js")});
   const shots = [];
   const consoleErrors = [];
   page.on("console", (msg) => {
