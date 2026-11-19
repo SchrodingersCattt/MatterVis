@@ -2,6 +2,8 @@
  * Args: playwright module, chrome path, base url.
  */
 const { spawnSync } = require("node:child_process");
+const path = require("node:path");
+const { noteSample, accepted } = require("./flat_ortep_picture.js");
 const { chromium } = require(process.argv[2]);
 const chrome = process.argv[3];
 const base = process.argv[4];
@@ -9,6 +11,24 @@ const python = process.env.MV_PYTHON;
 
 function fail(message) {
   throw new Error(message);
+}
+
+async function sceneId(page) {
+  return page.evaluate(() => {
+    const graph = document.querySelector("#crystal-graph .js-plotly-plot");
+    const meta = graph && graph.layout && graph.layout.meta && graph.layout.meta.mattervis_render;
+    return meta && meta.scene_id ? String(meta.scene_id) : "";
+  });
+}
+
+async function openScene(page, id) {
+  await page.locator("#scene-tab-" + id).click();
+  await page.waitForFunction((wanted) => {
+    const graph = document.querySelector("#crystal-graph .js-plotly-plot");
+    const meta = graph && graph.layout && graph.layout.meta && graph.layout.meta.mattervis_render;
+    return !!(meta && String(meta.scene_id) === wanted);
+  }, id, { timeout: 90000 });
+  await graphReady(page);
 }
 
 async function graphReady(page) {
@@ -102,6 +122,7 @@ async function publicationRaster(page) {
         ink,
         width: img.width,
         height: img.height,
+        visible: image.visible !== false,
       });
     };
     img.onerror = () => resolve({ error: "image decode", bg: scene && scene.bgcolor });
@@ -110,61 +131,115 @@ async function publicationRaster(page) {
 }
 
 function publicationReady(raster) {
-  return !!(raster && !raster.error && sceneBackgroundIsClear(raster.bg) && raster.ink);
+  return !!(raster && !raster.error && raster.visible !== false && sceneBackgroundIsClear(raster.bg) && raster.ink);
 }
 
-function compositedInk(png) {
+function pictureHolds(paperDataUrl, shotPng) {
   if (!python) fail("MV_PYTHON is required to read the composited graph");
-  const result = spawnSync(python, ["-c", `
-import io, sys
-from PIL import Image
-image = Image.open(io.BytesIO(sys.stdin.buffer.read())).convert("RGB")
-width, height = image.size
-# The caption sits on the bottom strip. The plot above it is the picture
-# the user sees, including a blank canvas that still has a paper image.
-crop = image.crop((0, 0, width, max(1, int(height * 0.9))))
-pixels = list(crop.getdata())
-ink = sum(1 for red, green, blue in pixels if red < 245 or green < 245 or blue < 245)
-print(ink, len(pixels))
-`], { input: png });
-  if (result.status !== 0) fail("composited decode failed: " + String(result.stderr || ""));
+  const encoded = String(paperDataUrl || "").split(",")[1] || "";
+  const paper = Buffer.from(encoded, "base64");
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(paper.length, 0);
+  header.writeUInt32BE(shotPng.length, 4);
+  const result = spawnSync(python, [path.join(__dirname, "flat_ortep_picture.py")], {
+    input: Buffer.concat([header, paper, shotPng]),
+  });
+  if (result.status !== 0) fail("picture compare failed: " + String(result.stderr || ""));
   const parts = String(result.stdout || "").trim().split(/\s+/);
-  const ink = Number(parts[0]);
-  const total = Number(parts[1]);
-  if (!Number.isFinite(ink) || !Number.isFinite(total) || total <= 0) fail("composited decode was empty");
-  return { ink, total, fraction: ink / total };
+  return { holds: parts[0] === "1", overlap: Number(parts[1]), paperCells: Number(parts[2]) };
+}
+
+async function nextFrame(page) {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+}
+
+async function readPictureSample(page) {
+  const raster = await publicationRaster(page);
+  const shot = await page.locator("#crystal-graph").screenshot({ type: "png" });
+  const paperState = await page.evaluate(() => {
+    const graph = document.querySelector("#crystal-graph .js-plotly-plot");
+    const image = graph && graph.layout && graph.layout.images && graph.layout.images[0];
+    const meta = graph && graph.layout && graph.layout.meta && graph.layout.meta.mattervis_render;
+    const label = document.querySelector("#scene-label, #structure-name");
+    return {
+      source: image && image.visible !== false && image.source ? String(image.source) : "",
+      imageCount: graph && graph.layout && graph.layout.images ? graph.layout.images.length : 0,
+      imageVisible: image ? image.visible : null,
+      sceneId: meta && meta.scene_id ? String(meta.scene_id) : "",
+      traces: graph && graph.data ? graph.data.length : 0,
+      traceName: graph && graph.data && graph.data[0] ? String(graph.data[0].name || graph.data[0].type || "") : "",
+      heading: label ? String(label.textContent || "") : "",
+    };
+  });
+  const paper = paperState.source;
+  const compared = paper ? pictureHolds(paper, shot) : { holds: false, overlap: 0, paperCells: 0 };
+  const status = await page.evaluate(() => {
+    const node = document.getElementById("mv-render-status");
+    const banner = document.getElementById("status-banner");
+    const render = node && !node.hidden ? String(node.textContent || "") : "";
+    const bannerText = banner ? String(banner.textContent || "") : "";
+    return render + " " + bannerText;
+  });
+  const statusBad = /could not be restored|did not match the view|relayout failed|invalid property/i.test(status);
+  return {
+    holds: publicationReady(raster) && compared.holds,
+    statusBad,
+    status,
+    overlap: compared.overlap,
+    paperCells: compared.paperCells,
+    imageCount: paperState.imageCount,
+    imageVisible: paperState.imageVisible,
+    sceneId: paperState.sceneId,
+    traces: paperState.traces,
+    traceName: paperState.traceName,
+  };
 }
 
 async function assertPublicationVisible(page, label) {
   const deadline = Date.now() + 90000;
-  let previous = null;
-  let ready = false;
+  let state = { ready: false, seenLater: false, failed: "" };
+  let steady = 0;
+  let last = null;
   while (Date.now() < deadline) {
-    const raster = await publicationRaster(page);
-    const shot = await page.locator("#crystal-graph").screenshot({ type: "png" });
-    const composited = compositedInk(shot);
-    const shown = publicationReady(raster) && composited.fraction > 0.008;
-    if (ready && !shown) {
-      fail(label + " publication picture disappeared " + JSON.stringify({ previous, raster, composited }));
+    await nextFrame(page);
+    last = await readPictureSample(page);
+    state = noteSample(state, last);
+    if (state.failed) fail(label + " " + state.failed + " " + JSON.stringify(last));
+    if (accepted(state)) {
+      steady += 1;
+      if (steady >= 3) return;
+    } else {
+      steady = 0;
     }
-    if (shown) {
-      ready = true;
-      const againShot = await page.locator("#crystal-graph").screenshot({ type: "png" });
-      const again = compositedInk(againShot);
-      if (ready && !(again.fraction > 0.008)) {
-        fail(label + " publication picture disappeared " + JSON.stringify({ composited, again }));
-      }
-      return;
-    }
-    previous = { raster, composited };
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
   }
-  fail(label + " publication picture did not stay visible " + JSON.stringify(previous));
+  fail(label + " publication picture did not stay visible " + JSON.stringify({ state, last }));
+}
+
+async function assertDelayedBlankFails(page) {
+  const deadline = Date.now() + 30000;
+  let state = { ready: false, seenLater: false, failed: "" };
+  let armed = false;
+  while (Date.now() < deadline) {
+    await nextFrame(page);
+    if (state.ready && !armed) {
+      await nextFrame(page);
+      await page.evaluate(() => {
+        const graph = document.querySelector("#crystal-graph .js-plotly-plot");
+        const images = (graph.layout.images || []).map((image) => Object.assign({}, image, { visible: false }));
+        return window.Plotly.relayout(graph, { images });
+      });
+      armed = true;
+      await nextFrame(page);
+    }
+    const sample = await readPictureSample(page);
+    state = noteSample(state, { holds: sample.holds, statusBad: false });
+    if (armed && state.failed === "disappeared") return;
+  }
+  fail("delayed disappearance was not rejected " + JSON.stringify(state));
 }
 
 async function assertProjectionApplied(page, projection, startAttempts) {
   const deadline = Date.now() + 20000;
-  let stable = 0;
   let last = null;
   while (Date.now() < deadline) {
     last = await page.evaluate(() => {
@@ -186,14 +261,15 @@ async function assertProjectionApplied(page, projection, startAttempts) {
     const started = last.attempts > startAttempts;
     const matches = last.radio === projection && (projection === "orthographic" ? last.ortho === true : last.ortho === false);
     if (started && matches && !last.text) {
-      stable += 1;
-      if (stable >= 2) {
-        assertHealthy(await readCamera(page), "projection " + projection);
-        await assertPublicationVisible(page, "projection " + projection);
-        return;
+      await assertPublicationVisible(page, "projection " + projection);
+      for (let frame = 0; frame < 3; frame += 1) {
+        await nextFrame(page);
+        const later = await readPictureSample(page);
+        const laterState = noteSample({ ready: true, seenLater: true, failed: "" }, later);
+        if (laterState.failed) fail("projection " + projection + " late " + laterState.failed + " " + later.status);
       }
-    } else {
-      stable = 0;
+      assertHealthy(await readCamera(page), "projection " + projection);
+      return;
     }
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
   }
@@ -258,18 +334,19 @@ async function main() {
     await assertPublicationVisible(page, "second reset");
     assertHealthy(await readCamera(page), "second reset");
 
-    const tabs = page.locator("#scene-tabs .tab");
-    const tabCount = await tabs.count();
-    if (tabCount < 2) fail("expected two scenes, saw " + tabCount);
-    await tabs.nth(1).click();
-    await graphReady(page);
+    const firstScene = await sceneId(page);
+    const sceneIds = await page.evaluate(() => [...document.querySelectorAll("#scene-tabs .tab")]
+      .map((node) => String(node.id || "").replace(/^scene-tab-/, ""))
+      .filter(Boolean));
+    const otherScene = sceneIds.find((id) => id !== firstScene);
+    if (!firstScene || !otherScene) fail("expected two scenes, saw " + JSON.stringify(sceneIds));
+    await openScene(page, otherScene);
     await selectDropdown(page, "material-selector", "Flat shading (fast 3D)");
     await selectDropdown(page, "style-selector", "ORTEP");
     await assertPublicationVisible(page, "second scene flat ortep");
     await page.locator("#view-reset").click();
     await assertPublicationVisible(page, "second scene reset");
-    await tabs.nth(0).click();
-    await graphReady(page);
+    await openScene(page, firstScene);
     await assertPublicationVisible(page, "returned scene");
 
     await selectDropdown(page, "material-selector", "3D Mesh");
@@ -294,6 +371,14 @@ async function main() {
       return radio && radio.value === "perspective";
     }, null, { timeout: 20000 });
     assertHealthy(await readCamera(page), "perspective mesh");
+    for (let frame = 0; frame < 3; frame += 1) {
+      await nextFrame(page);
+      assertHealthy(await readCamera(page), "perspective mesh later");
+    }
+
+    await selectDropdown(page, "material-selector", "Flat shading (fast 3D)");
+    await selectDropdown(page, "style-selector", "ORTEP");
+    await assertDelayedBlankFails(page);
   } catch (error) {
     await page.screenshot({ path: "/tmp/flat-ortep-fail.png", fullPage: true }).catch(() => {});
     const info = await page.evaluate(() => {

@@ -611,3 +611,44 @@ Promise.race([
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_typed_array_coordinates_count_and_a_stale_image_does_not():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const sandbox = {Promise, Object, Array, JSON, Number, String, Date, setTimeout, clearTimeout, window: {}, document: {getElementById: () => null}};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const api = sandbox.window.MatterVisViewCamera;
+const ortho = {eye:{x:0,y:0,z:2}, center:{x:0,y:0,z:0}, up:{x:0,y:1,z:0}, projection:{type:'orthographic'}};
+function graph(data, images) {
+  return {
+    data,
+    layout: {images: images || [], meta: {mattervis_render: {scene_id: 'scene-b', scene_generation: 9, render_revision: 4}}},
+    _fullLayout: {scene: {_scene: {camera: {_ortho: true}}}},
+  };
+}
+const arrays = graph([{type:'scatter3d', x:[0, 1], y:[0, 1], z:[0, 1], marker:{opacity:0}}]);
+assert.equal(api.visibleGeometry(arrays), true);
+assert.equal(api.postcondition(arrays, ortho, {command:'projection'}), true);
+const packed = graph([{type:'scatter3d', marker:{opacity:0}, x:{dtype:'f8', bdata:'AAAAAAAAAAAAAAAAAAAAQA=='}, y:{dtype:'f8', bdata:'AAAAAAAAAAAAAAAAAAAAQA=='}, z:{dtype:'f8', bdata:'AAAAAAAAAAAAAAAAAAAAQA=='}}]);
+assert.equal(api.visibleGeometry(packed), true, 'typed-array coordinates were dropped');
+assert.equal(api.postcondition(packed, ortho, {command:'projection'}), true);
+const emptyPacked = graph([{type:'scatter3d', x:{dtype:'f8', bdata:''}, y:{dtype:'f8', bdata:''}, z:{dtype:'f8', bdata:''}}]);
+assert.equal(api.visibleGeometry(emptyPacked), false);
+const stale = graph(
+  [{type:'scatter3d', x:[], y:[], z:[]}],
+  [{source:'data:image/png;base64,STALE', visible:true}],
+);
+assert.equal(api.visibleGeometry(stale), false);
+assert.equal(api.postcondition(stale, ortho, {command:'projection'}), false, 'a stale layout image masked missing coordinates');
+const hiddenImage = graph([{type:'scatter3d', x:[], y:[], z:[]}], [{source:'data:image/png;base64,STALE', visible:false}]);
+assert.equal(api.postcondition(hiddenImage, ortho, {command:'projection'}), false);
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr

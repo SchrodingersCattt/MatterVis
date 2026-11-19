@@ -176,16 +176,21 @@
     if (gd.layout && gd.layout.scene && gd.layout.scene.camera) return gd.layout.scene.camera;
     return null;
   }
+  function hasCoordinateValues(value) {
+    if (!value) return false;
+    var view = typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(value);
+    if (Array.isArray(value) || view) return value.length > 0;
+    /* Plotly columns arrive as {dtype, bdata}. The object itself has no
+     * length, so an array check drops coordinates that are on the trace. */
+    return typeof value.bdata === "string" && value.bdata.length > 0;
+  }
   function visibleGeometry(gd) {
     var data = gd && Array.isArray(gd.data) ? gd.data : [];
-    function hasValues(value) {
-      return (Array.isArray(value) || (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(value))) && value.length > 0;
-    }
     return data.some(function (trace) {
       if (!trace || trace.visible === false || trace.visible === "legendonly") return false;
       var type = String(trace.type || "").toLowerCase();
-      if (type === "mesh3d") return hasValues(trace.x) && hasValues(trace.i);
-      return hasValues(trace.x) || hasValues(trace.y) || hasValues(trace.z);
+      if (type === "mesh3d") return hasCoordinateValues(trace.x) && hasCoordinateValues(trace.i);
+      return hasCoordinateValues(trace.x) || hasCoordinateValues(trace.y) || hasCoordinateValues(trace.z);
     });
   }
   function internalProjection(gd) {
@@ -386,13 +391,6 @@
     gd.__mvContextLossCanvas = canvas;
     gd.__mvContextLossInstalled = true;
   }
-  function publicationImageVisible(gd) {
-    var images = gd && gd.layout && gd.layout.images;
-    if (!images || !images.length) return false;
-    return images.some(function (image) {
-      return !!(image && image.source && image.visible !== false);
-    });
-  }
   function postcondition(gd, camera, options) {
     var expected = projectionType(camera);
     var internal = internalProjection(gd);
@@ -404,10 +402,9 @@
       var got = projectionType(actualCamera(gd));
       if (got && got !== expected) return false;
     }
-    /* Mesh vertices are one drawable. A paper image is the other: the flat
-     * publication figure keeps only a transparent camera anchor in `data`,
-     * so a projection change must not be rejected for lack of a mesh. */
-    if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd) && !publicationImageVisible(gd)) return false;
+    /* Coordinates have to be on a trace. A layout image is not geometry,
+     * and its source is not checked against the current scene. */
+    if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd)) return false;
     if (options && options.requireEye) {
       var expectedDistance = vectorLength(camera && camera.eye);
       var gotDistance = vectorLength(liveEye(gd));

@@ -16,9 +16,17 @@ MatterVis supports two ORTEP-style paths:
   rewritten by the figure build.
   The publication raster is a paper image under that orbit scene. The scene
   background is transparent so the raster stays visible. An opaque scene
-  background covers the drawing and leaves only the caption. A projection
-  change is not rejected because the only WebGL trace is the transparent
-  camera anchor; the paper image is the drawable picture.
+  background covers the drawing and leaves only the caption. The orbit
+  anchor stores coordinates. An array-valued anchor already counts as
+  geometry. A local viewer of this code also showed those columns as
+  Plotly typed-array objects (`dtype` and non-empty `bdata`), which an
+  array-length check does not see. The camera geometry check counts that
+  payload. Marker opacity is not part of the check. A layout image does
+  not stand in for missing coordinates, and its source is not compared
+  with the scene, generation, or revision. The earlier parent-session
+  camera toast was not captured with its live graph. A later parent
+  session that did not report the toast does not assign that toast to
+  this clause and does not clear it.
 
 The CIF parser reads `_atom_site_aniso_U_*` into `atom["U"]`; missing
 anisotropic data falls back to `_atom_site_U_iso_or_equiv`.
