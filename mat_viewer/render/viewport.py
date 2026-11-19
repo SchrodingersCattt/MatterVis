@@ -519,7 +519,13 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         ]
 
     mode = style.get("display_mode", scene.get("display_mode"))
-    cell_owns_cube = mode == "unit_cell"
+    # A cube isosurface is framed on atom spheres plus mesh vertices. The
+    # unit-cell box and the voxel grid stay out of that fit even when the
+    # cell is drawn, so a small orbital in a large cell is not a speck.
+    isosurface_content_fit = (
+        scene.get("cube_data") is not None and style.get("isosurface_enabled", True)
+    )
+    cell_owns_cube = mode == "unit_cell" and not isosurface_content_fit
 
     def _cell_corners() -> list[np.ndarray]:
         if scene.get("M") is None:
@@ -594,7 +600,7 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         atom_maxs = (carts + radii[:, None]).max(axis=0)
 
     extras: list[np.ndarray] = []
-    if style.get("show_unit_cell", False):
+    if style.get("show_unit_cell", False) and not isosurface_content_fit:
         extras.extend(cell_corners)
 
     # Gate that decides whether a given overlay's bbox should grow the
@@ -727,7 +733,13 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         [float(mins[1]), float(maxs[1])],
         [float(mins[2]), float(maxs[2])],
     ]
-    return _auto_camera_fit_ranges(scene, style, ranges, extra_points=extras)
+    return _auto_camera_fit_ranges(
+        scene,
+        style,
+        ranges,
+        extra_points=extras,
+        include_cell=not isosurface_content_fit,
+    )
 
 
 def _auto_camera_fit_ranges(
@@ -736,6 +748,7 @@ def _auto_camera_fit_ranges(
     ranges: list[list[float]],
     *,
     extra_points: Iterable[Iterable[float]] | None = None,
+    include_cell: bool = True,
 ) -> list[list[float]]:
     """Add a small orientation-aware margin to a default perspective view.
 
@@ -820,7 +833,9 @@ def _auto_camera_fit_ranges(
                     )
                 )
         mode = style.get("display_mode", scene.get("display_mode"))
-        if mode == "unit_cell" or bool(style.get("show_unit_cell", False)):
+        if include_cell and (
+            mode == "unit_cell" or bool(style.get("show_unit_cell", False))
+        ):
             matrix = scene.get("M")
             if matrix is not None:
                 matrix = np.asarray(matrix, dtype=float)

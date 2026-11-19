@@ -1,0 +1,397 @@
+"""Cube isosurface auto-view: mesh bounds, side-on lobes, and general-renderer zoom."""
+
+from __future__ import annotations
+
+from argparse import Namespace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from mat_viewer.cli import _camera_spec
+from mat_viewer.cube.cpu import cube_isosurface_meshes
+from mat_viewer.cube.io import CubeAtom, CubeData
+from mat_viewer.render.contracts import CameraSpec, LinePrimitive, TriangleMeshPrimitive
+from mat_viewer.render.geometry import unit_cell_primitive
+from mat_viewer.render.isosurface_framing import (
+    cube_grid_corner_extents,
+    isosurface_mesh_extents,
+    view_direction_for_content,
+)
+from mat_viewer.render.planning import prepare_render
+from mat_viewer.render.viewport import _scene_ranges
+
+
+def _camera_args(**overrides) -> Namespace:
+    values = {
+        "output": "figure.png",
+        "width": 900,
+        "height": 720,
+        "show_hydrogen": True,
+        "show_unit_cell": True,
+        "camera_axis": None,
+        "view_direction": None,
+        "camera_position": None,
+        "camera_up": None,
+        "camera_target": None,
+        "camera_distance": 1.8,
+        "projection": "orthographic",
+        "ortho_scale": None,
+        "style": "ball_stick",
+        "atom_scale": 1.0,
+        "bond_radius": 0.15,
+        "min_atom_radius": None,
+        "isovalue": 0.45,
+        "isosurface_stride": 1,
+        "zoom": 1.0,
+        "framing_margin": 1.12,
+        "view": "auto",
+    }
+    values.update(overrides)
+    return Namespace(**values)
+
+
+def _field_cube(
+    values: np.ndarray,
+    *,
+    spacing: float,
+    atom_index: tuple[float, float, float],
+) -> CubeData:
+    axes = np.eye(3) * float(spacing)
+    origin = np.zeros(3)
+    cart = axes.T @ np.asarray(atom_index, dtype=float)
+    return CubeData(
+        title="synthetic",
+        comment="",
+        atoms=[CubeAtom(atomic_number=8, charge=0.0, coord=cart.copy())],
+        origin=origin,
+        axes=axes,
+        values=np.asarray(values, dtype=float),
+        path=SimpleNamespace(),  # type: ignore[arg-type]
+    )
+
+
+def _structure(cube: CubeData, *, atom_cart: np.ndarray) -> SimpleNamespace:
+    scene = {
+        "M": cube.lattice,
+        "cube_data": cube,
+        "draw_atoms": [
+            {
+                "elem": "O",
+                "cart": np.asarray(atom_cart, dtype=float),
+                "atom_radius": 0.6,
+                "label": "O1",
+            }
+        ],
+        "bounds": {
+            "center": (cube.lattice.sum(axis=0) * 0.5).tolist(),
+            "mins": [0.0, 0.0, 0.0],
+            "maxs": cube.lattice.sum(axis=0).tolist(),
+        },
+    }
+    bundle = SimpleNamespace(M=cube.lattice, cube_data=cube, scene=scene)
+    return SimpleNamespace(
+        frames=(SimpleNamespace(bundle=bundle),),
+        input_format="cube",
+    )
+
+
+def _padded_orbital():
+    shape = (22, 22, 22)
+    coords = np.indices(shape, dtype=float)
+    centre = np.array([4.0, 5.0, 4.5])
+    spacing = 0.55
+    radius = np.sqrt(sum((coords[axis] - centre[axis]) ** 2 for axis in range(3)))
+    values = np.exp(-0.5 * (radius / 1.15) ** 2)
+    cube = _field_cube(values, spacing=spacing, atom_index=tuple(centre))
+    atom = (centre * spacing)
+    return _structure(cube, atom_cart=atom), cube, atom
+
+
+def _pz_orbital():
+    shape = (18, 18, 18)
+    coords = np.indices(shape, dtype=float)
+    centre = np.array([9.0, 9.0, 9.0])
+    spacing = 0.4
+    xy = (coords[0] - centre[0]) ** 2 + (coords[1] - centre[1]) ** 2
+    z = coords[2] - centre[2]
+    positive = np.exp(-0.5 * ((xy + (z - 3.2) ** 2) / 1.35**2))
+    negative = np.exp(-0.5 * ((xy + (z + 3.2) ** 2) / 1.35**2))
+    values = positive - negative
+    cube = _field_cube(values, spacing=spacing, atom_index=tuple(centre))
+    atom = centre * spacing
+    return _structure(cube, atom_cart=atom), cube
+
+
+def _direction(camera: CameraSpec) -> np.ndarray:
+    vector = np.asarray(camera.position) - np.asarray(camera.target)
+    return vector / np.linalg.norm(vector)
+
+
+def test_mesh_extents_follow_vertices_not_grid_corners() -> None:
+    structure, _cube, _atom = _padded_orbital()
+    scene = structure.frames[0].bundle.scene
+    mesh_min, mesh_max = isosurface_mesh_extents(
+        scene, {"isosurface_isovalue": 0.45, "isosurface_stride": 1}
+    )
+    grid_min, grid_max = cube_grid_corner_extents(scene)
+
+    assert mesh_min is not None and mesh_max is not None
+    mesh_span = float(np.linalg.norm(mesh_max - mesh_min))
+    grid_span = float(np.linalg.norm(grid_max - grid_min))
+    assert mesh_span < grid_span * 0.45
+    assert not np.allclose(mesh_min, grid_min)
+    assert not np.allclose(mesh_max, grid_max)
+
+
+def test_padded_grid_auto_view_frames_the_orbital_not_the_cell() -> None:
+    structure, cube, atom = _padded_orbital()
+    args = _camera_args(show_unit_cell=True)
+    camera = _camera_spec(structure, args, display="unit_cell")
+
+    cell_centre = 0.5 * cube.lattice.sum(axis=0)
+    assert camera.target == pytest.approx(args.camera_fit_record["target"])
+    assert np.linalg.norm(np.asarray(camera.target) - atom) < 1.6
+    assert np.linalg.norm(np.asarray(camera.target) - cell_centre) > 4.0
+    assert camera.ortho_scale < 3.5
+    assert args.camera_fit_record["mode"] == "isosurface_content"
+    assert args.camera_fit_record["includes_cell"] is False
+    aabb = np.asarray(args.camera_fit_record["aabb_max"]) - np.asarray(
+        args.camera_fit_record["aabb_min"]
+    )
+    assert float(np.max(aabb)) < 6.0
+
+
+def test_plotly_scene_ranges_ignore_grid_and_cell_for_an_isosurface() -> None:
+    structure, cube, atom = _padded_orbital()
+    scene = structure.frames[0].bundle.scene
+    style = {
+        "display_mode": "unit_cell",
+        "show_unit_cell": True,
+        "isosurface_enabled": True,
+        "isosurface_isovalue": 0.45,
+        "isosurface_stride": 1,
+        "style": "ball_stick",
+    }
+    ranges = _scene_ranges(scene, style)
+    span = np.array([axis[1] - axis[0] for axis in ranges], dtype=float)
+    centre = np.array([0.5 * (axis[0] + axis[1]) for axis in ranges], dtype=float)
+    cell_span = np.linalg.norm(cube.lattice, axis=1)
+
+    assert float(np.max(span)) < float(np.min(cell_span)) * 0.55
+    assert np.linalg.norm(centre - atom) < 2.0
+
+
+def test_pz_auto_view_is_side_on_and_explicit_c_star_stays_end_on() -> None:
+    structure, _cube = _pz_orbital()
+    auto = _camera_spec(structure, _camera_args(), display="unit_cell")
+    end_on = _camera_spec(
+        structure,
+        _camera_args(camera_axis="c*"),
+        display="unit_cell",
+    )
+
+    assert abs(float(np.dot(_direction(auto), [0.0, 0.0, 1.0]))) < 0.45
+    assert abs(float(np.dot(_direction(end_on), [0.0, 0.0, 1.0]))) > 0.95
+
+
+def test_flat_contact_is_not_viewed_along_its_long_axis() -> None:
+    # Geometric stand-in for a hydrogen-bonded pair lying in the xy plane:
+    # long along the contact, thin along z. No element or bond heuristic.
+    x = np.linspace(-2.4, 2.4, 18)
+    y = np.linspace(-0.8, 0.8, 8)
+    grid_x, grid_y = np.meshgrid(x, y)
+    points = np.column_stack(
+        (grid_x.ravel(), grid_y.ravel(), np.zeros(grid_x.size))
+    )
+    direction, _up = view_direction_for_content(points)
+    long_axis = np.array([1.0, 0.0, 0.0])
+    plane_normal = np.array([0.0, 0.0, 1.0])
+
+    assert abs(float(np.dot(direction, long_axis))) < 0.45
+    assert abs(float(np.dot(direction, plane_normal))) > 0.7
+
+
+def test_isotropic_surface_uses_a_diagonal_not_plus_z() -> None:
+    points = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ]
+    )
+    direction, _up = view_direction_for_content(points)
+    diagonal = np.array([1.0, 1.0, 0.8])
+    diagonal /= np.linalg.norm(diagonal)
+
+    assert direction == pytest.approx(diagonal)
+    assert abs(float(direction[2])) < 0.7
+
+
+def test_general_zoom_and_framing_margin_change_scale_not_direction() -> None:
+    structure, _cube = _pz_orbital()
+    base = _camera_spec(structure, _camera_args(zoom=1.0), display="unit_cell")
+    zoomed = _camera_spec(structure, _camera_args(zoom=2.0), display="unit_cell")
+    wider = _camera_spec(
+        structure,
+        _camera_args(zoom=0.5, framing_margin=2.24),
+        display="unit_cell",
+    )
+
+    assert zoomed.ortho_scale == pytest.approx(base.ortho_scale / 2.0)
+    assert _direction(zoomed) == pytest.approx(_direction(base))
+    assert zoomed.target == pytest.approx(base.target)
+    assert wider.ortho_scale == pytest.approx(base.ortho_scale * 4.0)
+    assert _direction(wider) == pytest.approx(_direction(base))
+
+
+def test_explicit_target_and_ortho_scale_are_not_replaced() -> None:
+    structure, _cube = _pz_orbital()
+    camera = _camera_spec(
+        structure,
+        _camera_args(camera_target=[1.25, -0.5, 0.25], ortho_scale=4.5, zoom=2.0),
+        display="unit_cell",
+    )
+
+    assert camera.target == pytest.approx([1.25, -0.5, 0.25])
+    assert camera.ortho_scale == pytest.approx(4.5)
+
+
+def test_structure_zoom_scales_the_existing_orthographic_fit() -> None:
+    bundle = SimpleNamespace(
+        M=np.diag([3.0, 4.0, 5.0]),
+        scene={
+            "bounds": {
+                "center": [0.0, 0.0, 0.0],
+                "mins": [-1.0, -1.0, -1.0],
+                "maxs": [1.0, 1.0, 1.0],
+            }
+        },
+    )
+    structure = SimpleNamespace(frames=(SimpleNamespace(bundle=bundle),))
+    base = _camera_spec(
+        structure,
+        _camera_args(show_unit_cell=False, zoom=1.0),
+        display="formula_unit",
+    )
+    zoomed = _camera_spec(
+        structure,
+        _camera_args(show_unit_cell=False, zoom=2.0),
+        display="formula_unit",
+    )
+
+    assert zoomed.ortho_scale == pytest.approx(base.ortho_scale / 2.0)
+    assert _direction(zoomed) == pytest.approx(_direction(base))
+
+
+def test_cpu_fit_ignores_a_drawn_cell_and_does_not_look_down_z() -> None:
+    _structure, cube = _pz_orbital()
+    meshes = cube_isosurface_meshes(cube, isovalue=0.45, stride=1)
+    scene = {
+        "atoms": [
+            {
+                "elem": "O",
+                "cart": np.array([3.6, 3.6, 3.6]),
+                "atom_radius": 0.55,
+                "label": "O1",
+            }
+        ],
+        "bonds": [],
+        "matrix": cube.lattice,
+        "isosurfaces": meshes,
+        "display_mode": "unit_cell",
+    }
+    plan = prepare_render(
+        scene,
+        render={"show_cell": True, "width": 160, "height": 160, "representation": "ball_stick"},
+    )
+    camera = plan.camera
+    cell = unit_cell_primitive("unit-cell", cube.lattice)
+    cell_radius = float(
+        np.linalg.norm(
+            cell.segments.reshape(-1, 3) - np.asarray(camera.target),
+            axis=1,
+        ).max()
+    )
+
+    assert camera.ortho_scale < cell_radius * 0.45
+    assert abs(float(np.dot(_direction(camera), [0.0, 0.0, 1.0]))) < 0.45
+    assert any(
+        isinstance(primitive, LinePrimitive) and primitive.semantic_id == "unit-cell"
+        for primitive in plan.primitives
+    )
+    assert any(isinstance(primitive, TriangleMeshPrimitive) for primitive in plan.primitives)
+
+
+def test_cpu_render_of_a_pz_pair_shows_a_waist_rather_than_a_speck_or_disk() -> None:
+    from mat_viewer.render.cpu.raster import render_rgba
+
+    _structure, cube = _pz_orbital()
+    meshes = cube_isosurface_meshes(cube, isovalue=0.45, stride=1)
+    scene = {
+        "atoms": [
+            {
+                "elem": "O",
+                "cart": np.array([3.6, 3.6, 3.6]),
+                "atom_radius": 0.4,
+                "label": "O1",
+            }
+        ],
+        "bonds": [],
+        "matrix": np.eye(3) * 40.0,
+        "isosurfaces": meshes,
+    }
+    plan = prepare_render(
+        scene,
+        render={
+            "show_cell": True,
+            "width": 180,
+            "height": 180,
+            "background": (1.0, 1.0, 1.0, 1.0),
+        },
+    )
+    image = render_rgba(plan)
+    foreground = np.any(image[:, :, :3] < 250, axis=2)
+    assert foreground.mean() > 0.08
+
+    rows = np.flatnonzero(foreground.any(axis=1))
+    cols = np.flatnonzero(foreground.any(axis=0))
+    assert rows.size and cols.size
+    row_band = foreground[rows[0] : rows[-1] + 1]
+    third = max(len(row_band) // 3, 1)
+    top = int(row_band[:third].sum())
+    middle = int(row_band[third : 2 * third].sum())
+    bottom = int(row_band[2 * third :].sum())
+    assert middle < 0.85 * min(top, bottom)
+
+    orange = (image[:, :, 0] > image[:, :, 2] + 20) & foreground
+    blue = (image[:, :, 2] > image[:, :, 0] + 20) & foreground
+    assert int(orange.sum()) > 20
+    assert int(blue.sum()) > 20
+
+
+def test_camera_request_reports_zoom_and_framing_margin() -> None:
+    from mat_viewer.render.cli_controls import _camera_request
+
+    payload = _camera_request(
+        Namespace(
+            projection="orthographic",
+            camera_axis=None,
+            view_direction=None,
+            camera_position=None,
+            camera_target=None,
+            camera_up=None,
+            camera_distance=1.8,
+            field_of_view=None,
+            ortho_scale=None,
+            camera_clip=None,
+            zoom=2.0,
+            framing_margin=1.4,
+        )
+    )
+
+    assert payload["zoom"] == 2.0
+    assert payload["framing_margin"] == 1.4

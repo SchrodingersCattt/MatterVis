@@ -8,7 +8,7 @@ scalar controls and repeatable selector rules for mixed styles.
 |---|---|
 | Display mode | `--view` |
 | Unit-cell boundary replicas | `--include-boundary-replicas` / `--no-boundary-replicas` |
-| Camera axis, direction, position, target, up, projection, fit distance, FOV, orthographic scale, camera fit, and clipping | `--camera-axis`, `--view-direction`, `--camera-position`, `--camera-target`, `--camera-up`, `--orthogonal` / `--perspective`, `--camera-distance`, `--field-of-view`, `--ortho-scale`, `--camera-fit`, `--camera-clip` |
+| Camera axis, direction, position, target, up, projection, fit distance, FOV, orthographic scale, zoom, framing margin, and clipping | `--camera-axis`, `--view-direction`, `--camera-position`, `--camera-target`, `--camera-up`, `--orthogonal` / `--perspective`, `--camera-distance`, `--field-of-view`, `--ortho-scale`, `--zoom`, `--framing-margin`, `--camera-clip` |
 | Representation, shading, backend, canvas, background, atom/bond scale, visibility, cell, labels, rings, and ORTEP | Direct `mat-vis render` flags |
 | Cube isosurface mode, phase colors, stride, material, and a second scalar cube sampled in physical coordinates | `--isosurface-mode`, `--isosurface-color-cube`, `--isosurface-color-range`, `--isosurface-color-center`, `--isosurface-colormap`, and the other `--isosurface-*` flags |
 | Sphere and cylinder mesh quality | `--sphere-detail`, `--cylinder-sides` |
@@ -25,6 +25,7 @@ scalar controls and repeatable selector rules for mixed styles.
 
 Intentionally programmatic objects remain API-only: a precompiled `RenderPlan`
 and arbitrary in-memory `topology_data`. They are composition artifacts rather
-than omitted end-user controls. `mat-vis render --check --json` reports the
-normalized camera, mesh-quality settings, and selector groups without loading
-the source.
+than omitted end-user controls. `camera_fit` is a style field described in
+`scene_api.md`, not a `mat-vis render` flag. `mat-vis render --check --json`
+reports the normalized camera, including `zoom` and `framing_margin`,
+mesh-quality settings, and selector groups without loading the source.

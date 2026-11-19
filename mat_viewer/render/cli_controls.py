@@ -214,6 +214,8 @@ def _camera_request(args: argparse.Namespace) -> dict:
         "field_of_view": args.field_of_view,
         "ortho_scale": args.ortho_scale,
         "clip": args.camera_clip,
+        "zoom": args.zoom,
+        "framing_margin": args.framing_margin,
     }
 
 

@@ -196,8 +196,20 @@ def _viewport_traces(viewport, *, scene: str, property_active: bool):
 
 
 def _viewport_points(viewport) -> np.ndarray:
+    from .isosurface_framing import (
+        primitive_is_frame_decoration,
+        viewport_has_isosurface,
+    )
+
     points: list[np.ndarray] = []
+    # When an isosurface is drawn, cell-box and axis lines must not expand
+    # the Plotly data radius past the CameraSpec fit. Structure-only plans
+    # still contribute every primitive; their ortho scale already includes
+    # the cell when that is the requested frame.
+    hide_decoration = viewport_has_isosurface(viewport.primitives)
     for primitive in viewport.primitives:
+        if hide_decoration and primitive_is_frame_decoration(primitive):
+            continue
         if isinstance(primitive, TriangleMeshPrimitive):
             points.append(np.asarray(primitive.vertices, dtype=float))
         elif isinstance(primitive, LinePrimitive):

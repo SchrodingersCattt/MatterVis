@@ -347,12 +347,13 @@ honours:
   volume in world (Å) units. When set, overrides the auto-fitted scale
   derived from visible atom bounds. Useful for locking panel sizes
   across a figure grid.
-- `camera_fit` — strategy for fitting the camera to content.
-  `"cell_and_visible_atoms"` (default when cells are drawn) fits to
-  both cell corners and visible atoms. `"visible_atoms"` fits only to
-  atomistic content, ignoring cell geometry — use this when background
-  atoms (hydrogen, etc.) are hidden and the cell would waste viewport
-  space.
+- `camera_fit` — style/API name for a fit strategy. It is not a
+  `mat-vis render` flag. `"cell_and_visible_atoms"` (default when cells
+  are drawn on a structure with no isosurface) fits cell corners and
+  visible atoms. `"visible_atoms"` fits atomistic content and ignores
+  cell geometry. A shown cube isosurface is framed on atom spheres plus
+  mesh vertices regardless of this field; the grid and cell box do not
+  own that viewport.
 
 ### Interactive style overrides
 

@@ -47,6 +47,37 @@ mat-vis render density.cube -o density.svg --backend cpu --check --json
 mat-vis render density.cube -o density.svg --backend cpu --json
 ```
 
+## Auto-view
+
+`mat-vis render` of a cube frames the displayed atom spheres and the
+marching-cubes vertices of both phases. The vertices are in the same
+origin-subtracted scene frame as the atoms. The voxel-grid corners, the cube
+box, and cell or axis lines do not set that frame, so a small orbital in a
+padded grid stays at publication scale when the cell is drawn.
+
+The automatic direction avoids the long axis of that point cloud. A 2pz-like
+pair of lobes is shown from the side, with a small tilt, instead of end-on
+as a disk. A nearly spherical surface falls back to a diagonal. Periodic
+structure renders that do not draw an isosurface still use the largest
+lattice face, with `c*` winning a cubic tie.
+
+`--camera-axis`, `--view-direction`, and `--camera-position` replace the
+automatic direction. `--camera-target` is the look-at point in scene
+coordinates. `--ortho-scale` is the orthographic half-height in Å and
+replaces the fitted scale. `--zoom` (`>1` zooms in) and `--framing-margin`
+apply on `--renderer general` and on the batch renderer; `--check --json`
+reports both. CPU and Plotly are not claimed to be visually identical.
+
+Comparable panels must share one recorded direction, up vector, projection,
+and viewport, and one explicit isovalue. `uniform_camera` copies the
+reference plan's direction and up vector, keeps orthographic projection, and
+uses the largest fitted half-height. Passing a different percentile isovalue
+per panel is not that contract.
+
+MatterVis does not Taubin-smooth isosurfaces. The fit reads the vertex array
+that will be drawn, so a smoother that replaces those vertices first is what
+the camera uses.
+
 `--check` resolves `[cube]` without loading the file or creating output.
 
 For the optional Plotly frontend, `build_cube_figure(path, ...)` is the public

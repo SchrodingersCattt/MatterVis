@@ -14,7 +14,6 @@ from .bond_annotations import bond_annotation_primitives
 from .compass_overlay import attach_lattice_compass_metadata
 from .contracts import (
     CameraSpec,
-    LinePrimitive,
     Primitive,
     RenderPlan,
     RenderSpec,
@@ -1305,34 +1304,9 @@ def _fit_camera(
     width: int,
     height: int,
 ) -> CameraSpec:
-    points: list[np.ndarray] = []
-    for primitive in primitives:
-        if isinstance(primitive, TriangleMeshPrimitive):
-            points.append(primitive.vertices)
-        elif isinstance(primitive, LinePrimitive):
-            points.append(primitive.segments.reshape(-1, 3))
-        elif isinstance(primitive, TextPrimitive):
-            points.append(np.asarray([primitive.position]))
-    if not points:
-        return CameraSpec()
-    combined = np.vstack(points)
-    minimum, maximum = combined.min(axis=0), combined.max(axis=0)
-    target = 0.5 * (minimum + maximum)
-    radius = max(float(np.linalg.norm(combined - target, axis=1).max()), 0.5)
-    direction = np.asarray([1.0, 1.0, 0.8])
-    direction /= np.linalg.norm(direction)
-    distance = max(radius * 3.2, 2.0)
-    aspect = float(width) / float(height)
-    ortho_scale = radius * 1.18 / min(1.0, aspect)
-    return CameraSpec.looking_along(
-        direction,
-        target=target,
-        distance=distance,
-        projection="orthographic",
-        ortho_scale=ortho_scale,
-        near=max(1e-3, distance - radius * 2.2),
-        far=distance + radius * 2.2,
-    )
+    from .isosurface_framing import fit_primitives
+
+    return fit_primitives(primitives, width=width, height=height)
 
 
 def _assert_unique_ids(primitives: Sequence[Primitive]) -> None:

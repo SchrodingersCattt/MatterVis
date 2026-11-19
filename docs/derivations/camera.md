@@ -13,7 +13,7 @@ same \(\vec\sigma\) or the rendered scene drifts from the camera frame.
 
 ```mermaid
 flowchart LR
-    A["scene<br/>(bounds · M · viewport · draw_atoms)"] --> R["_scene_ranges<br/>atom hull · cell corners (when owned or shown)<br/>topology focus · padding"]
+    A["scene<br/>(bounds · M · viewport · draw_atoms)"] --> R["_scene_ranges<br/>atom hull · cell corners when no isosurface<br/>mesh vertices when a cube isosurface is shown<br/>topology focus · padding"]
     S["style<br/>(display_mode · show_unit_cell · atom_scale)"] --> R
     T["topology_data<br/>(focus center + shell)"] --> R
     R --> AS["aspect / equalisation<br/>unit_cell → manual aspectratio<br/>else → _equalize_axis_ranges + cube"]

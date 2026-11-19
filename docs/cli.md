@@ -350,24 +350,55 @@ allowing each source to select its own percentile threshold.
 
 ### Camera
 
-Periodic static renders default to an orthographic view normal to the largest
-lattice face: `ab -> c*`, `ac -> b*`, or `bc -> a*`, with `c*` winning
-equal-area ties. Nonperiodic inputs fit the atomic coordinates and do not treat
-an ASE padding box as crystallographic data. Camera direction options are
-mutually exclusive. When `--no-cell` hides a real periodic cell, automatic
-framing likewise fits the visible atoms rather than hidden cell edges or vacuum
-padding.
+Periodic structure renders with no isosurface default to an orthographic view
+normal to the largest lattice face: `ab -> c*`, `ac -> b*`, or `bc -> a*`,
+with `c*` winning equal-area ties. Nonperiodic inputs fit the atomic
+coordinates and do not treat an ASE padding box as crystallographic data.
+Camera direction options are mutually exclusive. When `--no-cell` hides a real
+periodic cell, automatic framing likewise fits the visible atoms rather than
+hidden cell edges or vacuum padding.
+
+Cube and other isosurface renders use a different automatic fit. The frame is
+the displayed atom spheres plus the marching-cubes vertices of both phases,
+in the same origin-subtracted scene coordinates as the atoms, plus
+`--framing-margin`. Voxel-grid corners, the cube box, and cell-box or axis
+lines do not own that frame, even when `--show-cell` draws the cell. A lobed
+or elongated surface is viewed from its thin side with a small tilt, so a
+2pz orbital reads as a dumbbell rather than a disk. A nearly round surface
+uses a fixed diagonal (`[1, 1, 0.8]`), not `+z` and not `c*` merely because
+the cube is cubic. `--camera-axis`, `--view-direction`, and
+`--camera-position` still override that orientation. Explicit
+`--camera-target` stays the look-at point in scene coordinates. Explicit
+`--ortho-scale` stays the orthographic half-height in Å, requires
+`--orthogonal`, and replaces the automatic scale (zoom and framing margin do
+not modify it).
+
+`--zoom` and `--framing-margin` apply on both the general renderer and the
+batch renderer. `--zoom 1` is the historical fit. Values greater than 1 zoom
+into the centre by shrinking the automatic orthographic half-height, and by
+moving a fitted perspective camera closer. They do not change the view
+direction. `--check --json` reports both fields on the camera request. There
+is no `--camera-fit` flag; `camera_fit` is only a style/API field.
+
+CPU and Plotly do not produce identical pixels. Plotly keeps the same target,
+direction, up vector, and projection, but it does not honour CameraSpec
+near/far planes or field of view exactly. Comparable cube panels should share
+one recorded direction, up vector, projection, and viewport
+(`uniform_camera` does this from a reference plan) and one explicit
+`--isovalue`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--camera-axis a|b|c|a*|b*|c*` | auto | Override the largest-face default with a real or reciprocal lattice axis |
+| `--camera-axis a|b|c|a*|b*|c*` | auto | Override automatic orientation with a real or reciprocal lattice axis. Structure auto-view uses the largest face; isosurface auto-view does not |
 | `--view-direction X Y Z` | — | Cartesian direction from scene toward camera |
 | `--camera-position X Y Z` | — | Explicit absolute Cartesian camera position in Å |
-| `--camera-up X Y Z` | `+b` / `+Y` | Preferred screen-up direction |
-| `--camera-target X Y Z` | scene centre | Explicit Cartesian look-at target in angstrom |
-| `--camera-distance D` | `1.8` | Positive scene-fit multiplier for axis/direction views |
+| `--camera-up X Y Z` | `+b` / `+Y`, or the long content axis for an isosurface | Preferred screen-up direction |
+| `--camera-target X Y Z` | content or scene centre | Explicit Cartesian look-at target in scene angstroms, not the cube-file origin |
+| `--camera-distance D` | `1.8` | Positive scene-fit multiplier for axis/direction views. Not a distance in Å |
 | `--field-of-view DEG` | `45` | Perspective vertical field of view; requires `--perspective` |
-| `--ortho-scale ANGSTROM` | fitted | Orthographic half-height; requires `--orthogonal` |
+| `--ortho-scale ANGSTROM` | fitted | Orthographic half-height; requires `--orthogonal`. Replaces the automatic scale |
+| `--zoom FACTOR` | `1` | Automatic-fit zoom for general and batch renders. `>1` zooms into the centre |
+| `--framing-margin FACTOR` | `1.12` | Multiplier on the automatic orthographic half-height for general and batch renders |
 | `--camera-clip NEAR FAR` | fitted | Positive near/far clipping distances |
 
 `--camera-up` is orthogonalized against the view direction. CPU is the default

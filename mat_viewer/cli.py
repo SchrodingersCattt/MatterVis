@@ -746,84 +746,6 @@ def _hex_rgba(value: str) -> tuple[float, float, float, float]:
     return tuple(channels)  # type: ignore[return-value]
 
 
-def _scene_fit(
-    bundle,
-    *,
-    display: str,
-    show_hydrogen: bool,
-    show_cell: bool,
-    include_boundary_replicas: bool = True,
-    include_cross_boundary_bond_endpoints: bool = True,
-):
-    import numpy as np
-
-    scene = getattr(bundle, "scene", {}) or {}
-    if all(
-        hasattr(bundle, name)
-        for name in ("raw_atoms", "scene_cache", "M", "cell", "formula_unit_atoms")
-    ):
-        from .loader.core import build_bundle_scene
-
-        scene = build_bundle_scene(
-            bundle,
-            display_mode=display,
-            show_hydrogen=show_hydrogen,
-            include_boundary_replicas=include_boundary_replicas,
-            include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
-        )
-    bounds = scene.get("bounds") or {}
-    center = np.asarray(bounds.get("center", (0.0, 0.0, 0.0)), dtype=float)
-    radius = 0.0
-    mins = np.asarray(bounds.get("mins", ()), dtype=float)
-    maxs = np.asarray(bounds.get("maxs", ()), dtype=float)
-    fit_points = np.empty((0, 3), dtype=float)
-    cell_vertices = None
-    if mins.shape == (3,) and maxs.shape == (3,) and np.all(np.isfinite((mins, maxs))):
-        if display == "unit_cell" or show_cell:
-            matrix = np.asarray(getattr(bundle, "M", scene.get("M")), dtype=float)
-            if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
-                fractions = np.asarray(
-                    [
-                        [0, 0, 0],
-                        [1, 0, 0],
-                        [0, 1, 0],
-                        [0, 0, 1],
-                        [1, 1, 0],
-                        [1, 0, 1],
-                        [0, 1, 1],
-                        [1, 1, 1],
-                    ],
-                    dtype=float,
-                )
-                cell_vertices = fractions @ matrix
-                mins = np.minimum(mins, cell_vertices.min(axis=0))
-                maxs = np.maximum(maxs, cell_vertices.max(axis=0))
-        fit_points = np.asarray(
-            [
-                [x, y, z]
-                for x in (mins[0], maxs[0])
-                for y in (mins[1], maxs[1])
-                for z in (mins[2], maxs[2])
-            ],
-            dtype=float,
-        )
-        if display == "unit_cell" and cell_vertices is not None:
-            center = np.asarray(cell_vertices, dtype=float).mean(axis=0)
-            radius = float(np.linalg.norm(fit_points - center, axis=1).max())
-        else:
-            center = (mins + maxs) * 0.5
-            radius = float(np.linalg.norm((maxs - mins) * 0.5))
-    if radius <= 1.0e-9:
-        ranges = np.asarray(bounds.get("ranges", ()), dtype=float)
-        if ranges.shape == (3,) and np.all(np.isfinite(ranges)):
-            radius = float(np.linalg.norm(ranges * 0.5))
-    if center.shape != (3,) or not np.all(np.isfinite(center)):
-        center = np.zeros(3, dtype=float)
-    if not len(fit_points):
-        fit_points = np.asarray([center - radius, center + radius], dtype=float)
-    return scene, center, max(radius, 1.0), fit_points
-
-
 def _camera_spec(
     structure,
     args: argparse.Namespace,
@@ -831,144 +753,10 @@ def _camera_spec(
     display: str,
     topology_data=None,
 ):
-    import numpy as np
+    """Return the general-renderer camera. Implementation lives in render.cli_camera."""
+    from .render.cli_camera import _camera_spec as _build
 
-    from .agent_topology import topology_fit_points
-    from .render.contracts import CameraSpec
-
-    selected = structure.frames[0]
-    matrix = np.asarray(getattr(selected.bundle, "M", np.eye(3)), dtype=float)
-    camera_target = getattr(args, "camera_target", None)
-    camera_clip = getattr(args, "camera_clip", None)
-    requested_ortho_scale = getattr(args, "ortho_scale", None)
-    requested_field_of_view = getattr(args, "field_of_view", None)
-    include_boundary_replicas = getattr(args, "include_boundary_replicas", None)
-    if include_boundary_replicas is None:
-        include_boundary_replicas = True
-    include_cross_boundary_bond_endpoints = getattr(
-        args, "style", "ball_stick"
-    ) not in {"ball", "space_filling"}
-    _, target, radius, fit_points = _scene_fit(
-        selected.bundle,
-        display=display,
-        show_hydrogen=args.show_hydrogen,
-        show_cell=_effective_show_cell(structure, args),
-        include_boundary_replicas=include_boundary_replicas,
-        include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
-    )
-    topology_points = topology_fit_points(topology_data)
-    if len(topology_points):
-        fit_points = np.vstack((fit_points, topology_points))
-        radius = max(radius, float(np.linalg.norm(fit_points - target, axis=1).max()))
-    if _is_animation_output(args) and len(structure.frames) > 1:
-        from .render.viewport import ViewportAccumulator
-
-        accumulator = ViewportAccumulator()
-        accumulator.update_points(fit_points)
-        for frame in structure.frames[1:]:
-            _, _, _, frame_fit_points = _scene_fit(
-                frame.bundle,
-                display=display,
-                show_hydrogen=args.show_hydrogen,
-                show_cell=_effective_show_cell(structure, args),
-                include_boundary_replicas=include_boundary_replicas,
-                include_cross_boundary_bond_endpoints=(
-                    include_cross_boundary_bond_endpoints
-                ),
-            )
-            accumulator.update_points(frame_fit_points)
-        fit_points = accumulator.fit_points()
-        minimum = fit_points.min(axis=0)
-        maximum = fit_points.max(axis=0)
-        target = 0.5 * (minimum + maximum)
-        radius = float(np.linalg.norm(0.5 * (maximum - minimum)))
-    if camera_target is not None:
-        target = np.asarray(camera_target, dtype=float)
-    aspect = max(float(args.width) / float(args.height), 1.0e-6)
-    ortho_scale = (
-        float(requested_ortho_scale)
-        if requested_ortho_scale is not None
-        else radius * 1.15 / min(aspect, 1.0)
-    )
-    field_of_view = (
-        float(requested_field_of_view) if requested_field_of_view is not None else 45.0
-    )
-
-    if args.camera_position is not None:
-        position = np.asarray(args.camera_position, dtype=float)
-        up = np.asarray(args.camera_up or matrix[1], dtype=float)
-        absolute_distance = float(np.linalg.norm(position - target))
-        near = max(radius * 1.0e-4, absolute_distance - 1.5 * radius)
-        far = max(near * 2.0, absolute_distance + 1.5 * radius)
-        if camera_clip is not None:
-            near, far = map(float, camera_clip)
-        return CameraSpec(
-            position=tuple(position),
-            target=tuple(target),
-            up=tuple(up),
-            projection=args.projection,
-            fov_y_deg=field_of_view,
-            near=near,
-            far=far,
-            ortho_scale=ortho_scale,
-        )
-
-    from .math.rotation import axis_camera_basis, largest_face_camera_axis
-
-    if args.view_direction is not None:
-        direction = np.asarray(args.view_direction, dtype=float)
-        default_up = matrix[1]
-    else:
-        axis = args.camera_axis or largest_face_camera_axis(matrix)
-        basis = axis_camera_basis(matrix, axis)
-        direction = basis[2]
-        default_up = basis[1]
-    direction_norm = float(np.linalg.norm(direction))
-    if direction_norm < 1.0e-12:
-        raise ValueError("direction must be non-zero")
-    up = np.array(
-        args.camera_up if args.camera_up is not None else default_up,
-        dtype=float,
-        copy=True,
-    )
-    if np.linalg.norm(np.cross(direction, up)) < 1e-10:
-        up = np.array([0.0, 1.0, 0.0])
-        if np.linalg.norm(np.cross(direction, up)) < 1e-10:
-            up = np.array([1.0, 0.0, 0.0])
-    up /= np.linalg.norm(up)
-    if args.projection == "orthographic" and requested_ortho_scale is None:
-        view_to_camera = direction / direction_norm
-        forward = -view_to_camera
-        right = np.cross(forward, up)
-        right /= np.linalg.norm(right)
-        screen_up = np.cross(right, forward)
-        relative = fit_points - target
-        half_width = float(np.max(np.abs(relative @ right)))
-        half_height = float(np.max(np.abs(relative @ screen_up)))
-        ortho_scale = max(half_height, half_width / aspect, 0.5) * 1.12
-    multiplier = float(args.camera_distance)
-    if not np.isfinite(multiplier) or multiplier <= 0.0:
-        raise ValueError("--camera-distance fit multiplier must be finite and positive")
-    if args.projection == "perspective":
-        half_fov = np.radians(field_of_view * 0.5)
-        distance = multiplier * radius / np.sin(half_fov)
-    else:
-        distance = max(multiplier * radius, 1.5 * radius)
-    near = max(radius * 1.0e-4, distance - 1.5 * radius)
-    far = distance + 1.5 * radius
-    if camera_clip is not None:
-        near, far = map(float, camera_clip)
-    return CameraSpec.looking_along(
-        direction,
-        target=target,
-        up=up,
-        distance=distance,
-        projection=args.projection,
-        ortho_scale=ortho_scale,
-        fov_y_deg=field_of_view,
-        near=near,
-        far=far,
-    )
+    return _build(structure, args, display=display, topology_data=topology_data)
 
 
 def _render_result_payload(result, structure, args: argparse.Namespace, camera) -> dict:
@@ -993,6 +781,7 @@ def _render_result_payload(result, structure, args: argparse.Namespace, camera) 
         "ok": True,
         "backend": result_payload.get("backend", args.backend),
         "camera": _json_safe(camera),
+        "camera_fit": _json_safe(getattr(args, "camera_fit_record", None)),
         "warnings": result_payload.get("warnings", []),
         "install": resolve_requirements(_render_requirements(args)).install_command,
         "output": {
