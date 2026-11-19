@@ -59,6 +59,12 @@ writes is the picture that remains. A frame that has not been issued is
 refused when its scene, generation, or revision is no longer current. The
 delivered-frame identity includes scene generation beside the server
 session, scene id, render revision, camera revision, and `uirevision`.
+When that frame's scene id differs from the scene already on the canvas,
+the browser then relayouts the figure's own camera, axis ranges, and
+aspect. The gl3d scene otherwise keeps the previous axis box until a
+later size relayout, and the new geometry is drawn at that leftover
+scale. The follow-up is not stored as a pointer drag. A frame for the
+same scene still keeps the live camera when `uirevision` matches.
 Closing a scene and undoing that close reuses the scene id and can reuse
 the render revision, camera revision, and `uirevision`; the new generation
 still makes that frame current. A repeat of the same generation is the

@@ -552,6 +552,53 @@
     if (frameCameraIsStale(render, gd)) return false;
     return true;
   }
+  /* gl3d keeps the previous scene's axis box until a later relayout rebuilds
+   * it. Plotly.react already stores the new ranges and camera on the layout;
+   * without this follow-up the new geometry is drawn in the old box and only
+   * a width/height replot shows it at its own scale. */
+  function sceneBoxRelayout(sceneLayout) {
+    if (!sceneLayout || typeof sceneLayout !== "object") return null;
+    const patch = {};
+    if (sceneLayout.camera) {
+      try { patch["scene.camera"] = JSON.parse(JSON.stringify(sceneLayout.camera)); }
+      catch (_) { return null; }
+    }
+    ["xaxis", "yaxis", "zaxis"].forEach(function (axis) {
+      const range = sceneLayout[axis] && sceneLayout[axis].range;
+      if (Array.isArray(range) && range.length >= 2) {
+        patch["scene." + axis + ".range"] = [range[0], range[1]];
+      }
+    });
+    if (sceneLayout.aspectmode) patch["scene.aspectmode"] = sceneLayout.aspectmode;
+    if (sceneLayout.aspectratio) {
+      try { patch["scene.aspectratio"] = JSON.parse(JSON.stringify(sceneLayout.aspectratio)); }
+      catch (_) {}
+    }
+    if (sceneLayout.uirevision !== undefined) patch["scene.uirevision"] = sceneLayout.uirevision;
+    return Object.keys(patch).length ? patch : null;
+  }
+  function adoptMountedSceneBox(gd, sceneLayout) {
+    const patch = sceneBoxRelayout(sceneLayout);
+    if (!gd || !patch || !window.Plotly || typeof window.Plotly.relayout !== "function") {
+      return Promise.resolve();
+    }
+    const emit = gd.emit;
+    if (typeof emit === "function") {
+      gd.emit = function (eventName) {
+        if (eventName === "plotly_relayout") return gd;
+        return emit.apply(this, arguments);
+      };
+    }
+    gd.__mvAdoptingSceneBox = true;
+    const clear = function () {
+      gd.__mvAdoptingSceneBox = false;
+      if (typeof emit === "function") gd.emit = emit;
+    };
+    let pending;
+    try { pending = window.Plotly.relayout(gd, patch); }
+    catch (_) { clear(); return Promise.resolve(); }
+    return Promise.resolve(pending).then(clear, clear);
+  }
   function installPlotlyRenderGate() {
     if (!window.Plotly) { setTimeout(installPlotlyRenderGate,25); return; }
     function relayoutTouchesCamera(update) {
@@ -768,6 +815,9 @@
         }
         if (name==="relayout" && layout) {
           const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
+          /* The scene-box follow-up is the figure's own camera and ranges,
+           * not a pointer gesture and not a drag to persist. */
+          if (gd && gd.__mvAdoptingSceneBox) return original.apply(this, args);
           refreshSettledGestureStamp(gd, layout);
           const shown=renderMetadataFromLayout(gd && gd.layout);
           const canvasId=shown && shown.scene_id ? String(shown.scene_id) : "";
@@ -856,6 +906,8 @@
               };
             }
             const previous=renderMetadataFromLayout(gd.layout);
+            const mountedScene=previous&&previous.scene_id?String(previous.scene_id):"";
+            const replacingScene=!!(mountedScene&&incomingScene&&mountedScene!==incomingScene);
             let next=layout;
             if (layout.scene&&previous&&previous.scene_id===render.scene_id&&previous.server_started_at===render.server_started_at&&String(previous.scene_generation||"")===String(render.scene_generation||"")&&revision(gd.layout)===revision(layout)) {
               const camera=window.mattervisCurrentCamera&&window.mattervisCurrentCamera(gd);
@@ -904,7 +956,10 @@
               if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installCanvasRefit === "function") {
                 window.MatterVisViewCamera.installCanvasRefit(gd);
               }
-              return restoreInProgressDrag(gd).then(function () { return result; });
+              return restoreInProgressDrag(gd).then(function () {
+                if (!replacingScene) return result;
+                return adoptMountedSceneBox(gd, next && next.scene).then(function () { return result; });
+              });
             }, function (error) {
               if (gd.__mvInFlightFrame===key) gd.__mvInFlightFrame="";
               throw error;

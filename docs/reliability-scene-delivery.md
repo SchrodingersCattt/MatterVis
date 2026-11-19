@@ -57,6 +57,17 @@ must not change scene B, and a stale revision must not replace a newer one.
 - `layout.scene.uirevision` is
   `{scene_id}__{structure name}__{camera_revision}__{viewport signature}`.
   Plotly keeps a WebGL camera only while that token matches.
+- A complete frame whose scene id differs from the mounted scene is followed
+  by a relayout of that figure's camera, axis ranges, aspect mode, aspect
+  ratio, and `uirevision`. `Plotly.react` writes those values onto the
+  layout, and the gl3d scene keeps drawing in the previous axis box until a
+  later relayout rebuilds it. A width or height change is one such rebuild,
+  so the new geometry can sit in the previous box until the plot is resized.
+  The follow-up relayout is not a pointer gesture and is not stored as a
+  drag. A later frame for the same scene still keeps the live camera when
+  its `uirevision` matches. The projection control shows the selected
+  scene's stored projection; the canvas uses the camera on that scene's
+  figure.
 - The browser relayout gate drops a camera gesture whose scene is not the
   mounted canvas. It restores the mounted scene's own saved camera only when
   that camera belongs to the mounted scene. A settled gesture does not copy
