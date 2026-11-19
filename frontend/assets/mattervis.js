@@ -109,11 +109,13 @@
     if (layout.scene && layout.scene.uirevision !== undefined) return layout.scene.uirevision;
     return layout.uirevision !== undefined ? layout.uirevision : null;
   }
-  /* The last complete-frame decisions stay on the graph node and in a
-   * hidden text element. Opening DevTools and expanding that element
-   * shows them. This record does not choose whether a frame is painted. */
+  /* The last complete-frame decisions stay on the graph node that Plotly
+   * already mounted. Setting an attribute does not add a child, so the
+   * viewer-root child-list observer does not schedule rebindAll or flush a
+   * parked scene frame. This record does not choose whether a frame is painted. */
   function noteFrameWitness(gd, layout, traces, decision) {
     try {
+      if (!gd) return;
       const render = renderMetadataFromLayout(layout);
       const record = {
         at: new Date().toISOString(),
@@ -125,27 +127,17 @@
         server_started_at: render && render.server_started_at || null,
         uirevision: witnessUirevision(layout),
         incoming: traceCensus(traces),
-        canvas: traceCensus(gd && gd.data),
+        canvas: traceCensus(gd.data),
         camera: witnessCamera(layout),
-        delivered: gd && gd.__mvDeliveredFrame || null,
+        delivered: gd.__mvDeliveredFrame || null,
       };
-      const log = gd && Array.isArray(gd.__mvFrameWitness) ? gd.__mvFrameWitness : [];
+      const log = Array.isArray(gd.__mvFrameWitness) ? gd.__mvFrameWitness : [];
       log.push(record);
       while (log.length > FRAME_WITNESS_LIMIT) log.shift();
-      if (gd) gd.__mvFrameWitness = log;
-      if (!document || typeof document.getElementById !== "function" || typeof document.createElement !== "function") return;
-      let node = document.getElementById("mv-frame-witness");
-      if (!node) {
-        node = document.createElement("pre");
-        node.id = "mv-frame-witness";
-        node.hidden = true;
-        node.setAttribute("data-mv-role", "frame-witness");
-        const host = document.getElementById("crystal-graph");
-        if (host && typeof host.appendChild === "function") host.appendChild(node);
-        else if (document.body && typeof document.body.appendChild === "function") document.body.appendChild(node);
-        else return;
+      gd.__mvFrameWitness = log;
+      if (typeof gd.setAttribute === "function") {
+        gd.setAttribute("data-mv-frame-witness", JSON.stringify(log));
       }
-      node.textContent = JSON.stringify(log);
     } catch (_) {}
   }
 

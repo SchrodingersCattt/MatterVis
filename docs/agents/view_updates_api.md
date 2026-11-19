@@ -42,10 +42,11 @@ transactions continue to deliver the camera in their complete frame. The
 backend enqueues that complete frame when the state write commits, including
 when the caller is an external script and Dash `update_view` does not run.
 A second request for the same snapshot is deduplicated by the render worker.
-The browser also appends each complete-frame decision to the hidden
-`#mv-frame-witness` text element. That record is the applied or rejected
-frame's identity, camera, and coordinate counts. It does not change the
-frame that is painted.
+The browser also records each complete-frame decision on the existing
+`.js-plotly-plot` node as `__mvFrameWitness` and `data-mv-frame-witness`.
+That record is the applied or rejected frame's identity, camera, and
+coordinate counts. It does not insert a DOM node and it does not change
+the frame that is painted.
 
 The same journal also carries scene-list envelopes:
 

@@ -14,9 +14,11 @@ function harness() {
     geometry_version: 1, display_version: 1, camera_revision: 1, camera_version: 1,
     server_started_at: '2026-10-25T10:00:00Z'};
   const frames = [];
-  const nodes = {};
-  const gd = {data: [], layout: {scene: {camera: {eye: {x: 1, y: 1, z: 1}}},
+  const created = [];
+  const appended = [];
+  const gd = {data: [], attrs: {}, layout: {scene: {camera: {eye: {x: 1, y: 1, z: 1}}},
     meta: {mattervis_render: JSON.parse(JSON.stringify(expected))}}};
+  gd.setAttribute = (name, value) => { gd.attrs[name] = value; };
   function react(target, data) {
     const figure = Array.isArray(data) ? {data: data, layout: arguments[2]} : data;
     frames.push((figure.data || []).length);
@@ -25,12 +27,12 @@ function harness() {
     return Promise.resolve(target);
   }
   const document = {
-    body: {appendChild(node) { nodes[node.id] = node; }},
-    createElement() { return {id: '', hidden: false, textContent: '', setAttribute() {}}; },
+    body: {appendChild(node) { appended.push(node); }},
+    createElement() { const node = {id: ''}; created.push(node); return node; },
     getElementById(id) {
-      if (id === 'crystal-graph') return {querySelector: () => gd, appendChild(node) { nodes[node.id] = node; }};
+      if (id === 'crystal-graph') return {querySelector: () => gd, appendChild(node) { appended.push(node); }};
       if (id === 'fast-view-metadata') return {get textContent() { return JSON.stringify(expected); }};
-      return nodes[id] || null;
+      return null;
     },
   };
   const sandbox = {console, Promise, Object, Array, JSON, Number, String, Date,
@@ -53,11 +55,18 @@ function harness() {
     };
     return sandbox.window.Plotly.react(gd, {data: traces, layout: layout});
   }
-  return {frames, gd, expected, nodes, root: sandbox.window, submit};
+  return {frames, gd, expected, created, appended, root: sandbox.window, submit};
 }
 function witness(h) {
-  assert.ok(h.nodes['mv-frame-witness'], 'witness element was not created');
-  return JSON.parse(h.nodes['mv-frame-witness'].textContent);
+  assert.equal(h.created.length, 0, 'witness created a DOM node');
+  assert.equal(h.appended.length, 0, 'witness inserted a DOM node');
+  const text = h.gd.attrs['data-mv-frame-witness'];
+  assert.equal(text, JSON.stringify(h.gd.__mvFrameWitness));
+  return JSON.parse(text);
+}
+async function spinUntil(check) {
+  for (let i = 0; i < 40 && !check(); i += 1) await Promise.resolve();
+  assert.ok(check(), 'expected queued task did not start');
 }
 """
 
@@ -112,4 +121,58 @@ def test_stale_frame_is_recorded_and_does_not_paint():
   assert.equal(log.at(-1).incoming.coordinates, 1);
   assert.equal(log[0].decision, 'applied');
   assert.equal(h.gd.data.length, 1, 'stale record replaced the mounted traces');
+""")
+
+
+def test_untyped_frame_for_another_scene_is_recorded_and_does_not_paint():
+    _run(r"""
+  const h = harness();
+  h.expected.scene_id = 'scene-b';
+  h.root.commitFrameExpectation(JSON.parse(JSON.stringify(h.expected)));
+  await h.root.Plotly.react(h.gd, {data: [{type: 'mesh3d', visible: true, x: [0, 1, 2]}],
+    layout: {scene: {camera: {eye: {x: 1, y: 0, z: 0}, projection: {type: 'perspective'}}}}});
+  const log = witness(h);
+  assert.equal(h.frames.length, 0, 'untyped frame for another scene reached Plotly');
+  assert.equal(log.length, 1);
+  assert.equal(log[0].decision, 'untyped-other-scene');
+  assert.equal(log[0].incoming.coordinates, 3);
+  assert.equal(h.gd.data.length, 0);
+""")
+
+
+def test_duplicate_frame_is_recorded_as_already_showing():
+    _run(r"""
+  const h = harness();
+  const traces = [{type: 'mesh3d', visible: true, x: [0, 1]}];
+  await h.submit('scene-a', 2, traces);
+  await h.submit('scene-a', 2, traces);
+  const log = witness(h);
+  assert.equal(h.frames.length, 1, 'duplicate frame rebuilt the canvas');
+  assert.deepEqual(log.map(record => record.decision), ['applied', 'already-showing']);
+  assert.equal(log[1].incoming.coordinates, 2);
+  assert.equal(log[1].canvas.coordinates, 2);
+""")
+
+
+def test_frame_that_becomes_stale_while_queued_is_recorded_at_delivery():
+    _run(r"""
+  const h = harness();
+  let release;
+  const blocker = h.root.MatterVisRenderQueue.enqueue(h.gd,
+    () => new Promise(resolve => { release = resolve; }));
+  await spinUntil(() => typeof release === 'function');
+  const queued = h.submit('scene-a', 2, [{type: 'mesh3d', visible: true, x: [0, 1, 2, 3]}]);
+  h.expected.render_revision = 5;
+  h.expected.camera_revision = 5;
+  h.root.commitFrameExpectation(JSON.parse(JSON.stringify(h.expected)));
+  release();
+  await queued;
+  await blocker;
+  const log = witness(h);
+  assert.equal(h.frames.length, 0, 'frame that became stale while queued reached Plotly');
+  assert.equal(log.length, 1);
+  assert.equal(log[0].decision, 'stale-at-delivery');
+  assert.equal(log[0].render_revision, 2);
+  assert.equal(log[0].incoming.coordinates, 4);
+  assert.equal(h.gd.data.length, 0);
 """)
