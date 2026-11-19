@@ -94,8 +94,37 @@
         else item.resolve(gd);
       });
     }
+    // A newer drawable frame for the same scene replaces one that has not
+    // started, including an empty frame waiting to clear the canvas.
+    // Running that older Plotly.react would blank the view and then paint
+    // geometry the user has already left.
+    if (options && options.supersedeScene) {
+      queue.items = queue.items.filter(function (item) {
+        if (item.supersedeScene !== options.supersedeScene &&
+            item.yieldsTo !== options.supersedeScene) return true;
+        item.resolve(gd);
+        return false;
+      });
+    }
+    if (options && options.yieldsTo) {
+      const scene = options.yieldsTo;
+      const drawableWaiting = queue.items.some(function (item) {
+        return item.supersedeScene === scene;
+      });
+      if (drawableWaiting || (gd.__mvInFlightDrawable && gd.__mvInFlightScene === scene)) {
+        return Promise.resolve(gd);
+      }
+    }
     const result = new Promise(function (resolve, reject) {
-      queue.items.push({task: task, resolve: resolve, reject: reject, isCurrent: options && options.isCurrent});
+      queue.items.push({
+        task: task,
+        resolve: resolve,
+        reject: reject,
+        isCurrent: options && options.isCurrent,
+        frameKey: options && options.frameKey,
+        supersedeScene: options && options.supersedeScene,
+        yieldsTo: options && options.yieldsTo,
+      });
     });
     queue.last = result.catch(function () { return gd; });
     gd.__mvRenderQueue = queue.last;
@@ -699,6 +728,23 @@
         else if (name==="relayout") layout=args[1];
         const render=renderMetadataFromLayout(layout);
         const target=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
+        const incomingTraces = fullFigure
+          ? (objectFigure
+            ? (Array.isArray(args[1].data) ? args[1].data : [])
+            : (Array.isArray(args[1]) ? args[1] : []))
+          : [];
+        const drawableIncoming = incomingTraces.some(function (trace) {
+          return !!(trace && trace.visible !== false && trace.x && trace.x.length);
+        });
+        // An empty figure is not a loading state. Dash can deliver one while
+        // a real frame is already on screen; applying it clears WebGL and
+        // leaves a blank canvas until a later frame happens to arrive.
+        if (fullFigure && target && Array.isArray(target.data) && !drawableIncoming) {
+          const drawn = target.data.some(function (trace) {
+            return !!(trace && trace.visible !== false && trace.x && trace.x.length);
+          });
+          if (drawn) return Promise.resolve(target);
+        }
         // Dash can replay an older figure prop without MatterVis render
         // metadata while a selected-scene handoff is still in flight.  The
         // metadata fence below cannot identify that payload, so it would
@@ -765,7 +811,14 @@
             /* Do not leave the busy pill behind when a stale/duplicate frame
              * is rejected. Mark the request busy only after the frame gate
              * confirms that this Plotly call will actually run. */
+            if (gd.__mvInFlightFrame===key) return gd;
             if (!figureMetadataIsCurrent(render,gd)||alreadyShowing) return gd;
+            if (!drawableIncoming && Array.isArray(gd.data) && gd.data.some(function (trace) {
+              return !!(trace && trace.visible !== false && trace.x && trace.x.length);
+            })) return gd;
+            gd.__mvInFlightFrame=key;
+            gd.__mvInFlightScene=render && render.scene_id ? String(render.scene_id) : "";
+            gd.__mvInFlightDrawable=drawableIncoming;
             const statusNode = document.getElementById("mv-render-status");
             if (statusNode) {
               statusNode.hidden = false;
@@ -801,6 +854,11 @@
             else args[2]=next;
             return Promise.resolve(original.apply(receiver,args)).then(function(result) {
               frameApplied=true;
+              if (gd.__mvInFlightFrame===key) {
+                gd.__mvInFlightFrame="";
+                gd.__mvInFlightScene="";
+                gd.__mvInFlightDrawable=false;
+              }
               /* A Plotly figure replacement can leave the previous hover
                * payload alive on the recycled graph node.  Clear semantic
                * hover state after every complete frame so a right-click on
@@ -827,11 +885,23 @@
                 window.MatterVisViewCamera.installCanvasRefit(gd);
               }
               return restoreInProgressDrag(gd).then(function () { return result; });
+            }, function (error) {
+              if (gd.__mvInFlightFrame===key) {
+                gd.__mvInFlightFrame="";
+                gd.__mvInFlightScene="";
+                gd.__mvInFlightDrawable=false;
+              }
+              throw error;
             });
           };
           // Both Dash signatures and WS pass here. Retry after failures;
           // neither receipt nor a rejected react is a delivered frame.
-          return enqueueRender(gd, deliver).then(function (result) {
+          const sceneKey = render && render.scene_id ? String(render.scene_id) : "";
+          return enqueueRender(gd, deliver, {
+            frameKey: key,
+            supersedeScene: drawableIncoming ? sceneKey : "",
+            yieldsTo: !drawableIncoming && sceneKey ? sceneKey : "",
+          }).then(function (result) {
             /* An already-running react cannot be cancelled when a newer
              * camera abandons its queue. Restore that command after the
              * frame releases the FIFO, through the bounded camera path. */

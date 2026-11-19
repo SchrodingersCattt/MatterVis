@@ -42,6 +42,12 @@ transactions continue to deliver the camera in their complete frame. The
 backend enqueues that complete frame when the state write commits, including
 when the caller is an external script and Dash `update_view` does not run.
 A second request for the same snapshot is deduplicated by the render worker.
+The browser also drops a complete frame that has no drawable traces when the
+canvas already has drawable traces, and it drops a queued complete frame for
+a scene when a newer frame with drawable traces for that same scene arrives
+before the older one starts. An empty frame does not drop a drawable frame
+that is already queued or running. A running frame is still rejected when
+its scene or revision is no longer current.
 
 The same journal also carries scene-list envelopes:
 

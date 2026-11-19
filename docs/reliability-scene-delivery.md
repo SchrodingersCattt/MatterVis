@@ -10,6 +10,17 @@ must not change scene B, and a stale revision must not replace a newer one.
   journal. Duplicating a scene is a complete frame for the copy: the catalog
   can rename the tab before the canvas title exists, and the title arrives
   only with the figure.
+- A complete frame with no drawable traces does not replace a canvas that
+  already has drawable traces. An empty payload is not a loading state and
+  must not clear WebGL while a later frame is still in flight. A complete
+  frame that has not started is dropped when a newer frame with drawable
+  traces for the same scene is queued, so the older `Plotly.react` cannot
+  clear the canvas and then paint geometry the user has already left. An
+  empty frame does not drop a drawable frame that is already queued or
+  running. A frame that is already running is still rejected at execution
+  when its scene or revision is no longer current. The status line may show
+  atom and bond counts before the first drawable frame is mounted; that
+  interval is loading, and it ends when the current frame is applied.
 - Worker identity is `(scene_generation, render_revision, camera_revision)`.
   The finished build is published when that identity is still current. A
   strictly newer identity is requeued when the transition still needs a
