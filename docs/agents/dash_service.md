@@ -373,10 +373,16 @@ Notes for callers:
   previous ratio is not the value that remains.   A figure whose camera
   revision is newer than the stored fit keeps that figure's ratio
   instead of having the previous ratio stamped over it. A Fit or other
-  camera command for the selected scene waits until that scene's
-  geometry is the one on the canvas. A camera command for a scene the
-  user has left is not applied to the scene now shown, so the displayed
-  projection, data box, and eye stay with the scene that was requested.   An older camera
+  camera command for the selected scene waits until a figure for that
+  scene and generation has replaced the traces. A react that resolves
+  without installing those traces does not apply the command and does
+  not rewrite the canvas identity. A new generation keeps its own
+  command, including camera version 0; a higher version from an older
+  generation does not replace it. A later committed figure with a
+  higher camera revision drops the held command. A rejected react
+  leaves the command held. A new server epoch clears it. Leaving the
+  scene does not apply it; returning, once that geometry is current,
+  does.   An older camera
   revision for the same scene generation and server epoch does not
   replace it. A new scene, scene generation, or server epoch starts
   its own camera clock. A state patch with a
