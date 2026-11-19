@@ -297,11 +297,12 @@ vm.runInContext(source, sandbox);
   assert.equal(frame, 'figure');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].scene, 'scene-b');
+  assert.equal(gd.layout.meta.mattervis_render.scene_id, 'scene-b');
   const patch = sandbox.window.MatterVisViewUpdates.submit({
     scene_id: 'scene-b', update_kind: 'display', display_version: 2, geometry_version: 1,
     payload: {display_options: []},
   });
-  assert.equal(patch, 'stale');
+  assert.ok(patch instanceof Promise, 'a display patch for the delivered scene was rejected');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
@@ -538,6 +539,80 @@ const fit={
 };
 assert.equal(api.submit(fit) instanceof Promise, true);
 assert.equal(api.applicable(frame(0), gd), false, 'revision 0 replaced a Fit');
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_fit_for_the_selected_scene_waits_until_that_geometry_is_shown():
+    """A Fit must not write its data box onto the scene still on the canvas."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_updates.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const applied = [];
+const gd = {layout: {meta: {mattervis_render: {
+  scene_id: 'salt', scene_generation: 1, camera_revision: 4, camera_version: 4,
+  render_revision: 2, geometry_version: 2, display_version: 2,
+}}}, data: [{name: 'salt'}]};
+let selected = 'water';
+const sandbox = {
+  console, Promise, Number, String, Object, Array, JSON,
+  window: {
+    MatterVisSelectedScene: () => selected,
+    MatterVisViewCamera: {
+      graph: () => gd,
+      applyAsync: (camera, options) => { applied.push({camera, options}); return Promise.resolve(true); },
+    },
+    Plotly: {react: () => Promise.resolve()},
+  },
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const submit = sandbox.window.MatterVisViewUpdates.submit;
+const waterRanges = {x: [0, 1.35], y: [0, 1.05], z: [0, 0.56]};
+const waterFit = {
+  type: 'view_update', update_kind: 'camera', scene_id: 'water', scene_generation: 1,
+  geometry_version: 1, display_version: 1, camera_version: 2,
+  payload: {
+    command: 'fit',
+    aspectratio: {x: 1.2, y: 1.2, z: 1.2},
+    ranges: waterRanges,
+    camera: {eye: {x: 0.2, y: 0.2, z: 0.2}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}, projection: {type: 'orthographic'}},
+  },
+};
+const saltFit = {
+  type: 'view_update', update_kind: 'camera', scene_id: 'salt', scene_generation: 1,
+  geometry_version: 2, display_version: 2, camera_version: 5,
+  payload: {
+    command: 'fit',
+    ranges: {x: [-2, 20], y: [-2, 8], z: [-2, 8]},
+    camera: {eye: {x: 1, y: 1, z: 1}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}, projection: {type: 'perspective'}},
+  },
+};
+(async () => {
+  assert.equal(submit(waterFit), 'parked');
+  assert.equal(applied.length, 0, 'water fit wrote onto the salt canvas');
+  assert.equal(submit(saltFit), 'stale');
+  assert.equal(applied.length, 0, 'a salt fit painted after water was selected');
+  const figure = {
+    type: 'figure', update_kind: 'geometry', scene_id: 'water', scene_generation: 1,
+    geometry_version: 1, display_version: 1, camera_version: 1, camera_revision: 1,
+    figure: {data: [{name: 'water'}], layout: {meta: {mattervis_render: {scene_id: 'water', camera_revision: 1}}}},
+  };
+  await submit(figure);
+  assert.equal(applied.length, 1, 'the parked water fit was not applied to the water figure');
+  assert.equal(applied[0].options.scene_id, 'water');
+  assert.equal(applied[0].options.command, 'fit');
+  assert.equal(applied[0].camera.projection.type, 'orthographic');
+  assert.deepEqual(applied[0].options.ranges, waterRanges);
+  assert.equal(gd.layout.meta.mattervis_render.scene_id, 'water');
+  selected = 'triclinic';
+  assert.equal(submit(waterFit), 'stale', 'a fit for the scene the user left was kept');
+})().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 0, result.stderr or result.stdout

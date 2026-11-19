@@ -121,6 +121,49 @@
     }
     return "";
   }
+  var parkedCameraByScene = Object.create(null);
+  function cameraWaitsForGeometry(update, gd) {
+    /* A Fit for the scene the user selected must not write that scene's
+     * data box onto the geometry still on the canvas. Hold it until the
+     * matching figure lands. A Fit for a scene the user has left is not
+     * held: the final selection is the one that may paint. */
+    if (updateKind(update) !== "camera" || !update || !update.scene_id) return false;
+    var render = currentMeta(gd);
+    var shown = render && render.scene_id ? String(render.scene_id) : "";
+    var scene = String(update.scene_id);
+    if (!shown || scene === shown) return false;
+    var selected = selectedScene();
+    return !!(selected && selected === scene);
+  }
+  function pruneParkedCameras() {
+    var selected = selectedScene();
+    if (!selected) return;
+    Object.keys(parkedCameraByScene).forEach(function (scene) {
+      if (scene !== selected) delete parkedCameraByScene[scene];
+    });
+  }
+  function parkCamera(update) {
+    var scene = String(update.scene_id);
+    var existing = parkedCameraByScene[scene];
+    if (existing && cameraRevision(existing) > cameraRevision(update)) return "stale";
+    parkedCameraByScene[scene] = update;
+    return "parked";
+  }
+  function flushParkedCamera(gd) {
+    var render = currentMeta(gd);
+    var scene = render && render.scene_id ? String(render.scene_id) : "";
+    var parked = scene && parkedCameraByScene[scene];
+    if (!parked) return;
+    var selected = selectedScene();
+    if (selected && selected !== scene) {
+      delete parkedCameraByScene[scene];
+      return;
+    }
+    delete parkedCameraByScene[scene];
+    var shownRevision = Number(render.camera_revision || render.camera_version || 0);
+    if (Number.isFinite(shownRevision) && cameraRevision(parked) < shownRevision) return;
+    submit(parked);
+  }
   function expectedScene(scene) {
     if (!scene || typeof root.MatterVisExpectedRender !== "function") return null;
     return root.MatterVisExpectedRender(scene);
@@ -319,6 +362,17 @@
       return "error";
     }
     root.__mv_view_diag.submissions += 1;
+    pruneParkedCameras();
+    if (updateKind(snapshot) === "camera" && snapshot.scene_id && selectedScene() && String(snapshot.scene_id) !== selectedScene()) {
+      root.__mv_view_diag.staleDrops += 1;
+      root.__mv_view_diag.cameraStale += 1;
+      noteDrop(snapshot, gd, "selection");
+      return "stale";
+    }
+    if (cameraWaitsForGeometry(snapshot, gd)) {
+      root.__mv_view_diag.cameraParked = (root.__mv_view_diag.cameraParked || 0) + 1;
+      return parkCamera(snapshot);
+    }
     if (!applicable(snapshot, gd)) {
       root.__mv_view_diag.staleDrops += 1;
       if (kind === "camera") root.__mv_view_diag.cameraStale += 1;
@@ -438,7 +492,11 @@
        * would paint scene A's camera onto scene B before that gate runs. */
       pending[figureKey] = Promise.resolve(root.Plotly.react(gd, clone(snapshot.figure.data || []), layout)).then(function () {
         gd.__mvGraphGeneration = Number(gd.__mvGraphGeneration || 0) + 1;
+        if (!gd.layout) gd.layout = {};
+        if (!gd.layout.meta) gd.layout.meta = {};
+        gd.layout.meta.mattervis_render = renderMeta;
         markDelivered(snapshot, gd, figureKey);
+        flushParkedCamera(gd);
         return "figure";
       }, function (error) {
         if (root.MatterVisViewCamera && typeof root.MatterVisViewCamera.reportStatus === "function") {
@@ -461,6 +519,6 @@
     });
     return latest;
   }
-  root.MatterVisViewUpdates = { submit: submit, apply: submit, commit: submit, applicable: applicable, pickLatest: pickLatest, deliveredCount: function () { return Object.keys(delivered).length; }, reset: function () { delivered = Object.create(null); latestCameraRevision = Object.create(null); latestVersions = Object.create(null); } };
+  root.MatterVisViewUpdates = { submit: submit, apply: submit, commit: submit, applicable: applicable, pickLatest: pickLatest, deliveredCount: function () { return Object.keys(delivered).length; }, reset: function () { delivered = Object.create(null); latestCameraRevision = Object.create(null); latestVersions = Object.create(null); parkedCameraByScene = Object.create(null); } };
   (root.__mv_pending_view_updates || []).splice(0).forEach(function (update) { submit(update); });
 })(window);
