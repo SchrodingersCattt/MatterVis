@@ -18,6 +18,17 @@ must not change scene B, and a stale revision must not replace a newer one.
   identity is dropped.
 - `broadcast_figure` ignores a body whose scene cache key or render revision
   is no longer current. `latest_figure_broadcast` does not return that body.
+- The browser keeps the last complete-frame decisions in
+  `#mv-frame-witness`, a hidden text element, and on the graph node as
+  `__mvFrameWitness`. Each record names the decision (`applied`,
+  `stale-before-queue`, `stale-at-delivery`, `already-showing`, or
+  `untyped-other-scene`), the scene, generation, render revision, camera
+  revision, `uirevision`, the incoming and already-mounted trace and
+  coordinate counts, and the camera. Coordinate counts use the length of
+  `x`, including typed arrays. The record does not choose whether a frame
+  is painted, and it does not describe a session that ran before this
+  record existed. Expanding the element in the page inspector shows the
+  JSON. It is not a server state and it is not the live WebGL pixels.
 - `layout.scene.uirevision` is
   `{scene_id}__{structure name}__{camera_revision}__{viewport signature}`.
   Plotly keeps a WebGL camera only while that token matches.
