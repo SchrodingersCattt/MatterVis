@@ -807,7 +807,20 @@
         if (fullFigure&&render&&gd) {
           const receiver=this;
           const revision=function(lay) {return lay&&lay.scene&&lay.scene.uirevision!==undefined?lay.scene.uirevision:lay&&lay.uirevision;};
-          const key=JSON.stringify([render.server_started_at,render.scene_id,render.render_revision,render.camera_revision||0,revision(layout)]);
+          // Scene generation is part of the delivered identity. Close/undo
+          // resets the render revision and can reuse the same camera
+          // revision and uirevision on the same scene id. Without the
+          // generation, that restored frame matches the previous delivery
+          // and never reaches Plotly. The queue's generation order cannot
+          // repair a key that already says the frame is on screen.
+          const key=JSON.stringify([
+            render.server_started_at,
+            render.scene_id,
+            String(render.scene_generation||""),
+            render.render_revision,
+            render.camera_revision||0,
+            revision(layout),
+          ]);
           let frameApplied=false;
             const deliver=function() {
             if (interactionActive) return interactionSettled.then(deliver);

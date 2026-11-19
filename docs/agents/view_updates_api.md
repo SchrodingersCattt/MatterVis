@@ -56,7 +56,13 @@ before it starts. Newer is a higher scene generation, or the same generation
 and a higher render or camera revision. A `Plotly.react` that has already
 been issued is not cancelled; the newer committed frame applied after it
 writes is the picture that remains. A frame that has not been issued is
-refused when its scene, generation, or revision is no longer current.
+refused when its scene, generation, or revision is no longer current. The
+delivered-frame identity includes scene generation beside the server
+session, scene id, render revision, camera revision, and `uirevision`.
+Closing a scene and undoing that close reuses the scene id and can reuse
+the render revision, camera revision, and `uirevision`; the new generation
+still makes that frame current. A repeat of the same generation is the
+duplicate that is not rebuilt.
 
 The same journal also carries scene-list envelopes:
 

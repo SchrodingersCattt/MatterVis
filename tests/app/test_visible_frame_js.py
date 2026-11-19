@@ -373,3 +373,88 @@ def test_loading_placeholder_does_not_replace_a_committed_frame():
   assert.equal(h.frames.length, 1, 'loading placeholder could not paint a blank canvas');
   assert.equal(h.gd.layout.meta.mattervis_pending, true);
 """)
+
+
+def test_same_revision_new_generation_replaces_a_delivered_frame():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 1, h.trace());
+  const kept = h.gd.layout.scene.uirevision;
+  h.expected.scene_generation = 2;
+  h.commitExpectation();
+  await h.submit('scene-a', 1, []);
+  assert.equal(h.gd.layout.scene.uirevision, kept, 'the regression changed uirevision');
+  assert.equal(h.frames.length, 2, 'new generation empty frame matched the delivered key');
+  assert.equal(h.frames[1].generation, 2);
+  assert.equal(h.frames[1].revision, 1);
+  assert.equal(h.frames[1].traces, 0);
+  assert.equal(h.gd.data.length, 0, 'generation 2 empty frame left generation 1');
+  const replacement = [{type: 'scatter3d', name: 'restored', x: [2], y: [0], z: [0], visible: true}];
+  h.expected.scene_generation = 3;
+  h.commitExpectation();
+  await h.submit('scene-a', 1, replacement);
+  assert.equal(h.gd.layout.scene.uirevision, kept);
+  assert.equal(h.frames.length, 3, 'new generation geometry matched the delivered key');
+  assert.equal(h.frames[2].generation, 3);
+  assert.equal(h.gd.data[0].name, 'restored');
+  assert.equal(h.gd.layout.meta.mattervis_render.scene_generation, 3);
+""")
+
+
+def test_queued_same_revision_new_generation_is_the_last_intent():
+    _run_node(r"""
+  const h = harness();
+  let release;
+  const blocker = h.root.MatterVisRenderQueue.enqueue(h.gd,
+    () => new Promise(resolve => { release = resolve; }));
+  await spinUntil(() => typeof release === 'function');
+  const older = h.submit('scene-a', 1, h.trace());
+  h.expected.scene_generation = 2;
+  h.commitExpectation();
+  const emptied = h.submit('scene-a', 1, []);
+  release();
+  await older;
+  await emptied;
+  await blocker;
+  assert.deepEqual(h.frames.map(frame => [frame.generation, frame.revision, frame.traces]),
+    [[2, 1, 0]], 'queued generation 1 painted after generation 2');
+  assert.equal(h.gd.layout.scene.uirevision, 'scene-a__name__1__viewport');
+  assert.equal(h.gd.data.length, 0);
+""")
+
+
+def test_inflight_same_revision_new_generation_remains_after_the_first_write():
+    _run_node(r"""
+  const h = harness();
+  h.holdNext();
+  const first = h.submit('scene-a', 1, h.trace());
+  await spinUntil(() => h.canRelease());
+  h.expected.scene_generation = 2;
+  h.commitExpectation();
+  const emptied = h.submit('scene-a', 1, []);
+  h.release();
+  await first;
+  await emptied;
+  assert.equal(h.frames.length, 2, 'generation 2 was treated as the in-flight generation 1 frame');
+  assert.deepEqual([h.frames[0].generation, h.frames[0].traces], [1, 1]);
+  assert.deepEqual([h.frames[1].generation, h.frames[1].revision, h.frames[1].traces], [2, 1, 0]);
+  assert.equal(h.gd.layout.scene.uirevision, 'scene-a__name__1__viewport');
+  assert.equal(h.gd.data.length, 0, 'the finished generation 1 frame stayed on screen');
+  h.holdNext();
+  h.expected.scene_generation = 3;
+  h.commitExpectation();
+  const second = h.submit('scene-a', 1, h.trace());
+  await spinUntil(() => h.canRelease());
+  h.expected.scene_generation = 4;
+  h.commitExpectation();
+  const restored = [{type: 'scatter3d', name: 'restored', x: [3], y: [0], z: [0], visible: true}];
+  const next = h.submit('scene-a', 1, restored);
+  h.release();
+  await second;
+  await next;
+  assert.equal(h.frames.at(-1).generation, 4);
+  assert.equal(h.frames.at(-1).traces, 1);
+  assert.equal(h.gd.data[0].name, 'restored');
+  assert.equal(h.gd.layout.scene.uirevision, 'scene-a__name__1__viewport');
+  assert.equal(h.gd.layout.meta.mattervis_render.scene_generation, 4);
+""")

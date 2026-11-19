@@ -32,6 +32,15 @@ must not change scene B, and a stale revision must not replace a newer one.
   issued is not cancelled and can still write. A newer committed frame
   queued behind it is applied after that write, and that newer frame is the
   picture that remains, including when it has no traces.
+- The browser's delivered-frame identity is the server session, scene id,
+  scene generation, render revision, camera revision, and `uirevision`.
+  `uirevision` itself is scene id, structure name, camera revision, and
+  viewport signature. Closing a scene and undoing that close keeps the scene
+  id, sets the render revision back to zero, and assigns a new generation.
+  The next geometry or display change can make the render revision 1 again,
+  and the camera revision and `uirevision` can match the pre-close frame.
+  That restored frame is still delivered, empty or not. A repeated identity
+  that also repeats the generation is the duplicate that is not rebuilt.
 - A complete frame that has not started is dropped when a newer committed
   frame for the same scene is queued. Newer is a higher scene generation, or
   the same generation and a higher render revision, or the same generation
