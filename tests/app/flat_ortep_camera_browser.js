@@ -1,9 +1,11 @@
 /* Flat ORTEP camera interaction on the real viewer.
  * Args: playwright module, chrome path, base url.
  */
+const { spawnSync } = require("node:child_process");
 const { chromium } = require(process.argv[2]);
 const chrome = process.argv[3];
 const base = process.argv[4];
+const python = process.env.MV_PYTHON;
 
 function fail(message) {
   throw new Error(message);
@@ -30,6 +32,10 @@ async function readCamera(page) {
       keys: camera ? Object.keys(camera) : [],
       images: images ? images.length : 0,
       banner: banner ? String(banner.textContent || "") : "",
+      renderStatus: (() => {
+        const node = document.getElementById("mv-render-status");
+        return node && !node.hidden ? String(node.textContent || "") : "";
+      })(),
       dashError: dashError ? String(dashError.textContent || "") : "",
       title: String((gd && gd.layout && gd.layout.title && (gd.layout.title.text || gd.layout.title)) || ""),
     };
@@ -38,8 +44,9 @@ async function readCamera(page) {
 
 function assertHealthy(view, label) {
   if (view.dashError) fail(label + " dash error: " + view.dashError);
-  if (/invalid property|camera error|could not be restored|relayout failed/i.test(view.banner)) {
-    fail(label + " status: " + view.banner);
+  const statusText = String(view.renderStatus || "") + " " + String(view.banner || "");
+  if (/invalid property|camera error|could not be restored|did not match the view|relayout failed/i.test(statusText)) {
+    fail(label + " status: " + statusText);
   }
   if (!view.eye || !view.keys.includes("eye")) fail(label + " missing eye " + JSON.stringify(view));
   if (view.keys.includes("position") || view.keys.includes("focal_point")) {
@@ -106,26 +113,97 @@ function publicationReady(raster) {
   return !!(raster && !raster.error && sceneBackgroundIsClear(raster.bg) && raster.ink);
 }
 
+function compositedInk(png) {
+  if (!python) fail("MV_PYTHON is required to read the composited graph");
+  const result = spawnSync(python, ["-c", `
+import io, sys
+from PIL import Image
+image = Image.open(io.BytesIO(sys.stdin.buffer.read())).convert("RGB")
+width, height = image.size
+# The caption sits on the bottom strip. The plot above it is the picture
+# the user sees, including a blank canvas that still has a paper image.
+crop = image.crop((0, 0, width, max(1, int(height * 0.9))))
+pixels = list(crop.getdata())
+ink = sum(1 for red, green, blue in pixels if red < 245 or green < 245 or blue < 245)
+print(ink, len(pixels))
+`], { input: png });
+  if (result.status !== 0) fail("composited decode failed: " + String(result.stderr || ""));
+  const parts = String(result.stdout || "").trim().split(/\s+/);
+  const ink = Number(parts[0]);
+  const total = Number(parts[1]);
+  if (!Number.isFinite(ink) || !Number.isFinite(total) || total <= 0) fail("composited decode was empty");
+  return { ink, total, fraction: ink / total };
+}
+
 async function assertPublicationVisible(page, label) {
   const deadline = Date.now() + 90000;
   let previous = null;
   let ready = false;
   while (Date.now() < deadline) {
     const raster = await publicationRaster(page);
-    if (ready && !publicationReady(raster)) {
-      fail(label + " publication raster disappeared " + JSON.stringify({ previous, raster }));
+    const shot = await page.locator("#crystal-graph").screenshot({ type: "png" });
+    const composited = compositedInk(shot);
+    const shown = publicationReady(raster) && composited.fraction > 0.008;
+    if (ready && !shown) {
+      fail(label + " publication picture disappeared " + JSON.stringify({ previous, raster, composited }));
     }
-    if (publicationReady(raster)) {
-      const again = await publicationRaster(page);
-      if (!publicationReady(again)) {
-        fail(label + " publication raster disappeared " + JSON.stringify({ raster, again }));
+    if (shown) {
+      ready = true;
+      const againShot = await page.locator("#crystal-graph").screenshot({ type: "png" });
+      const again = compositedInk(againShot);
+      if (ready && !(again.fraction > 0.008)) {
+        fail(label + " publication picture disappeared " + JSON.stringify({ composited, again }));
       }
       return;
     }
-    previous = raster;
+    previous = { raster, composited };
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
   }
-  fail(label + " publication raster did not stay visible " + JSON.stringify(previous));
+  fail(label + " publication picture did not stay visible " + JSON.stringify(previous));
+}
+
+async function assertProjectionApplied(page, projection, startAttempts) {
+  const deadline = Date.now() + 20000;
+  let stable = 0;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await page.evaluate(() => {
+      const graph = document.querySelector("#crystal-graph .js-plotly-plot");
+      const scene = graph && graph._fullLayout && graph._fullLayout.scene && graph._fullLayout.scene._scene;
+      const status = document.getElementById("mv-render-status");
+      const radio = document.querySelector("#view-projection input:checked");
+      const diag = window.__mv_camera_diag || {};
+      return {
+        text: status && !status.hidden ? String(status.textContent || "") : "",
+        radio: radio && radio.value,
+        ortho: scene && scene.camera ? scene.camera._ortho : null,
+        attempts: Number(diag.attempts || 0),
+      };
+    });
+    if (/could not be restored|did not match the view|relayout failed/i.test(last.text)) {
+      fail("projection " + projection + " " + last.text);
+    }
+    const started = last.attempts > startAttempts;
+    const matches = last.radio === projection && (projection === "orthographic" ? last.ortho === true : last.ortho === false);
+    if (started && matches && !last.text) {
+      stable += 1;
+      if (stable >= 2) {
+        assertHealthy(await readCamera(page), "projection " + projection);
+        await assertPublicationVisible(page, "projection " + projection);
+        return;
+      }
+    } else {
+      stable = 0;
+    }
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  }
+  fail("projection " + projection + " did not settle " + JSON.stringify(last));
+}
+
+async function applyProjection(page, projection) {
+  const startAttempts = await page.evaluate(() => Number((window.__mv_camera_diag || {}).attempts || 0));
+  await page.locator("#view-projection input[value='" + projection + "']").click();
+  await assertProjectionApplied(page, projection, startAttempts);
 }
 
 async function drag(page) {
@@ -173,12 +251,12 @@ async function main() {
 
     await page.locator("#view-reset").click();
     await assertPublicationVisible(page, "after reset");
-    await page.locator("#view-projection input[value='orthographic']").click();
-    await assertPublicationVisible(page, "orthographic flat ortep");
-    await page.locator("#view-projection input[value='perspective']").click();
-    await assertPublicationVisible(page, "perspective flat ortep");
+    assertHealthy(await readCamera(page), "after reset");
+    await applyProjection(page, "orthographic");
+    await applyProjection(page, "perspective");
     await page.locator("#view-reset").click();
     await assertPublicationVisible(page, "second reset");
+    assertHealthy(await readCamera(page), "second reset");
 
     const tabs = page.locator("#scene-tabs .tab");
     const tabCount = await tabs.count();

@@ -386,6 +386,13 @@
     gd.__mvContextLossCanvas = canvas;
     gd.__mvContextLossInstalled = true;
   }
+  function publicationImageVisible(gd) {
+    var images = gd && gd.layout && gd.layout.images;
+    if (!images || !images.length) return false;
+    return images.some(function (image) {
+      return !!(image && image.source && image.visible !== false);
+    });
+  }
   function postcondition(gd, camera, options) {
     var expected = projectionType(camera);
     var internal = internalProjection(gd);
@@ -397,9 +404,10 @@
       var got = projectionType(actualCamera(gd));
       if (got && got !== expected) return false;
     }
-    /* If Plotly exposes a scene/data model, require geometry to remain
-     * drawable. Isolated hosts with no data model still get the camera check. */
-    if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd)) return false;
+    /* Mesh vertices are one drawable. A paper image is the other: the flat
+     * publication figure keeps only a transparent camera anchor in `data`,
+     * so a projection change must not be rejected for lack of a mesh. */
+    if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd) && !publicationImageVisible(gd)) return false;
     if (options && options.requireEye) {
       var expectedDistance = vectorLength(camera && camera.eye);
       var gotDistance = vectorLength(liveEye(gd));

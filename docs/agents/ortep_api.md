@@ -16,7 +16,9 @@ MatterVis supports two ORTEP-style paths:
   rewritten by the figure build.
   The publication raster is a paper image under that orbit scene. The scene
   background is transparent so the raster stays visible. An opaque scene
-  background covers the drawing and leaves only the caption.
+  background covers the drawing and leaves only the caption. A projection
+  change is not rejected because the only WebGL trace is the transparent
+  camera anchor; the paper image is the drawable picture.
 
 The CIF parser reads `_atom_site_aniso_U_*` into `atom["U"]`; missing
 anisotropic data falls back to `_atom_site_U_iso_or_equiv`.

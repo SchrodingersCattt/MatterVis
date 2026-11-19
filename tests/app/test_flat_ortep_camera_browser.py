@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -67,7 +68,7 @@ def test_flat_ortep_camera_survives_drag_reset_and_scene_switch(tmp_path: Path):
     beta.write_text(_CIF.format(name="beta", x0="0.30"), encoding="utf-8")
     running = start_mattervis(str(tmp_path), [str(alpha), str(beta)])
     artifacts = _artifact_dir()
-    env = {**os.environ, "NODE_PATH": str(ROOT / "node_modules")}
+    env = {**os.environ, "NODE_PATH": str(ROOT / "node_modules"), "MV_PYTHON": sys.executable}
     try:
         result = subprocess.run(
             [node, str(RUNNER), playwright, chrome, running.url],
