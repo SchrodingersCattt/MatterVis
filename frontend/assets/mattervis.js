@@ -80,6 +80,18 @@
    * burst of camera commands or duplicate Dash/WS frames cannot grow an
    * unbounded promise chain.  Dropped entries are already superseded by a
    * newer frame; resolving them lets their callers recover and continue. */
+  function frameSupersedes(next, queued) {
+    if (!next || !queued || !next.scene || next.scene !== queued.scene) return false;
+    if (queued.pending && !next.pending) return true;
+    if (next.pending && !queued.pending) return false;
+    if (next.generation !== queued.generation) return next.generation > queued.generation;
+    if (next.revision !== queued.revision) return next.revision > queued.revision;
+    if (next.camera !== queued.camera) return next.camera > queued.camera;
+    return true;
+  }
+  function loadingPlaceholder(layout) {
+    return !!(layout && layout.meta && layout.meta.mattervis_pending);
+  }
   function enqueueRender(gd, task, options) {
     if (!gd || typeof task !== "function") return Promise.resolve(gd);
     let queue = gd.__mvRenderQueueState;
@@ -94,26 +106,18 @@
         else item.resolve(gd);
       });
     }
-    // A newer drawable frame for the same scene replaces one that has not
-    // started, including an empty frame waiting to clear the canvas.
-    // Running that older Plotly.react would blank the view and then paint
-    // geometry the user has already left.
-    if (options && options.supersedeScene) {
+    // A newer committed frame replaces one for the same scene that has not
+    // started. Newer is a higher scene generation, or the same generation
+    // and a higher render or camera revision. Empty data is not that
+    // comparison. A loading placeholder does not replace a committed frame.
+    // Running the older Plotly.react would paint geometry the user has left.
+    if (options && options.supersede) {
+      const next = options.supersede;
       queue.items = queue.items.filter(function (item) {
-        if (item.supersedeScene !== options.supersedeScene &&
-            item.yieldsTo !== options.supersedeScene) return true;
+        if (!frameSupersedes(next, item.supersede)) return true;
         item.resolve(gd);
         return false;
       });
-    }
-    if (options && options.yieldsTo) {
-      const scene = options.yieldsTo;
-      const drawableWaiting = queue.items.some(function (item) {
-        return item.supersedeScene === scene;
-      });
-      if (drawableWaiting || (gd.__mvInFlightDrawable && gd.__mvInFlightScene === scene)) {
-        return Promise.resolve(gd);
-      }
     }
     const result = new Promise(function (resolve, reject) {
       queue.items.push({
@@ -122,8 +126,7 @@
         reject: reject,
         isCurrent: options && options.isCurrent,
         frameKey: options && options.frameKey,
-        supersedeScene: options && options.supersedeScene,
-        yieldsTo: options && options.yieldsTo,
+        supersede: options && options.supersede,
       });
     });
     queue.last = result.catch(function () { return gd; });
@@ -733,28 +736,33 @@
             ? (Array.isArray(args[1].data) ? args[1].data : [])
             : (Array.isArray(args[1]) ? args[1] : []))
           : [];
-        const drawableIncoming = incomingTraces.some(function (trace) {
-          return !!(trace && trace.visible !== false && trace.x && trace.x.length);
-        });
-        // An empty figure is not a loading state. Dash can deliver one while
-        // a real frame is already on screen; applying it clears WebGL and
-        // leaves a blank canvas until a later frame happens to arrive.
-        if (fullFigure && target && Array.isArray(target.data) && !drawableIncoming) {
-          const drawn = target.data.some(function (trace) {
-            return !!(trace && trace.visible !== false && trace.x && trace.x.length);
-          });
-          if (drawn) return Promise.resolve(target);
-        }
-        // Dash can replay an older figure prop without MatterVis render
-        // metadata while a selected-scene handoff is still in flight.  The
-        // metadata fence below cannot identify that payload, so it would
-        // overwrite the freshly submitted replacement frame with the previous
-        // scene.  Once a live canvas has a typed scene identity, keep an
-        // untyped full-frame call out when the selected scene has moved on.
+        // Dash can replay a figure prop without MatterVis render metadata.
+        // The metadata fence below cannot identify that payload. Once a live
+        // canvas belongs to a scene, an untyped call must not replace it
+        // when the selected scene has moved on, and an untyped call with no
+        // traces must not clear it. A typed complete frame is applied even
+        // when it has no atom coordinates: an empty scene, hidden geometry,
+        // a publication image, a cell, or an overlay is a final intent, not
+        // a missing frame. Trace count is not visibility.
         if (fullFigure && target && !render) {
           const shown = renderMetadataFromLayout(target.layout);
           const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
           if (shown && shown.scene_id && selected && String(shown.scene_id) !== String(selected)) {
+            return Promise.resolve(target);
+          }
+          if (shown && shown.scene_id && !incomingTraces.length) return Promise.resolve(target);
+        }
+        // A loading placeholder is not a committed empty scene. It must not
+        // wipe a picture already committed for the selected scene. The
+        // committed frame that follows, including one with no traces, still
+        // passes the metadata fence below.
+        if (fullFigure && render && loadingPlaceholder(layout) && target) {
+          const shownNow = renderMetadataFromLayout(target.layout);
+          const shownPending = !!(target.layout && target.layout.meta && target.layout.meta.mattervis_pending);
+          const selectedNow = typeof currentSceneId === "function" ? currentSceneId() : null;
+          if (shownNow && shownNow.scene_id && !shownPending && selectedNow &&
+              String(shownNow.scene_id) === String(selectedNow) &&
+              String(render.scene_id) === String(selectedNow)) {
             return Promise.resolve(target);
           }
         }
@@ -813,12 +821,15 @@
              * confirms that this Plotly call will actually run. */
             if (gd.__mvInFlightFrame===key) return gd;
             if (!figureMetadataIsCurrent(render,gd)||alreadyShowing) return gd;
-            if (!drawableIncoming && Array.isArray(gd.data) && gd.data.some(function (trace) {
-              return !!(trace && trace.visible !== false && trace.x && trace.x.length);
-            })) return gd;
+            if (loadingPlaceholder(layout)) {
+              const shownNow = renderMetadataFromLayout(gd.layout);
+              const shownPending = !!(gd.layout && gd.layout.meta && gd.layout.meta.mattervis_pending);
+              const selectedNow = typeof currentSceneId === "function" ? currentSceneId() : null;
+              if (shownNow && shownNow.scene_id && !shownPending && selectedNow &&
+                  String(shownNow.scene_id) === String(selectedNow) &&
+                  String(render.scene_id) === String(selectedNow)) return gd;
+            }
             gd.__mvInFlightFrame=key;
-            gd.__mvInFlightScene=render && render.scene_id ? String(render.scene_id) : "";
-            gd.__mvInFlightDrawable=drawableIncoming;
             const statusNode = document.getElementById("mv-render-status");
             if (statusNode) {
               statusNode.hidden = false;
@@ -854,11 +865,7 @@
             else args[2]=next;
             return Promise.resolve(original.apply(receiver,args)).then(function(result) {
               frameApplied=true;
-              if (gd.__mvInFlightFrame===key) {
-                gd.__mvInFlightFrame="";
-                gd.__mvInFlightScene="";
-                gd.__mvInFlightDrawable=false;
-              }
+              if (gd.__mvInFlightFrame===key) gd.__mvInFlightFrame="";
               /* A Plotly figure replacement can leave the previous hover
                * payload alive on the recycled graph node.  Clear semantic
                * hover state after every complete frame so a right-click on
@@ -886,11 +893,7 @@
               }
               return restoreInProgressDrag(gd).then(function () { return result; });
             }, function (error) {
-              if (gd.__mvInFlightFrame===key) {
-                gd.__mvInFlightFrame="";
-                gd.__mvInFlightScene="";
-                gd.__mvInFlightDrawable=false;
-              }
+              if (gd.__mvInFlightFrame===key) gd.__mvInFlightFrame="";
               throw error;
             });
           };
@@ -899,8 +902,13 @@
           const sceneKey = render && render.scene_id ? String(render.scene_id) : "";
           return enqueueRender(gd, deliver, {
             frameKey: key,
-            supersedeScene: drawableIncoming ? sceneKey : "",
-            yieldsTo: !drawableIncoming && sceneKey ? sceneKey : "",
+            supersede: {
+              scene: sceneKey,
+              generation: Number(render.scene_generation || 0),
+              revision: Number(render.render_revision || 0),
+              camera: Number(render.camera_revision || 0),
+              pending: loadingPlaceholder(layout),
+            },
           }).then(function (result) {
             /* An already-running react cannot be cancelled when a newer
              * camera abandons its queue. Restore that command after the

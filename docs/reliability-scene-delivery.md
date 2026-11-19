@@ -10,17 +10,33 @@ must not change scene B, and a stale revision must not replace a newer one.
   journal. Duplicating a scene is a complete frame for the copy: the catalog
   can rename the tab before the canvas title exists, and the title arrives
   only with the figure.
-- A complete frame with no drawable traces does not replace a canvas that
-  already has drawable traces. An empty payload is not a loading state and
-  must not clear WebGL while a later frame is still in flight. A complete
-  frame that has not started is dropped when a newer frame with drawable
-  traces for the same scene is queued, so the older `Plotly.react` cannot
-  clear the canvas and then paint geometry the user has already left. An
-  empty frame does not drop a drawable frame that is already queued or
-  running. A frame that is already running is still rejected at execution
-  when its scene or revision is no longer current. The status line may show
-  atom and bond counts before the first drawable frame is mounted; that
-  interval is loading, and it ends when the current frame is applied.
+- A committed complete frame whose scene, generation, and revision are
+  current is applied whether or not it contains atom coordinates. An empty
+  scene, deletion of the last atom, hiding every atom, a publication image,
+  a cell, and an overlay are final intents. Hiding atoms omits their traces.
+  A selection trace may have an empty `x`, and a formula-unit scene may have
+  no cell mesh. None of those shapes means the frame is missing. Trace count
+  and non-empty coordinates are not the version check.
+- `layout.meta.mattervis_pending` is a loading placeholder. It is not a
+  committed empty scene. It does not replace a picture already committed for
+  the selected scene, and it does not drop a queued committed frame. The
+  status line may show atom and bond counts before the first frame for that
+  scene is mounted; that interval is loading, and it ends when the committed
+  frame is applied.
+- A full figure with no scene identity and no traces does not replace a
+  canvas that already belongs to a scene. That payload is not a committed
+  empty scene. A full figure with no scene identity is also dropped when the
+  selected scene is no longer the scene on the canvas.
+- Before `Plotly.react` is issued, a frame whose scene, generation, or
+  revision is no longer current is not issued. A call that has already been
+  issued is not cancelled and can still write. A newer committed frame
+  queued behind it is applied after that write, and that newer frame is the
+  picture that remains, including when it has no traces.
+- A complete frame that has not started is dropped when a newer committed
+  frame for the same scene is queued. Newer is a higher scene generation, or
+  the same generation and a higher render revision, or the same generation
+  and revision and a higher camera revision. An empty payload does not lose
+  that comparison to an older payload that still has coordinates.
 - Worker identity is `(scene_generation, render_revision, camera_revision)`.
   The finished build is published when that identity is still current. A
   strictly newer identity is requeued when the transition still needs a

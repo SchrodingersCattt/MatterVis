@@ -42,12 +42,21 @@ transactions continue to deliver the camera in their complete frame. The
 backend enqueues that complete frame when the state write commits, including
 when the caller is an external script and Dash `update_view` does not run.
 A second request for the same snapshot is deduplicated by the render worker.
-The browser also drops a complete frame that has no drawable traces when the
-canvas already has drawable traces, and it drops a queued complete frame for
-a scene when a newer frame with drawable traces for that same scene arrives
-before the older one starts. An empty frame does not drop a drawable frame
-that is already queued or running. A running frame is still rejected when
-its scene or revision is no longer current.
+The browser applies a committed complete frame whose scene, generation, and
+revision are current even when that frame has no visible atom traces. An
+empty scene, deletion of the last atom, hidden geometry, a publication
+image, a cell, or an overlay is that frame's final intent. Whether the
+payload's data is non-empty is not the version check. A
+`layout.meta.mattervis_pending` figure is a loading placeholder: it does not
+replace a picture already committed for the selected scene and it does not
+drop a queued committed frame. A full figure with no scene identity and no
+traces does not clear a canvas that already belongs to a scene. A queued
+frame is dropped when a newer committed frame for the same scene arrives
+before it starts. Newer is a higher scene generation, or the same generation
+and a higher render or camera revision. A `Plotly.react` that has already
+been issued is not cancelled; the newer committed frame applied after it
+writes is the picture that remains. A frame that has not been issued is
+refused when its scene, generation, or revision is no longer current.
 
 The same journal also carries scene-list envelopes:
 

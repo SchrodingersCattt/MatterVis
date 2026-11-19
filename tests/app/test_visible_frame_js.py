@@ -15,16 +15,35 @@ function harness() {
     geometry_version: 1, display_version: 1, camera_revision: 1, camera_version: 1,
     server_started_at: '2026-10-25T10:00:00Z'};
   const frames = [];
+  let hold = false, releaseFrame = null;
   const gd = {data: [], layout: {scene: {camera: {eye: {x: 1, y: 1, z: 1}}},
     meta: {mattervis_render: clone(expected)}}};
   function react(target, data) {
     const figure = Array.isArray(data) ? {data: data, layout: arguments[2]} : data;
     const traces = Array.isArray(figure.data) ? figure.data : [];
-    frames.push({scene: figure.layout.meta.mattervis_render.scene_id,
-      revision: figure.layout.meta.mattervis_render.render_revision, traces: traces.length});
-    target.layout = clone(figure.layout);
-    if (traces.length) target.data = traces;
-    return Promise.resolve(target);
+    function paint() {
+      const render = figure.layout && figure.layout.meta && figure.layout.meta.mattervis_render;
+      const images = figure.layout && Array.isArray(figure.layout.images) ? figure.layout.images : [];
+      frames.push({
+        scene: render ? render.scene_id : null,
+        generation: render ? render.scene_generation : null,
+        revision: render ? render.render_revision : null,
+        traces: traces.length,
+        images: images.length,
+        image: images[0] ? images[0].source : null,
+        names: traces.map(trace => trace && trace.name || ''),
+        visible: traces.map(trace => !trace || trace.visible !== false),
+        xLengths: traces.map(trace => trace && trace.x ? trace.x.length : 0),
+      });
+      target.layout = clone(figure.layout || {});
+      target.data = traces;
+      return target;
+    }
+    if (hold) {
+      hold = false;
+      return new Promise(resolve => { releaseFrame = () => resolve(paint()); });
+    }
+    return Promise.resolve(paint());
   }
   const sandbox = {console, Promise, Object, Array, JSON, Number, String, Date,
     setTimeout, clearTimeout,
@@ -33,15 +52,26 @@ function harness() {
       id === 'fast-view-metadata' ? {get textContent() { return JSON.stringify(expected); }} : null}};
   vm.createContext(sandbox);
   const gateEnd = gate.indexOf('  // ── Right-click menu');
-  vm.runInContext(gate.slice(0, gateEnd) + '})();', sandbox);
+  vm.runInContext(gate.slice(0, gateEnd) +
+    'window.commitFrameExpectation = value => rememberExpectedRender(value, true);})();', sandbox);
   const trace = () => [{type: 'scatter3d', mode: 'markers', x: [0], y: [0], z: [0], visible: true}];
   return {frames, gd, expected, root: sandbox.window, trace,
-    submit(scene, revision, data) {
+    holdNext() { hold = true; },
+    canRelease() { return typeof releaseFrame === 'function'; },
+    release() { const finish = releaseFrame; releaseFrame = null; finish(); },
+    commitExpectation() { sandbox.window.commitFrameExpectation(clone(expected)); },
+    submit(scene, revision, data, extraLayout) {
+      const extra = extraLayout || {};
       const layout = {scene: {camera: {eye: {x: 1, y: 1, z: 1}},
         uirevision: scene + '__name__' + revision + '__viewport'},
-        meta: {mattervis_render: Object.assign({}, expected, {scene_id: scene,
-          render_revision: revision, camera_revision: revision, camera_version: revision})}};
+        meta: Object.assign({mattervis_render: Object.assign({}, expected, {scene_id: scene,
+          render_revision: revision, camera_revision: revision, camera_version: revision})},
+          extra.meta || {})};
+      Object.keys(extra).forEach(key => { if (key !== 'meta') layout[key] = extra[key]; });
       return sandbox.window.Plotly.react(gd, {data: data, layout: layout});
+    },
+    submitUntyped(data) {
+      return sandbox.window.Plotly.react(gd, {data: data, layout: {scene: {camera: {eye: {x: 1, y: 1, z: 1}}}}});
     }};
 }
 async function spinUntil(check) {
@@ -66,14 +96,26 @@ def _run_node(scenario: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_empty_figure_does_not_clear_drawable_traces():
+def test_untyped_empty_figure_does_not_clear_a_scene():
     _run_node(r"""
   const h = harness();
-  h.gd.data = h.trace();
-  await h.submit('scene-a', 1, []);
-  assert.equal(h.frames.length, 0, 'empty figure reached Plotly');
-  assert.equal(h.gd.data.length, 1, 'empty figure cleared the current traces');
+  await h.submit('scene-a', 1, h.trace());
+  await h.submitUntyped([]);
+  assert.equal(h.frames.length, 1, 'untyped empty figure reached Plotly');
+  assert.equal(h.gd.data.length, 1, 'untyped empty figure cleared the current scene');
   assert.equal(h.gd.data[0].x.length, 1);
+""")
+
+
+def test_current_empty_frame_is_the_final_intent():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 1, h.trace());
+  await h.submit('scene-a', 2, []);
+  assert.equal(h.frames.length, 2, 'current empty scene did not reach Plotly');
+  assert.equal(h.frames[1].revision, 2);
+  assert.equal(h.frames[1].traces, 0);
+  assert.equal(h.gd.data.length, 0, 'deleting the last atom left the previous trace');
 """)
 
 
@@ -143,4 +185,191 @@ def test_scene_switch_keeps_the_final_scene_when_the_previous_frame_is_still_que
     'the previous scene painted after the selected scene changed');
   assert.equal(h.gd.layout.meta.mattervis_render.scene_id, 'scene-b');
   assert.equal(h.gd.data.length, 1);
+""")
+
+
+def test_queued_empty_scene_replaces_a_pending_atom_frame():
+    _run_node(r"""
+  const h = harness();
+  let release;
+  const blocker = h.root.MatterVisRenderQueue.enqueue(h.gd,
+    () => new Promise(resolve => { release = resolve; }));
+  await spinUntil(() => typeof release === 'function');
+  const atoms = h.submit('scene-a', 2, h.trace());
+  const emptied = h.submit('scene-a', 3, []);
+  release();
+  await atoms;
+  await emptied;
+  await blocker;
+  assert.deepEqual(h.frames.map(frame => frame.revision), [3],
+    'the atom frame painted after the empty scene became current');
+  assert.equal(h.gd.data.length, 0);
+""")
+
+
+def test_scene_switch_to_an_empty_scene_drops_the_previous_atoms():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 2, h.trace());
+  h.expected.scene_id = 'scene-b';
+  h.expected.scene_generation = 2;
+  h.expected.render_revision = 1;
+  h.expected.camera_revision = 1;
+  h.commitExpectation();
+  await h.submit('scene-b', 1, []);
+  assert.equal(h.frames.length, 2, 'cross-scene empty frame did not reach Plotly');
+  assert.deepEqual([h.frames[1].scene, h.frames[1].generation, h.frames[1].traces],
+    ['scene-b', 2, 0]);
+  assert.equal(h.gd.data.length, 0, 'the previous scene remained after the selected scene became empty');
+  assert.equal(h.gd.layout.meta.mattervis_render.scene_id, 'scene-b');
+""")
+
+
+def test_hidden_atoms_keep_a_visible_cell_layer():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 1, h.trace());
+  const hidden = [{type: 'scatter3d', name: 'atom', x: [0], y: [0], z: [0], visible: false}];
+  const cell = [{type: 'scatter3d', name: 'unit-cell-box', x: [0, 1], y: [0, 0], z: [0, 0], visible: true}];
+  await h.submit('scene-a', 2, hidden.concat(cell));
+  assert.equal(h.frames.length, 2);
+  assert.deepEqual(h.frames[1].names, ['atom', 'unit-cell-box']);
+  assert.deepEqual(h.frames[1].visible, [false, true]);
+  assert.equal(h.gd.data[0].visible, false, 'hiding the atom dropped the committed frame');
+  assert.equal(h.gd.data[1].name, 'unit-cell-box');
+""")
+
+
+def test_publication_image_applies_without_a_visible_atom_trace():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 1, h.trace());
+  const anchor = [{type: 'scatter3d', name: 'flat-ortep-camera', x: [0], y: [0], z: [0],
+    opacity: 0, visible: true}];
+  const image = {source: 'data:image/png;base64,QQ==', xref: 'paper', yref: 'paper'};
+  await h.submit('scene-a', 2, anchor, {images: [image]});
+  assert.equal(h.frames.length, 2, 'publication image did not reach Plotly');
+  assert.equal(h.frames[1].image, image.source);
+  assert.equal(h.gd.layout.images[0].source, image.source);
+  assert.equal(h.gd.data[0].opacity, 0);
+""")
+
+
+def test_image_only_frame_replaces_atom_traces():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 1, h.trace());
+  const image = {source: 'data:image/png;base64,QQ==', xref: 'paper', yref: 'paper'};
+  await h.submit('scene-a', 2, [], {images: [image]});
+  assert.equal(h.frames.length, 2, 'image-only frame did not reach Plotly');
+  assert.equal(h.frames[1].traces, 0);
+  assert.equal(h.frames[1].image, image.source);
+  assert.equal(h.gd.data.length, 0, 'image-only frame left the previous atom trace');
+  assert.equal(h.gd.layout.images[0].source, image.source);
+""")
+
+
+def test_overlay_frame_applies_when_no_atom_trace_is_visible():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 1, h.trace());
+  const overlay = [{type: 'mesh3d', name: 'overlay', x: [0, 1, 0], y: [0, 0, 1], z: [0, 0, 0],
+    i: [0], j: [1], k: [2], visible: true}];
+  await h.submit('scene-a', 2, overlay);
+  assert.equal(h.frames.length, 2);
+  assert.deepEqual(h.frames[1].names, ['overlay']);
+  assert.equal(h.gd.data.length, 1);
+  assert.equal(h.gd.data[0].name, 'overlay');
+""")
+
+
+def test_stale_empty_frame_does_not_clear_the_current_scene():
+    _run_node(r"""
+  const h = harness();
+  h.expected.render_revision = 4;
+  h.expected.camera_revision = 4;
+  await h.submit('scene-a', 4, h.trace());
+  await h.submit('scene-a', 1, []);
+  assert.equal(h.frames.length, 1, 'stale empty frame reached Plotly');
+  assert.equal(h.gd.data.length, 1, 'stale empty frame cleared the current scene');
+""")
+
+
+def test_all_hidden_and_empty_selection_replace_the_previous_atoms():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 1, h.trace());
+  const hidden = [{type: 'scatter3d', name: 'atom', x: [0], y: [0], z: [0], visible: false}];
+  await h.submit('scene-a', 2, hidden);
+  assert.equal(h.frames.length, 2, 'all-hidden frame did not reach Plotly');
+  assert.deepEqual(h.frames[1].visible, [false]);
+  assert.equal(h.gd.data[0].visible, false);
+  const selection = [{type: 'scatter3d', name: 'selection', x: [], y: [], z: [], visible: true}];
+  await h.submit('scene-a', 3, selection);
+  assert.equal(h.frames.length, 3, 'empty-x selection frame did not reach Plotly');
+  assert.deepEqual(h.frames[2].xLengths, [0]);
+  assert.equal(h.gd.data.length, 1);
+  assert.equal(h.gd.data[0].name, 'selection');
+  assert.equal(h.gd.data[0].x.length, 0);
+""")
+
+
+def test_new_generation_empty_frame_clears_the_same_scene():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 4, h.trace());
+  h.expected.scene_generation = 2;
+  h.expected.render_revision = 1;
+  h.expected.camera_revision = 1;
+  h.commitExpectation();
+  await h.submit('scene-a', 1, []);
+  assert.equal(h.frames.length, 2, 'new generation empty frame did not reach Plotly');
+  assert.equal(h.frames[1].generation, 2);
+  assert.equal(h.frames[1].traces, 0);
+  assert.equal(h.gd.data.length, 0, 'new generation left the previous atoms');
+  assert.equal(h.gd.layout.meta.mattervis_render.scene_generation, 2);
+""")
+
+
+def test_inflight_scene_finishes_and_the_newer_empty_intent_remains():
+    _run_node(r"""
+  const h = harness();
+  h.holdNext();
+  const stale = h.submit('scene-a', 2, h.trace());
+  await spinUntil(() => h.canRelease());
+  h.expected.scene_id = 'scene-b';
+  h.expected.scene_generation = 2;
+  h.expected.render_revision = 1;
+  h.expected.camera_revision = 1;
+  h.commitExpectation();
+  const emptied = h.submit('scene-b', 1, []);
+  h.release();
+  await stale;
+  await emptied;
+  assert.equal(h.frames.length, 2, 'the issued react or the empty successor did not finish');
+  assert.equal(h.frames[0].scene, 'scene-a');
+  assert.equal(h.frames[0].traces, 1, 'the issued react did not write before the successor');
+  assert.deepEqual([h.frames[1].scene, h.frames[1].generation, h.frames[1].traces],
+    ['scene-b', 2, 0]);
+  assert.equal(h.gd.data.length, 0, 'the finished stale react stayed on screen');
+  assert.equal(h.gd.layout.meta.mattervis_render.scene_id, 'scene-b');
+""")
+
+
+def test_loading_placeholder_does_not_replace_a_committed_frame():
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 2, h.trace());
+  await h.submit('scene-a', 3, [], {meta: {mattervis_pending: true}});
+  assert.equal(h.frames.length, 1, 'loading placeholder replaced the committed frame');
+  assert.equal(h.gd.data.length, 1);
+  await h.submit('scene-a', 4, []);
+  assert.equal(h.frames.length, 2, 'committed empty frame did not replace the picture after a placeholder');
+  assert.equal(h.gd.data.length, 0);
+  h.gd.layout = {};
+  h.gd.data = [];
+  h.frames.length = 0;
+  await h.submit('scene-a', 5, [], {meta: {mattervis_pending: true}});
+  assert.equal(h.frames.length, 1, 'loading placeholder could not paint a blank canvas');
+  assert.equal(h.gd.layout.meta.mattervis_pending, true);
 """)
