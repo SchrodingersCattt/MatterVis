@@ -51,8 +51,10 @@ as its `runs-on`. The JSON field `declared.runner` is that label.
 
 The Camera WebGL job uploads both `browser-artifacts/` and
 `ci-diagnostics-browser` with `if: always()`. `browser-artifacts/` is
-the browser trace directory. `ci-diagnostics-browser` is the
-environment JSON, the freeze, the JUnit file, and the failure
+the browser trace directory. A painted Fit margin failure adds the
+original PNG, the ink mask, and the camera, generation, geometry
+version, and coordinate digest beside the trace. `ci-diagnostics-browser`
+is the environment JSON, the freeze, the JUnit file, and the failure
 signatures.
 
 ## MolCrysKit

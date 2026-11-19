@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
+from tests.app.fit_gap_artifacts import ink_box, measure_gap, write_gap_artifacts
 from tests.app.real_app_server import start_mattervis
 from tests.app.test_camera_browser_regression import (
     _chrome,
@@ -51,44 +52,21 @@ _atom_site_occupancy
 C1 C 0.20 0.30 0.40 1
 O1 O 0.55 0.42 0.61 1
 """
-def _covered(x: int, y: int, chrome: list[dict]) -> bool:
-    for item in chrome:
-        if (
-            item["x"] - 4 <= x <= item["x"] + item["width"] + 4
-            and item["y"] - 4 <= y <= item["y"] + item["height"] + 4
-        ):
-            return True
-    return False
-
-
 def _ink_box(path: Path, plot: dict, chrome: list[dict]) -> tuple[int, int, int, int, dict]:
-    image = Image.open(path).convert("RGB")
-    pixels = image.load()
-    left = max(0, int(plot["x"]))
-    top = max(0, int(plot["y"]))
-    right = min(image.width, int(plot["x"] + plot["width"]))
-    bottom = min(image.height, int(plot["y"] + plot["height"]))
-    visible = {
-        "x": left,
-        "y": top,
-        "width": right - left,
-        "height": bottom - top,
-    }
-    xs: list[int] = []
-    ys: list[int] = []
-    for y in range(top, bottom):
-        for x in range(left, right):
-            if _covered(x, y, chrome):
-                continue
-            red, green, blue = pixels[x, y]
-            # White is empty canvas. Gray cell edges, pale hydrogen spheres,
-            # and colored atoms are structure. Chrome rectangles are excluded
-            # separately, from the rects captured with this frame.
-            if max(red, green, blue) < 250:
-                xs.append(x)
-                ys.append(y)
-    assert xs, path
-    return min(xs), min(ys), max(xs), max(ys), visible
+    # White is empty canvas. Gray cell edges, pale hydrogen spheres,
+    # and colored atoms are structure. Chrome rectangles are excluded
+    # separately, from the rects captured with this frame.
+    return ink_box(path, plot, chrome)
+
+
+def _fit_artifact_dir() -> Path:
+    current = os.environ.get("PYTEST_CURRENT_TEST", "fit-painted-gap")
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", current.split(" (", 1)[0])[-180:]
+    path = ROOT / "browser-artifacts" / slug
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True)
+    return path
 
 
 _RESTORE_STATUS = (
@@ -122,36 +100,23 @@ def _toast_problems(shots):
     return problems
 
 
-def _gap_problems(shots, shots_dir: Path):
-    problems = []
-    for shot in shots:
-        plot = shot["plot"]
-        x0, y0, x1, y1, visible = _ink_box(shots_dir / shot["file"], plot, shot.get("chrome") or [])
-        short = min(visible["width"], visible["height"])
-        pad = 0.08 * short
-        gaps = (
-            x0 - visible["x"],
-            visible["x"] + visible["width"] - x1,
-            y0 - visible["y"],
-            visible["y"] + visible["height"] - y1,
-        )
-        inside = (
-            x0 >= visible["x"] + pad - 2
-            and y0 >= visible["y"] + pad - 2
-            and x1 <= visible["x"] + visible["width"] - pad + 2
-            and y1 <= visible["y"] + visible["height"] - pad + 2
-        )
-        tight = min(gaps) <= pad + 0.04 * short
-        # Left matches right and top matches bottom. The two axes need
-        # not match each other: a long cell in a square window has a
-        # larger gap on the short axis.
-        centered = abs(gaps[0] - gaps[1]) <= 8 and abs(gaps[2] - gaps[3]) <= 8
-        if not inside or not tight or not centered:
-            spans = None
-            if shot.get("ranges"):
-                spans = [round(abs(shot["ranges"][axis][1] - shot["ranges"][axis][0]), 2) for axis in ("x", "y", "z")]
-            problems.append((shot["file"], [round(g, 1) for g in gaps], round(pad, 1), inside, tight, centered, spans, shot.get("aspect")))
-    return problems
+def _gap_records(shots, shots_dir: Path) -> list[dict]:
+    # Left matches right and top matches bottom. The two axes need
+    # not match each other: a long cell in a square window has a
+    # larger gap on the short axis. The numbers live in measure_gap.
+    return [measure_gap(shot, shots_dir) for shot in shots]
+
+
+def _assert_painted_gaps(shots, shots_dir: Path) -> None:
+    records = _gap_records(shots, shots_dir)
+    problems = [record["problem"] for record in records if record["failed"]]
+    artifact = None
+    if problems:
+        artifact = write_gap_artifacts(_fit_artifact_dir(), shots, shots_dir, records)
+    message = "\n".join(str(item) for item in problems)
+    if artifact is not None:
+        message = f"{message}\nartifacts: {artifact}"
+    assert not problems, message
 
 
 def _run_browser(tmp_path, runner: Path, cifs: list[str]):
@@ -186,7 +151,7 @@ def test_painted_fit_frames_the_cell(tmp_path):
     assert len(shots) == 6
     assert all(shot.get("boundaryChecked") is True for shot in shots)
     assert not _toast_problems(shots), _toast_problems(shots)
-    assert not _gap_problems(shots, shots_dir), _gap_problems(shots, shots_dir)
+    _assert_painted_gaps(shots, shots_dir)
 
 
 def test_painted_fit_frames_elongated_triclinic_and_water(tmp_path):
@@ -202,8 +167,7 @@ def test_painted_fit_frames_elongated_triclinic_and_water(tmp_path):
     assert len(shots) == 9
     assert all(shot.get("boundaryChecked") is shot["boundary"] for shot in shots)
     assert not _toast_problems(shots), _toast_problems(shots)
-    problems = _gap_problems(shots, shots_dir)
-    assert not problems, "\n".join(str(item) for item in problems)
+    _assert_painted_gaps(shots, shots_dir)
     elongated = [shot for shot in shots if shot["file"].startswith("elongated-")]
     assert elongated
     for shot in elongated:

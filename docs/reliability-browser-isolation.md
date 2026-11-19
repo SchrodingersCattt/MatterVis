@@ -50,6 +50,11 @@ store survive from one test to the next when they share a server.
 - On failure the Node runner writes a screenshot, a Playwright trace, console
   and network logs, and scene/camera/render JSON under `browser-artifacts/`.
   The pytest process writes the full Node stdout and stderr next to them.
+  A painted Fit margin failure also copies that frame's original PNG, a
+  pixel mask (counted ink, control rectangles, plot box, 8% inset), the
+  lowest ink strip, and the camera with scene generation, geometry
+  version, and coordinate digest. The 8% margin and the 8px centering
+  check are unchanged.
   CI uploads that directory with `if: always()`. Assertions are unchanged.
   The 100-switch socket census records DOM snapshots and not trace
   screenshots. Capturing both during each WebGL scene swap stalls
