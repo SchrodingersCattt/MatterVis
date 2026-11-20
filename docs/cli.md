@@ -269,7 +269,7 @@ The `gpu` backend is opt-in for PNG, GIF, and MP4. Install
 `matter-vis[gpu]` (and `matter-vis[animation]` for GIF/MP4) and verify a
 usable adapter with `mat-vis capabilities --require gpu --json` before
 rendering. Transparent primitives, dashed lines, text, per-vertex mesh
-colors, and per-endpoint line colors fail explicitly.
+colors, per-endpoint line colors, and cube isosurface meshes fail explicitly.
 Opaque meshes, instanced spheres, cylinders, and solid ellipsoids are drawn
 on the device. Lines wider than one pixel, including the default unit-cell
 edges, are composited from the GPU depth buffer inside each viewport,

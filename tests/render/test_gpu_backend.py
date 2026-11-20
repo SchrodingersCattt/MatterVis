@@ -979,6 +979,19 @@ def _appearance_plan(metadata: dict, primitive_metadata: dict | None = None) -> 
     )
 
 
+def test_gpu_rejects_an_isosurface_mesh_before_drawing_a_flat_color() -> None:
+    mesh = TriangleMeshPrimitive(
+        semantic_id="volume",
+        vertices=np.asarray([[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]]),
+        triangles=np.asarray([[0, 1, 2]], dtype=int),
+        rgba=(0.2, 0.4, 0.8, 1.0),
+        metadata={"kind": "isosurface"},
+    )
+    with pytest.raises(gpu.GPUUnsupportedError, match="isosurface material") as raised:
+        gpu.lower_plan(_plan(mesh))
+    assert "flat color" in str(raised.value)
+
+
 def test_gpu_accepts_historical_matte_and_studio_soft_shade() -> None:
     matte = {
         "id": "matte",
