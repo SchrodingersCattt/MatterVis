@@ -1,9 +1,13 @@
 """Optional high-density ceiling for an interaction isosurface.
 
 The mask is off unless the caller turns it on. It samples a density cube at
-mesh vertices and drops triangles that enter ρ > ρ_cut. It does not rewrite
-the field cube, the density cube, or a colour cube, and it does not choose
-the cutoff.
+mesh vertices and clips triangles to ρ ≤ ρ_cut. A mixed triangle is cut on
+its edges where ρ = ρ_cut; companion arrays are linearly interpolated there.
+Deleting the whole triangle would move the hole with the marching-cubes
+stride. This module does not rewrite the field cube, the density cube, or a
+colour cube, and it does not choose the cutoff. The arrays it returns are
+the visible mesh. Smoothing and camera fit, when they run, start from those
+vertices rather than from the unfiltered triangulation.
 
 ρ and ρ_cut are in the density cube's scalar values. For electron density
 those values are atomic units, e/Bohr³. This module does not convert e/Å³.
@@ -56,6 +60,43 @@ def resolve_density_mask(
     return density_cube, cutoff
 
 
+def _clip_tokens(vertices: tuple[int, int, int], inside: np.ndarray):
+    """Return clipped-triangle tokens, preserving the input winding.
+
+    A token is ``("v", index)`` for a vertex with ρ ≤ cutoff or
+    ``("e", i, j)`` for the cutoff point on edge ``i``–``j`` with ``i < j``.
+    """
+
+    flags = tuple(bool(inside[index]) for index in vertices)
+    count = sum(flags)
+    if count == 0:
+        return ()
+    if count == 3:
+        return (tuple(("v", index) for index in vertices),)
+    if count == 1:
+        pivot = flags.index(True)
+        kept = vertices[pivot]
+        nxt = vertices[(pivot + 1) % 3]
+        prv = vertices[(pivot + 2) % 3]
+        return (
+            (
+                ("v", kept),
+                ("e", *sorted((kept, nxt))),
+                ("e", *sorted((kept, prv))),
+            ),
+        )
+    outside = flags.index(False)
+    dropped = vertices[outside]
+    nxt = vertices[(outside + 1) % 3]
+    prv = vertices[(outside + 2) % 3]
+    near_prv = ("e", *sorted((prv, dropped)))
+    near_nxt = ("e", *sorted((dropped, nxt)))
+    return (
+        (("v", nxt), ("v", prv), near_prv),
+        (("v", nxt), near_prv, near_nxt),
+    )
+
+
 def filter_mesh_by_density(
     source: CubeData,
     density: CubeData,
@@ -66,12 +107,14 @@ def filter_mesh_by_density(
     stride: int,
     cutoff: float,
 ) -> tuple[np.ndarray, tuple[Any, ...]] | None:
-    """Drop triangles with any vertex density above ``cutoff``.
+    """Clip triangles to vertices with ρ ≤ ``cutoff``.
 
     ``mesh_indices`` are marching-cubes coordinates on the strided field.
     Density is sampled in the shared Cartesian frame; the cubes' value
-    arrays are not written. A triangle is kept when every vertex has
-    ρ ≤ ρ_cut. Returns None when every triangle is above the ceiling.
+    arrays are not written. A triangle wholly above the cutoff is removed.
+    A triangle that crosses ρ_cut is split at the linearly interpolated
+    edge points, and each companion array is interpolated with the same
+    weight. Returns None when nothing remains.
     """
     rho = sample_cube_at_mesh_indices(
         source,
@@ -92,20 +135,54 @@ def filter_mesh_by_density(
         return None
     if faces.ndim != 2 or faces.shape[1] != 3:
         raise ValueError("isosurface triangles must have shape (M, 3)")
-    keep = np.all(rho[faces] <= cutoff, axis=1)
-    kept = faces[keep]
-    if kept.size == 0:
-        return None
-    used = np.unique(kept.ravel())
-    remap = np.full(int(rho.shape[0]), -1, dtype=np.int64)
-    remap[used] = np.arange(used.size, dtype=np.int64)
-    compacted: list[Any] = []
+    vertex_count = int(rho.shape[0])
+    columns: list[np.ndarray | None] = []
     for array in arrays:
         if array is None:
+            columns.append(None)
+            continue
+        values = np.asarray(array)
+        if len(values) != vertex_count:
+            raise ValueError("density-mask arrays must align with mesh vertices")
+        columns.append(values)
+    inside = rho <= cutoff
+    clipped = []
+    for face in faces:
+        clipped.extend(
+            _clip_tokens((int(face[0]), int(face[1]), int(face[2])), inside)
+        )
+    if not clipped:
+        return None
+    order: list[tuple] = []
+    index_of: dict[tuple, int] = {}
+
+    def _add(token: tuple) -> int:
+        found = index_of.get(token)
+        if found is None:
+            found = len(order)
+            index_of[token] = found
+            order.append(token)
+        return found
+
+    remapped = np.asarray([[_add(token) for token in face] for face in clipped], dtype=np.int64)
+    compacted: list[Any] = []
+    for column in columns:
+        if column is None:
             compacted.append(None)
             continue
-        compacted.append(np.asarray(array)[used])
-    return np.asarray(remap[kept], dtype=np.int64), tuple(compacted)
+        rows = []
+        for token in order:
+            if token[0] == "v":
+                rows.append(np.asarray(column[token[1]]))
+                continue
+            start = int(token[1])
+            end = int(token[2])
+            span = float(rho[end] - rho[start])
+            weight = 0.0 if span == 0.0 else (float(cutoff) - float(rho[start])) / span
+            weight = float(min(1.0, max(0.0, weight)))
+            rows.append((1.0 - weight) * np.asarray(column[start]) + weight * np.asarray(column[end]))
+        compacted.append(np.asarray(rows))
+    return remapped, tuple(compacted)
 
 
 __all__ = [

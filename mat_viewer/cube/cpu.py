@@ -41,8 +41,10 @@ def cube_isosurface_meshes(
 
     ``density_mask`` is off unless set. While it is off, ``density_cube`` and
     ``density_cutoff`` are ignored, including when both are present. When it
-    is on, both are required. Triangles with any vertex density above the
-    cutoff are dropped after marching cubes. The field, density, and colour
+    is on, both are required. Triangles are clipped to ρ ≤ ρ_cut. A crossing
+    edge keeps the linearly interpolated vertex instead of dropping the
+    whole triangle, which would follow the marching-cubes stride. The
+    returned vertices are the visible mesh. The field, density, and colour
     cubes are not rewritten, and the colour range is not taken from the
     vertices that remain. The cutoff is not chosen here.
     """
@@ -141,7 +143,10 @@ def cube_isosurface_meshes(
             triangles, (world_vertices, world_normals, vertex_colors) = filtered
             metadata["density_mask"] = {
                 "cutoff_e_per_bohr3": float(cutoff),
-                "rule": "drop triangles with any vertex density above the cutoff",
+                "rule": (
+                    "clip triangles to rho <= cutoff; "
+                    "edge vertices are linearly interpolated"
+                ),
             }
         mesh = {
             "id": semantic_id,

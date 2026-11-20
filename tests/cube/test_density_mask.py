@@ -65,6 +65,24 @@ def _closer_to(vertices: np.ndarray, target: np.ndarray, other: np.ndarray) -> n
     )
 
 
+def test_vertex_rule_drops_a_triangle_wholly_above_the_cutoff() -> None:
+    source = _cube(np.zeros((2, 2, 2)))
+    density_values = np.full((2, 2, 2), 0.2)
+    indices = np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
+    assert (
+        filter_mesh_by_density(
+            source,
+            _cube(density_values, name="density.cube"),
+            indices,
+            np.asarray([[0, 1, 2]], dtype=np.int64),
+            (indices,),
+            stride=1,
+            cutoff=0.05,
+        )
+        is None
+    )
+
+
 def test_vertex_rule_keeps_only_the_low_density_triangle() -> None:
     source = _cube(np.zeros((2, 2, 2)))
     density_values = np.zeros((2, 2, 2))
@@ -104,24 +122,46 @@ def test_vertex_rule_keeps_only_the_low_density_triangle() -> None:
     assert np.allclose(kept_positions[:, 0], [0.0, 1.0, 0.0])
 
 
-def test_vertex_rule_drops_a_triangle_that_crosses_the_cutoff() -> None:
-    source = _cube(np.zeros((2, 2, 2)))
-    density_values = np.full((2, 2, 2), 0.01)
-    density_values[0, 1, 0] = 0.0500001
-    indices = np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
-
-    assert (
-        filter_mesh_by_density(
-            source,
-            _cube(density_values, name="density.cube"),
-            indices,
-            np.asarray([[0, 1, 2]], dtype=np.int64),
-            (indices,),
-            stride=1,
-            cutoff=0.05,
-        )
-        is None
+def test_crossing_triangle_is_clipped_at_the_cutoff() -> None:
+    source = _cube(np.zeros((4, 4, 2)))
+    density_values = np.zeros((4, 4, 2))
+    density_values[0, 0, 0] = 0.0
+    density_values[2, 0, 0] = 10.0
+    density_values[0, 2, 0] = 0.0
+    indices = np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]])
+    coarse = filter_mesh_by_density(
+        source,
+        _cube(density_values, name="density.cube"),
+        indices,
+        np.asarray([[0, 1, 2]], dtype=np.int64),
+        (indices,),
+        stride=1,
+        cutoff=5.0,
     )
+    assert coarse is not None
+    coarse_faces, (coarse_positions,) = coarse
+    assert coarse_faces.shape[0] == 2
+    assert any(np.allclose(point, [1.0, 0.0, 0.0]) for point in coarse_positions)
+    assert not any(np.allclose(point, [2.0, 0.0, 0.0]) for point in coarse_positions)
+    # The same edge, split once, still cuts at x = 1. The midpoint sample is
+    # ρ = 5 and stays. Whole-triangle deletion would have removed both.
+    density_values[1, 0, 0] = 5.0
+    fine_indices = np.asarray(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]]
+    )
+    fine = filter_mesh_by_density(
+        source,
+        _cube(density_values, name="density.cube"),
+        fine_indices,
+        np.asarray([[0, 1, 3], [1, 2, 3]], dtype=np.int64),
+        (fine_indices,),
+        stride=1,
+        cutoff=5.0,
+    )
+    assert fine is not None
+    _faces, (fine_positions,) = fine
+    assert np.max(fine_positions[:, 0]) == pytest.approx(1.0)
+    assert not np.any(np.all(np.isclose(fine_positions, [2.0, 0.0, 0.0]), axis=1))
 
 
 def test_mask_removes_the_high_density_well_and_keeps_the_other() -> None:

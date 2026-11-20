@@ -69,8 +69,8 @@ the canonical loader before adding the isosurface overlay.
   colour, opacity, and ambient/diffuse material coefficients. Pass
   `color_cube` to attach per-vertex RGB sampled from a second `CubeData`.
   Pass `density_mask=True` with a density `CubeData` and `density_cutoff`
-  to drop triangles whose sampled density is above that cutoff. The flag
-  defaults off.
+  to clip the mesh to ρ ≤ ρ_cut. Crossing edges are interpolated. The flag
+  defaults off. The returned vertices are the visible mesh.
 - `ensure_cube_isosurfaces(structure)` attaches those meshes to the canonical
   scene consumed by CPU, matplotlib, Plotly, and GPU renderers. One mesh list
   is stored and replaced when the source grid, isovalue, stride, material,
@@ -140,7 +140,7 @@ contour, and this flag does not do that unless you turn it on for that render.
 
 The cutoff uses the density cube's scalar values. For electron density those
 values are atomic units, e/Bohr³ (1 a.u. ≈ 6.748 e/Å³, so 0.05 a.u. ≈ 0.337
-e/Å³). MatterVis does not convert e/Å³. `read_cube` converts coordinates to
+e/Å³). Atomaestro does not convert e/Å³. `read_cube` converts coordinates to
 angstroms and leaves the scalars untouched.
 
 When the mask is on, pass both a density cube and a cutoff ρ_cut > 0. If
@@ -152,8 +152,13 @@ Marching cubes runs on the loaded field. ρ is then sampled at the mesh
 vertices in one Cartesian frame: the source origin plus voxel axes, mapped
 into the density cube's own origin and axes. A grid with different spacing
 or shape is sampled with trilinear interpolation when that frame covers the
-surface. A triangle is drawn only when every vertex has ρ ≤ ρ_cut. Vertices
-above the cutoff are not drawn. The field cube, the density cube, and any
+surface. A triangle wholly above ρ_cut is removed. A triangle that crosses
+ρ_cut is split where the edge samples interpolate to ρ_cut, and positions,
+normals, and colours on that edge use the same weight. Dropping the whole
+triangle would make the hole follow the marching-cubes stride. Vertices
+above the cutoff are not drawn. The mesh stored on the scene is that
+clipped result. Later smoothing or a camera fit has to use those vertices,
+not the triangulation from before the mask. The field cube, the density cube, and any
 colour cube are not rewritten. Colour range and colour mapping stay on the
 full colour cube. Surviving vertices are not used to rescale sign(λ₂)ρ or
 d_norm.

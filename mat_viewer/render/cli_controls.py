@@ -616,7 +616,8 @@ def add_isosurface_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "User cutoff ρ_cut > 0 in e/Bohr^3 (1 a.u. ≈ 6.748 e/Å^3; "
             "0.05 a.u. ≈ 0.337 e/Å^3). Not a default and not converted from "
-            "e/Å^3. Triangles with any vertex above ρ_cut are dropped. "
+            "e/Å^3. Crossing triangles are clipped at ρ_cut; the whole "
+            "triangle is not dropped. "
             "0.05 is a weak-interaction NCI/RDG starting point only: it is "
             "not an IRI default, not shared across descriptors, and not "
             "transferable from a DFT/NCI convention onto a promolecular "
