@@ -1,6 +1,6 @@
 # Mercury MRYX input
 
-MatterVis imports `.mryx` using **MolCrysKit `read_mryx_atoms`**. The viewer has
+Atomaestro imports `.mryx` using **MolCrysKit `read_mryx_atoms`**. The viewer has
 no Mercury XML parser, element-code table or chemistry decoder of its own. The
 required upstream revision is
 `a54a922eb2d11dca3fafac2d63a19c603541ca4d`, the reviewed head of open
@@ -46,7 +46,11 @@ multi-structure document does not create a tab for every structure.
 ## Import scope
 
 This is read-only **stored-site geometry** import, not Mercury session
-restoration. Upstream warnings are emitted and retained in
+restoration and not a certification of Mercury files. Public tests use
+synthetic documents only. The adapter reads the document eagerly:
+`read_mryx_atoms(index=":")` materializes every stored structure before
+the first frame is yielded, including when the caller asks for one index.
+Upstream warnings are emitted and retained in
 `bundle.frame_info["mryx"]["diagnostics"]`; source metadata also appears in
 `bundle.scene["source_info"]["mryx"]`. Single-bundle uploads additionally expose
 `input_diagnostics` and `source_structure_count` on the scene, including the

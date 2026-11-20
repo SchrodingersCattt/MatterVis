@@ -505,7 +505,7 @@ def iter_atomistic_frames(
         None if frame_indices is None else [int(value) for value in frame_indices]
     )
     if requested is not None and any(value < 0 for value in requested):
-        raise ValueError("streaming frame indices must be non-negative")
+        raise ValueError("frame indices must be non-negative")
     selected = None if requested is None else set(requested)
     found: set[int] = set()
     format_name = resolved_format or "ase-auto"
