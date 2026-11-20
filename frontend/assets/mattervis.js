@@ -221,6 +221,25 @@
       : (selected.closest ? selected.closest("[id^='scene-tab-']") : null);
     return sceneIdFromTabNode(node);
   }
+  // One catalog read. HTML data-display-name is a projection written from
+  // the same catalog; tab text is never the name.
+  const sceneCatalogLabels = Object.create(null);
+  let notedSceneLabel = "";
+  function rememberSceneCatalog(message) {
+    if (!message || !Array.isArray(message.scenes)) return;
+    Object.keys(sceneCatalogLabels).forEach(function (key) {
+      delete sceneCatalogLabels[key];
+    });
+    message.scenes.forEach(function (scene) {
+      if (!scene || scene.id === undefined || scene.id === null || scene.id === "") return;
+      sceneCatalogLabels[String(scene.id)] = String(scene.label || "").trim();
+    });
+  }
+  function catalogLabelFor(sceneId) {
+    if (sceneId === undefined || sceneId === null || sceneId === "") return "";
+    const label = sceneCatalogLabels[String(sceneId)];
+    return label ? String(label) : "";
+  }
   function attributeText(node, name) {
     if (!node || typeof node.getAttribute !== "function") return null;
     var present = typeof node.hasAttribute === "function"
@@ -229,39 +248,51 @@
     if (!present) return null;
     return String(node.getAttribute(name)).trim();
   }
-  // Catalog identity on the tab is the scene name. Visible text is only a
-  // fallback for a node that was rendered without those attributes.
-  function sceneTabDisplayName(tab) {
-    var named = attributeText(tab, "data-display-name");
+  function projectedDisplayName(node) {
+    var named = attributeText(node, "data-display-name");
     if (named !== null) return named;
-    if (tab && typeof tab.querySelector === "function") {
-      named = attributeText(tab.querySelector("[data-display-name]"), "data-display-name");
+    if (node && typeof node.querySelector === "function") {
+      named = attributeText(node.querySelector("[data-display-name]"), "data-display-name");
       if (named !== null) return named;
     }
-    var sceneId = attributeText(tab, "data-scene-id");
-    if (sceneId === null && tab && typeof tab.id === "string" &&
+    return null;
+  }
+  function projectedDisplayNameForScene(sceneId) {
+    if (sceneId === null || sceneId === undefined || sceneId === "") return null;
+    if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") return null;
+    var nodes = document.querySelectorAll("[data-scene-id]");
+    if (!nodes || !nodes.length) return null;
+    var wanted = String(sceneId);
+    for (var index = 0; index < nodes.length; index += 1) {
+      var node = nodes[index];
+      if (attributeText(node, "data-scene-id") !== wanted) continue;
+      var named = attributeText(node, "data-display-name");
+      if (named !== null) return named;
+    }
+    return null;
+  }
+  function sceneLabelFor(sceneId, node) {
+    var fromCatalog = catalogLabelFor(sceneId);
+    if (fromCatalog) return fromCatalog;
+    var projected = projectedDisplayName(node);
+    if (projected !== null) return projected;
+    return projectedDisplayNameForScene(sceneId);
+  }
+  function renderedProjectionLabel(tab) {
+    // Staleness check only. The catalog message supplies the replacement
+    // name; this reads the projection currently painted on the tab.
+    var projected = projectedDisplayName(tab);
+    if (projected !== null) return projected;
+    var sceneId = null;
+    if (tab && typeof tab.id === "string" &&
         tab.id.indexOf("scene-tab-") === 0 &&
         tab.id.indexOf("scene-tab-close-") !== 0 &&
         tab.id.indexOf("scene-tab-label-") !== 0 &&
         tab.id !== "scene-tabs") {
       sceneId = tab.id.slice("scene-tab-".length);
     }
-    if (sceneId !== null && typeof document !== "undefined" &&
-        typeof document.querySelectorAll === "function") {
-      var nodes = document.querySelectorAll("[data-scene-id]");
-      if (nodes && nodes.length) {
-        for (var index = 0; index < nodes.length; index += 1) {
-          var node = nodes[index];
-          if (!node || node === tab) continue;
-          if (attributeText(node, "data-scene-id") !== sceneId) continue;
-          named = attributeText(node, "data-display-name");
-          if (named !== null) return named;
-        }
-      }
-    }
-    return null;
-  }
-  function sceneTabTextFallback(tab) {
+    projected = projectedDisplayNameForScene(sceneId);
+    if (projected !== null) return projected;
     if (!tab) return null;
     var text = typeof tab.querySelector === "function" ? tab.querySelector(".scene-tab-text") : null;
     if (text) return String(text.textContent || "").trim();
@@ -271,6 +302,11 @@
     }
     return null;
   }
+  window.MatterVisSceneLabels = {
+    remember: rememberSceneCatalog,
+    labelFor: sceneLabelFor,
+    catalogLabel: catalogLabelFor,
+  };
   // Keep the last real DOM selection so attribute churn on a tab (for
   // example, a tooltip/class update) cannot repeatedly scroll the active tab.
   // A null selection is transient while Dash swaps tab nodes; retain the last
@@ -281,10 +317,9 @@
     const current = String(status.textContent || "").trim();
     if (/^Uploading\b/.test(current)) return;
     const tab = node || sceneTabNodeForId(sceneId);
-    let label = sceneTabDisplayName(tab);
-    if (label === null && sceneId) label = sceneTabDisplayName(sceneTabNodeForId(sceneId));
-    if (label === null) label = sceneTabTextFallback(tab);
+    const label = sceneLabelFor(sceneId, tab);
     if (!label) return;
+    notedSceneLabel = label;
     status.textContent = "Loaded: " + label;
     status.style.color = "#047857";
     status.className = "";
@@ -1266,10 +1301,7 @@
       if (!tab || !tab.id || tab.id === "scene-tabs") continue;
       if (tab.id.indexOf("scene-tab-close-") === 0 || tab.id.indexOf("scene-tab-label-") === 0) continue;
       if (tab.id.indexOf("scene-tab-") !== 0) continue;
-      var label = sceneTabDisplayName(tab);
-      // Text is the compatibility fallback when data-display-name is absent.
-      // It is not the scene-name authority.
-      if (label === null) label = sceneTabTextFallback(tab);
+      var label = renderedProjectionLabel(tab);
       entries.push({id: tab.id.slice("scene-tab-".length), label: label});
     }
     return entries;
@@ -1327,6 +1359,7 @@
       // parser still disagrees rebuilds the tabs, and that rebuild bumps the
       // server version and delivers the same sequence again.
       if (sameSeq && !(message.focus && !applied.focus)) return;
+      rememberSceneCatalog(message);
       var domDiffers = sceneCatalogDomDiffers(message.scenes);
       var selected = "";
       try { selected = String(currentSceneId() || ""); } catch (_) { selected = ""; }
@@ -1336,6 +1369,10 @@
         focus: !!message.focus || (sameSeq && !!applied.focus),
       };
       claimOwnDuplicatedScene(message);
+      var shownId = "";
+      try { shownId = String(currentSceneId() || ""); } catch (_) { shownId = ""; }
+      if (!shownId && message.active_id) shownId = String(message.active_id);
+      if (shownId) noteLoadedScene(shownId);
       if (!domDiffers && !focusSwitch) return;
       setDashStore("scene-event-store", {
         seq: Date.now(),
@@ -2246,13 +2283,12 @@
   function ensureSceneTabTooltips() {
     document.querySelectorAll("#scene-tabs [id^='scene-tab-']").forEach(function (tab) {
       if (!tab || tab.id.indexOf("scene-tab-close-") === 0 || tab.id === "scene-tabs") return;
-      const fromCatalog = sceneTabDisplayName(tab);
+      const sceneId = sceneIdFromTabNode(tab);
+      const fromCatalog = sceneLabelFor(sceneId, tab);
       const text = typeof tab.querySelector === "function" ? tab.querySelector(".scene-tab-text") : null;
-      const fullName = fromCatalog !== null
-        ? fromCatalog
-        : (text
-          ? String(text.getAttribute("title") || text.textContent || "").trim()
-          : String(tab.textContent || "").replace(/\s+/g, " ").trim());
+      const fullName = fromCatalog || (
+        text ? String(text.getAttribute("title") || "").trim() : ""
+      );
       if (!fullName) return;
       // Dash may render dcc.Tab's React label inside a wrapper that does not
       // inherit the label's title. Put the native tooltip on the actual tab

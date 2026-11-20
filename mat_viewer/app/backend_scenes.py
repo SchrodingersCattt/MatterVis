@@ -204,42 +204,36 @@ class _SceneBackendMixin:
         )
 
     def scene_tabs(self) -> list[Any]:
-        from .dash_tabs import apply_scene_tab_dataset, tab_label_accepts_components
+        from .dash_tabs import html_scene_projection, tab_label_accepts_components
 
         component_label = tab_label_accepts_components()
         tabs = []
         for scene in self.scene_store.list():
             if component_label:
-                label: Any = apply_scene_tab_dataset(
-                    html.Span(
-                        [
-                            html.Span(
-                                scene["label"],
-                                className="scene-tab-text",
-                                title=str(scene["label"]),
-                            ),
-                            self._scene_close_control(scene),
-                        ],
-                        id=f"scene-tab-label-{scene['id']}",
-                        className="scene-tab-label",
-                        title=str(scene["label"]),
-                    ),
+                label: Any = html_scene_projection(
+                    [
+                        html.Span(
+                            scene["label"],
+                            className="scene-tab-text",
+                            title=str(scene["label"]),
+                        ),
+                        self._scene_close_control(scene),
+                    ],
                     scene["id"],
-                    scene["label"],
+                    str(scene["label"]),
+                    id=f"scene-tab-label-{scene['id']}",
+                    className="scene-tab-label",
+                    title=str(scene["label"]),
                 )
             else:
                 # Dash rejects a component in this prop and the layout
                 # callback would replace the viewer with the error screen.
                 label = str(scene["label"])
             tabs.append(
-                apply_scene_tab_dataset(
-                    dcc.Tab(
-                        label=label,
-                        value=scene["id"],
-                        id=f"scene-tab-{scene['id']}",
-                    ),
-                    scene["id"],
-                    scene["label"],
+                dcc.Tab(
+                    label=label,
+                    value=scene["id"],
+                    id=f"scene-tab-{scene['id']}",
                 )
             )
         return tabs
@@ -251,28 +245,26 @@ class _SceneBackendMixin:
         control is inside the tab and this row is empty. Otherwise the
         tab label is the scene name and the same close ids render here.
         """
-        from .dash_tabs import apply_scene_tab_dataset, tab_label_accepts_components
+        from .dash_tabs import html_scene_projection, tab_label_accepts_components
 
         if tab_label_accepts_components():
             return []
         row = []
         for scene in self.scene_store.list():
             row.append(
-                apply_scene_tab_dataset(
-                    html.Span(
-                        [
-                            html.Span(
-                                scene["label"],
-                                className="scene-tab-text",
-                                title=str(scene["label"]),
-                            ),
-                            self._scene_close_control(scene),
-                        ],
-                        className="scene-tab-label",
-                        title=str(scene["label"]),
-                    ),
+                html_scene_projection(
+                    [
+                        html.Span(
+                            scene["label"],
+                            className="scene-tab-text",
+                            title=str(scene["label"]),
+                        ),
+                        self._scene_close_control(scene),
+                    ],
                     scene["id"],
-                    scene["label"],
+                    str(scene["label"]),
+                    className="scene-tab-label",
+                    title=str(scene["label"]),
                 )
             )
         return row

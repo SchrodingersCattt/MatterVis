@@ -532,9 +532,12 @@ component as `dcc.Tab.label`. On that release and later, the per-tab
 close control is inside that label (`scene-tab-label-{id}` and
 `scene-tab-close-{id}`). On Dash 2.18.2 through 3.x the label is the
 scene name string, and the same close control is a child of
-`scene-tab-close-row`. Both shapes write `data-scene-id` and
-`data-display-name` from the scene catalog onto the tab; tab text is a
-projection of that label. Passing a component label to Dash 2.18.2
+`scene-tab-close-row`. The scene catalog message is the only label
+source (`MatterVisSceneLabels`). HTML projections carry
+`data-scene-id` and `data-display-name` on the component label or the
+close-row span. `dcc.Tab` is not given those attributes, and the
+adapter does not extend its private wildcard list. Tab text is not
+read back as the scene name. Passing a component label to Dash 2.18.2
 through 3.x raises `TypeError` while the layout is built and the page
 falls back to the error screen.
 

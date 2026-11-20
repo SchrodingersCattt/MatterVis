@@ -4,8 +4,8 @@ Dash 2.18.2 through 3.x reject a component in ``dcc.Tab.label`` while the
 layout is constructed. That exception used to be caught and replaced with
 the error screen. Dash 4.0.0 is the first stable release that accepts the
 component. The layout follows that public version so both contracts serve
-the viewer. Both shapes expose the catalog id and label as
-``data-scene-id`` and ``data-display-name`` on the tab node.
+the viewer. The catalog message is the label source. HTML projections
+carry ``data-scene-id`` and ``data-display-name``. ``dcc.Tab`` does not.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 CI
     import tomli as tomllib
 
 import pytest
+from dash import dcc
 from dash.development.base_component import Component
 
 from mat_viewer.app import ViewerBackend, create_app
@@ -106,17 +107,32 @@ def test_web_extra_declares_the_dash_floor() -> None:
         assert dash_reqs == ["dash>=2.18.2"]
 
 
+def _assert_tab_is_not_the_label_store(tab) -> None:
+    props = tab.to_plotly_json()["props"]
+    assert "data-scene-id" not in props
+    assert "data-display-name" not in props
+    declared = list(getattr(dcc.Tab, "_valid_wildcard_attributes", []) or [])
+    assert "data-" not in declared
+    assert list(getattr(tab, "_valid_wildcard_attributes", []) or []) == declared
+
+
 def test_installed_label_contract_keeps_selection_and_one_close_control(tmp_path: Path) -> None:
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     try:
         scene_id = backend.active_scene_id()
         label_text = next(item["label"] for item in backend.scene_options() if item["id"] == scene_id)
+        wildcards_before = list(getattr(dcc.Tab, "_valid_wildcard_attributes", []) or [])
         tabs = backend.scene_tabs()
         row = backend.scene_tab_close_row()
+        assert list(getattr(dcc.Tab, "_valid_wildcard_attributes", []) or []) == wildcards_before
         tab = next(item for item in tabs if item.value == scene_id)
         assert tab.id == f"scene-tab-{scene_id}"
         close_id = _close_id(scene_id)
-        _assert_catalog_identity(tab, scene_id, str(label_text))
+        _assert_tab_is_not_the_label_store(tab)
+        catalog = backend.scene_catalog(focus=False)
+        assert catalog["focus"] is False
+        named = next(item for item in catalog["scenes"] if item["id"] == scene_id)
+        assert named["label"] == label_text
         if tab_label_accepts_components():
             assert isinstance(tab.label, Component)
             assert _has_component_id(tab, close_id)
@@ -149,7 +165,7 @@ def test_string_label_fallback_keeps_close_outside_the_tab(monkeypatch, tmp_path
         close_id = _close_id(scene_id)
         assert isinstance(tab.label, str)
         assert tab.label
-        _assert_catalog_identity(tab, scene_id, str(label_text))
+        _assert_tab_is_not_the_label_store(tab)
         carriers = [child for child in row if getattr(child, "data-scene-id", None) == scene_id]
         assert carriers
         _assert_catalog_identity(carriers[0], scene_id, str(label_text))
@@ -181,10 +197,10 @@ def test_layout_endpoint_serves_the_viewer(tmp_path: Path) -> None:
         payload = json.loads(body)
         tab_props = _props_matching(payload, id=f"scene-tab-{scene_id}")
         assert tab_props
-        assert tab_props[0]["data-scene-id"] == scene_id
-        assert tab_props[0]["data-display-name"] == str(label_text)
+        assert "data-scene-id" not in tab_props[0]
+        assert "data-display-name" not in tab_props[0]
         carriers = _props_matching(payload, **{"data-scene-id": scene_id})
-        assert len(carriers) >= 2
+        assert carriers
         assert all(item["data-display-name"] == str(label_text) for item in carriers)
         if tab_label_accepts_components():
             assert "scene-tabs-card--string-labels" not in body
@@ -221,13 +237,40 @@ def test_string_label_layout_is_still_the_viewer(monkeypatch, tmp_path: Path) ->
         payload = json.loads(body)
         tab_props = _props_matching(payload, id=f"scene-tab-{scene_id}")
         assert tab_props
-        assert tab_props[0]["data-scene-id"] == scene_id
-        assert tab_props[0]["data-display-name"] == str(label_text)
+        assert "data-scene-id" not in tab_props[0]
+        assert "data-display-name" not in tab_props[0]
         carriers = _props_matching(payload, **{"data-scene-id": scene_id})
-        assert len(carriers) >= 2
+        assert carriers
         assert all(item["data-display-name"] == str(label_text) for item in carriers)
     finally:
         app.crystal_backend.close(wait=True)
+
+
+def test_inactive_rename_and_close_keep_the_open_scene(tmp_path: Path) -> None:
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        active = backend.active_scene_id()
+        active_label = next(item["label"] for item in backend.scene_options() if item["id"] == active)
+        other = backend.duplicate_scene(active)
+        backend.set_active_scene(active, broadcast=False, focus_clients=False)
+        renamed = backend.update_scene(other["id"], {"label": "Inactive rename"})
+        assert renamed["label"] == "Inactive rename"
+        assert backend.active_scene_id() == active
+        catalog = backend.scene_catalog(focus=False)
+        assert catalog["focus"] is False
+        assert catalog["active_id"] == active
+        by_id = {item["id"]: item["label"] for item in catalog["scenes"]}
+        assert by_id[active] == active_label
+        assert by_id[other["id"]] == "Inactive rename"
+        removed = backend.delete_scene(other["id"])
+        assert removed["id"] == other["id"]
+        assert backend.active_scene_id() == active
+        catalog = backend.scene_catalog(focus=False)
+        assert catalog["focus"] is False
+        assert [item["id"] for item in catalog["scenes"]] == [active]
+        assert catalog["scenes"][0]["label"] == active_label
+    finally:
+        backend.close(wait=True)
 
 
 def test_component_label_follows_the_public_dash_version() -> None:
@@ -243,6 +286,7 @@ def test_component_label_follows_the_public_dash_version() -> None:
 
     source = (ROOT / "mat_viewer" / "app" / "dash_tabs.py").read_text(encoding="utf-8")
     assert "_base_nodes" not in source
+    assert "_valid_wildcard_attributes" not in source
     accepts = tab_label_accepts_components()
     assert accepts is (parse_version(dash.__version__) >= parse_version("4.0.0"))
     assert tab_label_accepts_components() is accepts

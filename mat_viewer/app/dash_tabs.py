@@ -10,14 +10,16 @@ contracts serve the viewer: Dash 2.18.2 through 3.x keep a string label,
 and Dash 4.0.0 and later keep a component label. The boolean is cached
 for the process.
 
-Whichever shape is chosen, the tab node carries the scene catalog on
-``data-scene-id`` and ``data-display-name``. Tab text is a projection of
-that catalog state.
+The scene catalog message is the label source. HTML projections carry
+``data-scene-id`` and ``data-display-name`` for the close row and, on
+Dash 4, the component label. ``dcc.Tab`` does not declare ``data-*``,
+and this module does not extend that private wildcard list.
 """
 
 from __future__ import annotations
 
 from functools import cache
+from typing import Any
 
 from packaging.version import parse as parse_version
 
@@ -37,7 +39,7 @@ def tab_label_accepts_components() -> bool:
 
 
 def scene_tab_dataset(scene_id: str, label: str) -> dict[str, str]:
-    """Catalog identity written onto every scene tab node."""
+    """Catalog projection written onto HTML scene nodes."""
 
     return {
         "data-scene-id": str(scene_id),
@@ -45,19 +47,17 @@ def scene_tab_dataset(scene_id: str, label: str) -> dict[str, str]:
     }
 
 
-def apply_scene_tab_dataset(component, scene_id: str, label: str):
-    """Attach catalog identity attributes to one tab node.
+def html_scene_projection(children: Any, scene_id: str, label: str, **kwargs: Any):
+    """Return an HTML span that projects one catalog scene.
 
-    ``html`` nodes already accept ``data-*``. ``dcc.Tab`` does not declare
-    those props, so the same keys are attached after construction and
-    included when the component is serialized. Close-control ids are left
-    unchanged.
+    Callers pass this span as a Dash 4 tab label or as a child of
+    ``scene-tab-close-row`` when the installed Dash only accepts a
+    string label. The span is not a second name authority: the catalog
+    message overwrites it.
     """
 
-    attrs = scene_tab_dataset(scene_id, label)
-    wildcards = list(getattr(component, "_valid_wildcard_attributes", []) or [])
-    if "data-" not in wildcards:
-        component._valid_wildcard_attributes = [*wildcards, "data-"]
-    for key, value in attrs.items():
-        setattr(component, key, value)
-    return component
+    from dash import html
+
+    props = dict(kwargs)
+    props.update(scene_tab_dataset(scene_id, label))
+    return html.Span(children, **props)
