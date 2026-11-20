@@ -5,6 +5,8 @@
 [![PyPI](https://img.shields.io/pypi/v/matter-vis.svg)](https://pypi.org/project/matter-vis/)
 [![CI](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml)
 
+> **Upcoming project rename (next release).** MatterVis will adopt a new name in its next release to distinguish it from similarly named materials-visualization software and better reflect its broader scope across structure visualization, analysis, and modeling. **The new name is still being finalized; nothing has been renamed yet.** The existing `mat-vis` CLI command and `mat_viewer` Python imports are planned to remain compatible. GitHub links are expected to redirect after the repository rename; PyPI project names do not redirect, so a `matter-vis` compatibility package is planned. See [the rename tracking issue](https://github.com/SchrodingersCattt/MatterVis/issues/316) for the migration plan and updates.
+
 ## Overview
 
 MatterVis is a Python toolkit for deterministic, publication-quality material
