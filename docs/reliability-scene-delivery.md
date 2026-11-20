@@ -20,7 +20,10 @@ must not change scene B, and a stale revision must not replace a newer one.
   is no longer current. `latest_figure_broadcast` does not return that body.
 - The browser keeps the last complete-frame decisions on the existing
   `.js-plotly-plot` inside `#crystal-graph`: the property `__mvFrameWitness`
-  and the attribute `data-mv-frame-witness`. Both are the same JSON array.
+  and the attribute `data-mv-frame-witness`. `frame_witness.js` owns that
+  record. `MatterVisFrameWitness.enable(false)` stops it. It is not a
+  selection store. Both the property and the attribute are the same JSON
+  array.
   Each record names the decision (`applied`, `stale-before-queue`,
   `stale-at-delivery`, `already-showing`, or `untyped-other-scene`), the
   scene, generation, render revision, camera revision, `uirevision`, the

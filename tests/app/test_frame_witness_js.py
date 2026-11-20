@@ -8,6 +8,7 @@ import pytest
 
 _HARNESS = r"""
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const witnessJs = fs.readFileSync(process.argv[1] + '/frame_witness.js', 'utf8');
 const gate = fs.readFileSync(process.argv[1] + '/mattervis.js', 'utf8');
 function harness() {
   const expected = {scene_id: 'scene-a', scene_generation: 1, render_revision: 1,
@@ -40,7 +41,7 @@ function harness() {
     window: {Plotly: {react, newPlot: react, relayout: () => Promise.resolve(gd)}}};
   vm.createContext(sandbox);
   const gateEnd = gate.indexOf('  // ── Right-click menu');
-  vm.runInContext(gate.slice(0, gateEnd) +
+  vm.runInContext(witnessJs + '\n' + gate.slice(0, gateEnd) +
     'window.commitFrameExpectation = value => rememberExpectedRender(value, true);})();', sandbox);
   function submit(scene, revision, traces) {
     const render = Object.assign({}, expected, {scene_id: scene, render_revision: revision,
@@ -175,4 +176,23 @@ def test_frame_that_becomes_stale_while_queued_is_recorded_at_delivery():
   assert.equal(log[0].render_revision, 2);
   assert.equal(log[0].incoming.coordinates, 4);
   assert.equal(h.gd.data.length, 0);
+""")
+
+
+def test_disabled_witness_records_nothing_and_still_paints():
+    _run(r"""
+  const h = harness();
+  h.root.MatterVisFrameWitness.enable(false);
+  assert.equal(h.root.MatterVisFrameWitness.enabled(), false);
+  await h.submit('scene-a', 2, [{type: 'mesh3d', visible: true, x: [0, 1, 2]}]);
+  assert.equal(h.frames.length, 1, 'disabling the witness blocked the frame');
+  assert.equal(h.gd.__mvFrameWitness, undefined);
+  assert.equal(h.gd.attrs['data-mv-frame-witness'], undefined);
+  assert.equal(h.gd.__mvSelection, undefined);
+  h.root.MatterVisFrameWitness.enable(true);
+  await h.submit('scene-a', 3, [{type: 'mesh3d', visible: true, x: [0, 1]}]);
+  const log = witness(h);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].decision, 'applied');
+  assert.equal(log[0].render_revision, 3);
 """)

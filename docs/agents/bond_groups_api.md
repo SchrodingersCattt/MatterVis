@@ -34,7 +34,7 @@ keys must match (AND semantics).**
 | Key | Type | Behaviour |
 |---|---|---|
 | `all` | `true` | Matches every bond. Other keys are ignored when set. |
-| `between_elements` | list[str] | The bond's endpoints must (set-wise) equal the two-element list. `["O","H"]` matches O-H **and** H-O bonds. A single-element list matches homo-element bonds (e.g. `["C"]` for C-C). `[]` is a persisted incomplete endpoint edit: it matches no bonds and is not rewritten to `all`. An empty list beside another recognised key is dropped so it cannot hide that key. |
+| `between_elements` | list[str] | The bond's endpoints must (set-wise) equal the two-element list. `["O","H"]` matches O-H **and** H-O bonds. A single-element list matches homo-element bonds (e.g. `["C"]` for C-C). `[]` is an explicit match-nothing rule: the editor stores it while the endpoint picker is empty, and a saved scene, preset, and reloaded scene keep it. It matches no bonds and is not rewritten to `all`. A missing selector is not a rule. `{"all": true}` is the only match-everything form. An empty list beside another recognised key is dropped so it cannot hide that key. |
 | `labels` | list[str] | Canonical bond identifiers such as `"A1-B2"`; endpoint order is accepted both ways. |
 | `is_minor` | bool | When `true`, only matches bonds whose `is_minor` flag is set (partial-occupancy bonds); when `false`, only major-occupancy bonds. |
 

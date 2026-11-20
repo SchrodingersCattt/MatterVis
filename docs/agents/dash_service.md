@@ -619,12 +619,16 @@ The full list (authoritative; the diagram only groups them):
   groups editor; per-row inputs are pattern-matched, see
   `atom_groups_api.md` for the `{type, group_id}` shape). Choosing
   "by element" before any symbol is picked stores `{"elements": []}`
-  and keeps the element picker visible.
+  and keeps the element picker visible. That empty list is the saved
+  match-nothing rule. It is not dropped on save and it is not
+  `{"all": true}`.
 - `bond-groups-add-btn`, `bond-groups-rows-container` (Phase 4 bond
   groups editor; per-row inputs are pattern-matched with
   `{type, group_id}` shape, see `bond_groups_api.md`). Choosing
   "between elements" before any endpoint is picked stores
   `{"between_elements": []}` and keeps the endpoint picker visible.
+  That empty list is the saved match-nothing rule. It is not dropped
+  on save and it is not `{"all": true}`.
 - `transforms-add-btn`, `transforms-rows-container`,
   `transforms-kind-select` (Phase 4 transforms editor; per-row
   inputs are pattern-matched with `{type, transform_id}` shape, see

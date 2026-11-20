@@ -75,7 +75,6 @@
   const expectedCameraRevisionByScene = Object.create(null);
   const expectedSceneGenerationByScene = Object.create(null);
   const MAX_RENDER_QUEUE = 32;
-  const FRAME_WITNESS_LIMIT = 16;
 
   function incomingTracesForWitness(args, objectFigure) {
     if (objectFigure && args[1]) return Array.isArray(args[1].data) ? args[1].data : [];
@@ -110,14 +109,16 @@
     return layout.uirevision !== undefined ? layout.uirevision : null;
   }
   /* The last complete-frame decisions stay on the graph node that Plotly
-   * already mounted. Setting an attribute does not add a child, so the
-   * viewer-root child-list observer does not schedule rebindAll or flush a
-   * parked scene frame. This record does not choose whether a frame is painted. */
+   * already mounted. The diagnostic module writes the attribute; this
+   * function only describes the frame. It does not choose a selection or
+   * whether the frame is painted. A disabled witness records nothing. */
   function noteFrameWitness(gd, layout, traces, decision) {
     try {
-      if (!gd) return;
+      const witness = window.MatterVisFrameWitness;
+      if (!gd || !witness || typeof witness.note !== "function") return;
+      if (typeof witness.enabled === "function" && !witness.enabled()) return;
       const render = renderMetadataFromLayout(layout);
-      const record = {
+      witness.note(gd, {
         at: new Date().toISOString(),
         decision: decision,
         scene_id: render && render.scene_id || null,
@@ -130,14 +131,7 @@
         canvas: traceCensus(gd.data),
         camera: witnessCamera(layout),
         delivered: gd.__mvDeliveredFrame || null,
-      };
-      const log = Array.isArray(gd.__mvFrameWitness) ? gd.__mvFrameWitness : [];
-      log.push(record);
-      while (log.length > FRAME_WITNESS_LIMIT) log.shift();
-      gd.__mvFrameWitness = log;
-      if (typeof gd.setAttribute === "function") {
-        gd.setAttribute("data-mv-frame-witness", JSON.stringify(log));
-      }
+      });
     } catch (_) {}
   }
 

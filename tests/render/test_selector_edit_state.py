@@ -231,9 +231,13 @@ def test_mixed_cco_rules_color_only_the_selected_targets(tmp_path: Path):
             "atom_groups": [
                 {"id": "oxygens", "selector": {"elements": ["O"]}, "color": "#FF0000"},
                 {"id": "pending", "selector": {"elements": []}, "color": "#00FFCC"},
+                {"id": "everything", "selector": {"all": True}, "color": "#000000"},
+                {"id": "missing", "selector": {}},
             ],
             "bond_groups": [
                 {"id": "pending-bond", "selector": {"between_elements": []}},
+                {"id": "every-bond", "selector": {"all": True}},
+                {"id": "missing-bond", "selector": {}},
             ],
         }
     )
@@ -241,7 +245,23 @@ def test_mixed_cco_rules_color_only_the_selected_targets(tmp_path: Path):
     atom_by_id = {group["id"]: group for group in state["atom_groups"]}
     assert atom_by_id["oxygens"]["selector"] == {"elements": ["O"]}
     assert atom_by_id["pending"]["selector"] == {"elements": []}
-    assert state["bond_groups"][0]["selector"] == {"between_elements": []}
+    assert atom_by_id["everything"]["selector"] == {"all": True}
+    assert "missing" not in atom_by_id
+    bond_by_id = {group["id"]: group for group in state["bond_groups"]}
+    assert bond_by_id["pending-bond"]["selector"] == {"between_elements": []}
+    assert bond_by_id["every-bond"]["selector"] == {"all": True}
+    assert "missing-bond" not in bond_by_id
+    sample = {"elem": "C", "label": "C1"}
+    sample_bond = {"i": 0, "j": 1}
+    sample_atoms = [{"elem": "C", "label": "C1"}, {"elem": "O", "label": "O1"}]
+    assert atom_matches_selector(sample, {"elements": []}) is False
+    assert atom_matches_selector(sample, {"all": True}) is True
+    assert bond_matches_selector(
+        sample_bond, {"between_elements": []}, atoms=sample_atoms
+    ) is False
+    assert bond_matches_selector(
+        sample_bond, {"all": True}, atoms=sample_atoms
+    ) is True
     backend.flush_scene_store()
     stored = json.loads((tmp_path / "isolated-scenes.json").read_text(encoding="utf-8"))
     stored_groups = []
@@ -249,7 +269,9 @@ def test_mixed_cco_rules_color_only_the_selected_targets(tmp_path: Path):
         if isinstance(node, dict):
             selector = node.get("selector")
             if isinstance(selector, dict) and (
-                "elements" in selector or "between_elements" in selector
+                "elements" in selector
+                or "between_elements" in selector
+                or "all" in selector
             ):
                 stored_groups.append(selector)
             for value in node.values():
@@ -261,7 +283,35 @@ def test_mixed_cco_rules_color_only_the_selected_targets(tmp_path: Path):
     assert {"elements": []} in stored_groups
     assert {"elements": ["O"]} in stored_groups
     assert {"between_elements": []} in stored_groups
+    assert {"all": True} in stored_groups
+    assert {} not in stored_groups
 
+    backend.close()
+    reloaded = ViewerBackend(preset_path=default_preset_path(), root_dir=str(tmp_path))
+    reloaded_state = reloaded.get_state()
+    reloaded_atoms = {group["id"]: group["selector"] for group in reloaded_state["atom_groups"]}
+    reloaded_bonds = {group["id"]: group["selector"] for group in reloaded_state["bond_groups"]}
+    assert reloaded_atoms["pending"] == {"elements": []}
+    assert reloaded_atoms["everything"] == {"all": True}
+    assert reloaded_atoms["oxygens"] == {"elements": ["O"]}
+    assert "missing" not in reloaded_atoms
+    assert reloaded_bonds["pending-bond"] == {"between_elements": []}
+    assert reloaded_bonds["every-bond"] == {"all": True}
+    assert "missing-bond" not in reloaded_bonds
+    saved = reloaded.save_preset()
+    from_preset = ViewerBackend(preset_path=saved["path"], root_dir=str(tmp_path))
+    from_preset.load_preset_from_path(saved["path"])
+    preset_state = from_preset.get_state()
+    preset_atoms = {group["id"]: group["selector"] for group in preset_state["atom_groups"]}
+    preset_bonds = {group["id"]: group["selector"] for group in preset_state["bond_groups"]}
+    assert preset_atoms["pending"] == {"elements": []}
+    assert preset_atoms["everything"] == {"all": True}
+    assert preset_bonds["pending-bond"] == {"between_elements": []}
+    assert preset_bonds["every-bond"] == {"all": True}
+    from_preset.close()
+    reloaded.close()
+
+    backend = ViewerBackend(preset_path=default_preset_path(), root_dir=str(tmp_path))
     backend.update_atom_group("pending", {"selector": {"elements": ["C"]}})
     assert backend.list_atom_groups()
     pending = next(group for group in backend.list_atom_groups() if group["id"] == "pending")

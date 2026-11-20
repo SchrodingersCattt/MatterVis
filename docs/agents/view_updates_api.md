@@ -44,9 +44,10 @@ when the caller is an external script and Dash `update_view` does not run.
 A second request for the same snapshot is deduplicated by the render worker.
 The browser also records each complete-frame decision on the existing
 `.js-plotly-plot` node as `__mvFrameWitness` and `data-mv-frame-witness`.
-That record is the applied or rejected frame's identity, camera, and
-coordinate counts. It does not insert a DOM node and it does not change
-the frame that is painted.
+`frame_witness.js` owns that record. `MatterVisFrameWitness.enable(false)`
+stops recording. The record is the applied or rejected frame's identity,
+camera, and coordinate counts. It does not insert a DOM node, it does not
+change the frame that is painted, and it is not selection state.
 
 The same journal also carries scene-list envelopes:
 
