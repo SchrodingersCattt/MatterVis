@@ -1,6 +1,6 @@
 # Native GPU backend
 
-MatterVis exposes the optional native backend through the same immutable
+Atomaestro exposes the optional native backend through the same immutable
 `RenderPlan` used by the CPU and Plotly adapters. It is selected explicitly:
 
 ```bash

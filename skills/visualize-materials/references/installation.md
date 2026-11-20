@@ -1,4 +1,4 @@
-# Install MatterVis
+# Install Atomaestro
 
 Use the published PyPI package by default:
 
@@ -9,10 +9,10 @@ python -m pip install matter-vis
 This installs core dependencies, including MolCrysKit. Add optional extras only
 when required; see [capabilities and installation](./capabilities-and-install.md).
 
-For requested MatterVis source changes, install a checkout instead:
+For requested Atomaestro source changes, install a checkout instead:
 
 ```bash
-git clone https://github.com/SchrodingersCattt/MatterVis.git
-cd MatterVis
+git clone https://github.com/SchrodingersCattt/Atomaestro.git
+cd Atomaestro
 python -m pip install .
 ```

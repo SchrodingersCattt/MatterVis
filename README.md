@@ -1,16 +1,20 @@
-# MatterVis: Crystal Structure Visualization Toolkit
+# Atomaestro: Atomistic Structure Visualization and Scientific Workbench
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](#)
 [![PyPI](https://img.shields.io/pypi/v/matter-vis.svg)](https://pypi.org/project/matter-vis/)
-[![CI](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml)
+[![CI](https://github.com/SchrodingersCattt/Atomaestro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SchrodingersCattt/Atomaestro/actions/workflows/ci.yml)
+
+> **Repository rename:** **MatterVis is now Atomaestro** on GitHub. The current PyPI distribution remains [`matter-vis`](https://pypi.org/project/matter-vis/), with the `mat-vis` CLI and `mat_viewer` Python imports unchanged. A future release is planned to introduce `atomaestro` packaging and a matching CLI command while keeping the existing interfaces compatible. For exact current-versus-planned behavior, see the [migration guide](docs/rebranding.md) and [tracking issue #316](https://github.com/SchrodingersCattt/Atomaestro/issues/316).
 
 ## Overview
 
-MatterVis is a Python toolkit for deterministic, publication-quality material
-visualization. Its lightweight core renders PNG/PDF/SVG on the CPU; Plotly,
-Dash/Web APIs, Textual, Cube isosurfaces, and animation encoders are optional
-frontends.
+Atomaestro (formerly MatterVis) is a Python toolkit for deterministic,
+publication-quality atomistic structure visualization and scientific analysis.
+Its lightweight core renders PNG/PDF/SVG on the CPU; Plotly, Dash/Web APIs,
+Textual, Cube isosurfaces, and animation encoders are optional frontends.
+The broader roadmap includes integrated structure modeling, multi-structure scene
+composition, and agent-driven scientific workflows.
 
 ## Scenes and scientific revisions
 
@@ -47,6 +51,10 @@ can use the revision/write APIs directly without adopting the catalog.
 
 ## Installation
 
+The GitHub repository is now named **Atomaestro**, but the published package
+and its executable have not yet been renamed. The commands below are the
+currently supported installation and usage paths. See the [migration guide](docs/rebranding.md).
+
 ### From PyPI (recommended)
 
 ```bash
@@ -56,8 +64,8 @@ pip install matter-vis
 ### From source (development)
 
 ```bash
-git clone https://github.com/SchrodingersCattt/MatterVis.git
-cd MatterVis
+git clone https://github.com/SchrodingersCattt/Atomaestro.git
+cd Atomaestro
 pip install -e .
 ```
 
@@ -84,7 +92,7 @@ mat-vis capabilities --require web-screenshot --json
 mat-vis capabilities --require static-web-export --json
 ```
 
-MolCrysKit is required and is the only chemistry structure source. MatterVis
+MolCrysKit is required and is the only chemistry structure source. Atomaestro
 does not fall back to private MolCrysKit fields or local chemistry heuristics.
 Extended versus molecular presentation comes from
 ``MolecularCrystal.get_connectivity_report()``. Ball-and-stick strokes both
@@ -97,7 +105,7 @@ until the API is on PyPI.
 
 ### CLI — one-liner from CIF to figure
 
-Install MatterVis, then render a crystal structure with a single command:
+Install the currently published `matter-vis` distribution, then render a crystal structure:
 
 ```bash
 # Primary terminal observation and chemistry inspection
@@ -157,7 +165,7 @@ result = render(plan, output="dap4.svg", backend="cpu")
 
 ## Command Line Interface
 
-Installing MatterVis also installs the `mat-vis` command. The CLI is self-documenting;
+Installing the current `matter-vis` distribution provides the `mat-vis` command. The next planned release will introduce `atomaestro` as a new primary command while keeping `mat-vis` compatible. The CLI is self-documenting;
 use `--help` at any level to see the exact arguments:
 
 ```bash
@@ -186,7 +194,7 @@ The main subcommands cover:
 |---|---|
 | **Understanding the design** | [Architecture](docs/architecture.md) |
 | **Using the library** | [API Reference](docs/agents/) · [CLI Reference](docs/cli.md) |
-| **AI agent (calling MatterVis)** | [Caller API Contracts](docs/agents/) |
+| **AI agent (calling Atomaestro)** | [Caller API Contracts](docs/agents/) |
 | **AI agent (modifying code)** | [AGENTS.md](AGENTS.md) · [Developer Notes](docs/dev-notes.md) |
 | **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Topology scores** | [Scores Reference](docs/scores.md) |

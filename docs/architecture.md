@@ -1,6 +1,6 @@
-# MatterVis Architecture
+# Atomaestro Architecture
 
-MatterVis has one chemistry source and several explicitly selected output
+Atomaestro has one chemistry source and several explicitly selected output
 frontends. The base installation owns the complete browser-independent static
 path; an optional frontend may consume the same `RenderPlan`, but it may not
 recompute chemical identity or silently replace another backend.
@@ -10,7 +10,7 @@ flowchart TB
     input["CIF / ASE-supported structure / trajectory"]
     mck["MolCrysKit\nchemical structure source"]
     records["SiteRecord · BondRecord\nFormulaUnitSelection · RingGeometry"]
-    select["MatterVis selection and display copies\nformula unit · unit cell · ASU · cluster"]
+    select["Atomaestro selection and display copies\nformula unit · unit cell · ASU · cluster"]
     specs["ViewSpec · CameraSpec · RenderSpec"]
     plan["RenderPlan\ntriangles · lines/arcs · text"]
 
@@ -48,7 +48,7 @@ commands are in
 | Layer | Owns | Must not own |
 |---|---|---|
 | MolCrysKit | symmetry-expanded sites, molecule and ASU identity, PBC bonds, ADPs, rings, formula-unit selection | cameras, colors, output formats |
-| MatterVis selection | which public records and periodic images are displayed | re-perceived bonds or private MolCrysKit `.info` fields |
+| Atomaestro selection | which public records and periodic images are displayed | re-perceived bonds or private MolCrysKit `.info` fields |
 | representation | ball-and-stick, space filling, wireframe, ORTEP, aromatic circle/disk | renderer selection |
 | shading | smooth, flat, ORTEP axes/hatch | chemical topology or output format |
 | camera | one homogeneous orthographic/perspective transform and clipping contract | chemistry or backend fallback |
@@ -134,7 +134,7 @@ contract is `docs/reliability-scene-delivery.md`.
 
 ## Documentation of the render interface
 
-MatterVis is a pure render interface. Stable docs describe geometry, bond
+Atomaestro is a pure render interface. Stable docs describe geometry, bond
 graphs, and display modes: which public records and periodic images are
 shown, and how a backend lowers an existing `RenderPlan`. Chemistry
 semantics — molecule grouping, PBC unwrapping, packing shells, shape

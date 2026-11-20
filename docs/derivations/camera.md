@@ -54,7 +54,7 @@ For manual aspect ratio with aspect component \(a_k\),
 \sigma_k=\frac{h_k}{a_k}.
 \]
 
-For `aspectmode="cube"` after MatterVis equalizes all axis ranges, the rendered
+For `aspectmode="cube"` after Atomaestro equalizes all axis ranges, the rendered
 cube is isotropic and
 
 \[
@@ -78,7 +78,7 @@ where \(\odot\) is elementwise multiplication.
 
 ### Isometric Aspect Contract
 
-MatterVis must preserve Cartesian distances in every rendered molecular scene.
+Atomaestro must preserve Cartesian distances in every rendered molecular scene.
 That means one Angstrom along Cartesian x, y, and z must map to the same
 rendered scene-cube length. In the notation above, the no-flattening invariant
 is:
@@ -96,7 +96,7 @@ a_k=\frac{h_k}{\max_j h_j},
 \sigma_k=\frac{h_k}{a_k}=\max_j h_j.
 \]
 
-For `aspectmode="cube"`, MatterVis first equalizes the ranges so
+For `aspectmode="cube"`, Atomaestro first equalizes the ranges so
 \(h_x=h_y=h_z\), which gives the same invariant.
 
 This is deliberately not the same as using lattice-vector lengths
@@ -147,7 +147,7 @@ remain chemically contiguous, but those outside images do not own the base
 viewport. Otherwise the real unit cell can collapse into a thin strip inside an
 oversized atom hull.
 
-After the min/max hull is formed, MatterVis pads it:
+After the min/max hull is formed, Atomaestro pads it:
 
 \[
 \mathrm{span}_k=\max(M_k-m_k,0.8),
@@ -281,7 +281,7 @@ renormalized:
 \right).
 \]
 
-If MatterVis does not remap, it must explicitly reset the camera when the cube
+If Atomaestro does not remap, it must explicitly reset the camera when the cube
 scale changes.
 
 ## Current Code Mapping

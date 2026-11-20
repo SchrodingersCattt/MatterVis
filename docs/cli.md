@@ -1,6 +1,6 @@
 # CLI Reference
 
-MatterVis renders atomistic structures and trajectories without launching the
+Atomaestro renders atomistic structures and trajectories without launching the
 browser viewer. Every input format is parsed into the same canonical structure
 frame before scene construction.
 
@@ -131,7 +131,7 @@ printf '%s\n' \
 ~~~
 
 Every input line receives one JSON response line and stdout is flushed after
-each response. Actions are selected online by the caller; MatterVis does not
+each response. Actions are selected online by the caller; Atomaestro does not
 pre-plan a trajectory or repair malformed natural-language commands.
 
 JSONL observations are always monochrome and ANSI-free. The default charset is
@@ -200,7 +200,7 @@ Supported inputs:
 
 LAMMPS numeric types are not elements. Pass --type-map whenever the source does
 not encode element identity unambiguously; the order is type 1, type 2, and so
-on. MatterVis never guesses it from a model filename.
+on. Atomaestro never guesses it from a model filename.
 
 ### Per-atom property colors
 
@@ -273,12 +273,15 @@ colors, and per-endpoint line colors fail explicitly.
 Opaque meshes, instanced spheres, cylinders, and solid ellipsoids are drawn
 on the device. Lines wider than one pixel, including the default unit-cell
 edges, are composited from the GPU depth buffer inside each viewport,
-together with depth-disabled lines. A depth-disabled stroke stays in front
-of a depth-tested one. The command
-never falls back to CPU. GPU output is not supersampled: `scale`,
-`sphere_detail`, and `cylinder_sides` do not change the GPU image size or
-the fixed instance meshes.
-Base MatterVis provides CPU 3D and Matplotlib projected 2D PNG/PDF/SVG, ORTEP, rings, polyhedra, and
+together with depth-disabled lines, ORTEP hatch, and ORTEP principal axes.
+That composite is the intended line pass, not a fallback. A depth-disabled
+stroke stays in front of a depth-tested one. A depth-tested stroke is hidden
+where the GPU depth is nearer than the stroke. The command never falls back
+to CPU and does not substitute another surface preset or lighting rig for
+the historical matte `studio_soft` shade. GPU output is not supersampled:
+`scale`, `sphere_detail`, and `cylinder_sides` do not change the GPU image
+size or the fixed instance meshes.
+Base Atomaestro provides CPU 3D and Matplotlib projected 2D PNG/PDF/SVG, ORTEP, rings, polyhedra, and
 ordinary structure inputs. Run `mat-vis capabilities --require FEATURE --json`
 for an exact install command before using an optional frontend.
 
@@ -307,7 +310,7 @@ GIF/MP4 require at least two selected frames. All selected frames use one camera
 canvas, and shared world-space viewport scale.
 
 Physical time and playback time are independent. `--fps` controls only how fast
-the movie plays. With `--display-time`, MatterVis resolves time in this order:
+the movie plays. With `--display-time`, Atomaestro resolves time in this order:
 
 1. per-frame `time_fs`, `time_ps`, or `time_ns`;
 2. per-frame `timestep`, `step`, or `nstep`, multiplied by `--time-step`;
@@ -329,7 +332,7 @@ Generic annotations and the physical-time shortcut are mutually exclusive.
 
 Animations preserve one requested representation, camera, and backend
 across every frame. Plotly GIF/MP4 is rejected explicitly. CPU and GPU are
-the animation backends; MatterVis never substitutes one frame backend for
+the animation backends; Atomaestro never substitutes one frame backend for
 another.
 
 ### Display options
@@ -485,7 +488,7 @@ default and colours each hull from its centre element, with same-hue face
 lightness. The JSON `site` or `sites` keys and `--polyhedron-site` select
 source atom indices; molecule-level selectors use source fragment indices. The
 JSON `center_images:true` option works at both levels. At molecule level,
-MatterVis follows each displayed complete fragment image and translates the
+Atomaestro follows each displayed complete fragment image and translates the
 center, ligand shell, and hull together. Receipts keep source and display counts
 separate.
 
@@ -667,7 +670,7 @@ or source identifier before rendering; `cluster` does not crop a periodic cell.
 ### Fonts not rendering correctly in PDF
 
 Use a Unicode-capable font already available in the execution environment.
-MatterVis does not install operating-system packages automatically.
+Atomaestro does not install operating-system packages automatically.
 
 ### Terminal depth and layers
 

@@ -1,11 +1,11 @@
 # Lattice And Coordinate Derivations
 
-This note derives the lattice algebra used by MatterVis and maps it to the
+This note derives the lattice algebra used by Atomaestro and maps it to the
 current implementation.
 
 ## Derivation
 
-MatterVis stores the lattice as a row-vector matrix:
+Atomaestro stores the lattice as a row-vector matrix:
 
 \[
 M =
@@ -59,7 +59,7 @@ M^*M^\top = 2\pi I.
 If a caller wants crystallographic reciprocal vectors without the \(2\pi\)
 factor, use \(M^{-\top}\).
 
-For cell aspect rendering, MatterVis only needs the displayed lengths of the
+For cell aspect rendering, Atomaestro only needs the displayed lengths of the
 three row vectors:
 
 \[
@@ -130,13 +130,13 @@ renderer aspect is derived from emitted Cartesian axis ranges in
 `docs/derivations/camera.md`.  The actual cell geometry remains correct because
 traces are emitted in Cartesian coordinates.
 
-The reciprocal-lattice formula is not currently a first-class MatterVis API.
+The reciprocal-lattice formula is not currently a first-class Atomaestro API.
 If it is introduced later, it should follow the row-matrix convention
 \(M^*=2\pi M^{-\top}\) and not copy column-vector textbook snippets blindly.
 
 ## Invariants
 
-- `M` in all live MatterVis scenes is a row-vector lattice matrix.
+- `M` in all live Atomaestro scenes is a row-vector lattice matrix.
 - Cartesian coordinates are always computed as `frac @ M`.
 - Integer image shifts are fractional row vectors and translate by
   `frac_to_cart(shift, M)`.

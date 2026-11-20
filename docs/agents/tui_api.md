@@ -1,7 +1,7 @@
 # Terminal-view controller API
 
 Use this API when a Python caller or local agent adapter needs to control a
-MatterVis terminal view semantically. It shares the terminal renderer and
+Atomaestro terminal view semantically. It shares the terminal renderer and
 canonical `CrystalIR`/MolCrysKit loader path with `mat-vis tui`; it is **not** an
 HTTP service and it does not create a second chemistry or render pipeline.
 
@@ -9,7 +9,7 @@ When the installed MolCrysKit exposes its chemistry contract, the loader also
 copies stable atom identities, bond order/type, entity dimensionality,
 stereochemical descriptors, CIP order, generated names, linear notation,
 crystal enantiomer composition, warnings, and evidence into immutable
-`CrystalChemistryRecords`. MatterVis does not infer any of those values from
+`CrystalChemistryRecords`. Atomaestro does not infer any of those values from
 screen distances. Older MolCrysKit releases leave `CrystalIR.chemistry` unset.
 
 ```python
@@ -55,7 +55,7 @@ front/back answers, collision scores, or a recommended camera.
 ## Stateful agent sessions
 
 `TerminalSession` keeps one controller alive while the caller chooses each next
-action from the latest observation. MatterVis executes actions but does not
+action from the latest observation. Atomaestro executes actions but does not
 provide an agent policy, action budget, answer protocol, or oracle blacklist.
 
 ```python

@@ -1,6 +1,6 @@
 # Diagnose and Select the Scene
 
-Read this before selecting a MatterVis display mode or formal-figure style.
+Read this before selecting a Atomaestro display mode or formal-figure style.
 
 ## Required diagnosis
 

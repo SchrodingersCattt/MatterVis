@@ -28,7 +28,7 @@ geometry-expanding transforms such as `repeat`, `grow_radius`,
 `by_symmetry`, or `slab`.
 
 When a transform is added through `POST /api/v2/transforms` while the
-scene is still in `formula_unit`, MatterVis now auto-promotes the
+scene is still in `formula_unit`, Atomaestro now auto-promotes the
 scene to `unit_cell` by default and echoes:
 
 ```json
@@ -106,7 +106,7 @@ includes them and a "grow" that didn't would feel broken.
 
 Bond-walks `hops` steps outward from each seed over the signed periodic
 `BondRecord` graph. For an edge `(left, right, S)`, a visible `left@q`
-reaches exactly `right@(q+S)`; MatterVis never re-perceives the bond. Use this to add a
+reaches exactly `right@(q+S)`; Atomaestro never re-perceives the bond. Use this to add a
 single coordination shell while pulling in only the chemically
 bonded atoms (vs `grow_radius` which is geometry-only).
 

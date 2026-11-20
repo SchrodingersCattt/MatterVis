@@ -85,7 +85,7 @@ position is within \(r\) of any seed home position:
 \le r.
 \]
 
-MatterVis searches a finite image grid.  For each lattice direction \(k\),
+Atomaestro searches a finite image grid.  For each lattice direction \(k\),
 with vector length \(\ell_k=\lVert M_{k,:}\rVert\), the half-width is
 
 \[
@@ -159,7 +159,7 @@ The slab transform delegates crystallographic slab generation to MolCrysKit:
 (A,M,hkl,\text{layers},\text{thickness},\text{vacuum}).
 \]
 
-MatterVis then rebuilds the scene with the returned atom coordinates and
+Atomaestro then rebuilds the scene with the returned atom coordinates and
 replaces the lattice by \(M_\mathrm{slab}\).  This is the only transform in the
 current list that is expected to replace `M`.
 
@@ -239,7 +239,7 @@ Slab:
 
 - `mat_viewer/transforms/core.py:539-597` calls
   `molcrys_kit.operations.surface.generate_topological_slab`, returns
-  MatterVis-shaped atoms, and extracts `slab_M`.
+  Atomaestro-shaped atoms, and extracts `slab_M`.
 - `mat_viewer/transforms/core.py:824-854` rebuilds the scene with both
   `cell_override` and `M_override`.
 
@@ -273,7 +273,7 @@ at input time.
 SiteRecord source/image identities. Missing records are fatal; an empty record
 list is a valid zero-bond structure.
 
-Slab generation properly stays upstream in MolCrysKit.  MatterVis should add
+Slab generation properly stays upstream in MolCrysKit.  Atomaestro should add
 passthrough parameters when needed, not duplicate slab geometry.
 
 ## Invariants

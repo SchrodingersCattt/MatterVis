@@ -42,7 +42,7 @@ goal is "don't repeat known failures", not blame.
   analysis-text panel, and leave the `polyhedron_specs` shape and
   the `find_polyhedra` invocation strictly alone.
 - **Permanent rule (already in AGENTS.md as principle "reuse before
-  reinvent"):** before adding a new concept to MatterVis, verify the
+  reinvent"):** before adding a new concept to Atomaestro, verify the
   upstream library doesn't already express it. Before wrapping an
   upstream function, verify that function isn't itself deprecated.
 
@@ -77,7 +77,7 @@ goal is "don't repeat known failures", not blame.
      internal QA didn't trip the bug. The fix landed only after a
      diagnostic that ran the full topology table on the catalog CIF
      and counted "?" / variable-cluster_size rows directly.
-  3. *Two formula counters disagreed silently.* The MatterVis loader
+  3. *Two formula counters disagreed silently.* The Atomaestro loader
      formula (`heavy_atom_count` only) said `"N1"`; the caller-side
      `_formula` (counts including H) said `"N1H8"`. Neither side
      noticed because both happened to put the cation in the same
@@ -105,7 +105,7 @@ goal is "don't repeat known failures", not blame.
     blank partial occupancy alone; otherwise ordered special-position
     atoms render as false minor disorder.
 - **Permanent rule:** when MolCrysKit already computes a quantity
-  (molecule grouping, bond graph, ordered replica, …), MatterVis must
+  (molecule grouping, bond graph, ordered replica, …), Atomaestro must
   consume it as the single source of truth. Re-deriving the same
-  thing in MatterVis "for safety" is reinvention by another name and
+  thing in Atomaestro "for safety" is reinvention by another name and
   has historically been the source of disorder + PBC bugs.

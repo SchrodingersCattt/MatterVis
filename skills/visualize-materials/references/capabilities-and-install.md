@@ -60,7 +60,7 @@ caller who explicitly wants every frontend.
 
 The CPU backend needs neither Chrome nor Kaleido. HTML needs Plotly but not
 Chrome. Only Plotly static PNG/PDF/SVG needs `[plotly-export]`; Kaleido may also
-need a working Chrome installation. MatterVis never downloads Chrome, runs
+need a working Chrome installation. Atomaestro never downloads Chrome, runs
 `apt`, or changes system libraries automatically. If an explicit Plotly static
 render fails after the Python extra is installed, preserve the original error
 and ask the caller to provide or authorize a compatible Chrome runtime. Do not

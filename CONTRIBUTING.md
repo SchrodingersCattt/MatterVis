@@ -1,4 +1,4 @@
-# Contributing to MatterVis
+# Contributing to Atomaestro
 
 ## Documentation policy
 
@@ -49,8 +49,8 @@ Write `Docs: N/A` and a one-line reason:
 
 - Pure refactors, test/CI-only changes, private helpers, and docs-only
   pull requests
-- Pinning MolCrysKit without a MatterVis behavior change (note the pin in
-  the pull request body; update docs only if MatterVis contract text
+- Pinning MolCrysKit without a Atomaestro behavior change (note the pin in
+  the pull request body; update docs only if Atomaestro contract text
   mentions the pin)
 
 ### Review bar
@@ -60,7 +60,7 @@ Missing documentation on an in-scope pull request is review **P1**.
 
 ### Render interface
 
-MatterVis is a pure render interface. Docs stay geometry, bond-graph, and
+Atomaestro is a pure render interface. Docs stay geometry, bond-graph, and
 display-mode oriented. Chemistry documentation belongs in MolCrysKit.
 
 Do not document or add chemistry heuristics (ionic/halide whitelists,
@@ -76,5 +76,5 @@ substantive `Docs: N/A`. The check does not fail the build. It does not
 judge whether in-scope docs are substantively complete; that remains
 review P1.
 
-A green CI run does not merge a pull request. MatterVis merges need
+A green CI run does not merge a pull request. Atomaestro merges need
 explicit maintainer approval.

@@ -1,6 +1,6 @@
 # State Model
 
-MatterVis currently treats the scene state dict as a catch-all object.  It
+Atomaestro currently treats the scene state dict as a catch-all object.  It
 stores user intent, derived style, cache hints, camera transport, legacy aliases,
 and REST shorthands in one namespace.  The target design splits those concerns.
 

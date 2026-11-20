@@ -1,6 +1,6 @@
 # Optional in-process frontend extensions
 
-MatterVis retains its native Dash viewer and Textual viewer. Plugins attach
+Atomaestro retains its native Dash viewer and Textual viewer. Plugins attach
 optional right-side panels to those hosts; they do not construct another
 `ViewerBackend` or replace the native renderer, controls, graph IDs or bindings.
 Importing `mat_viewer.extensions` uses only the standard library.
@@ -343,7 +343,7 @@ chemistry operations, checks, storage, or a workflow engine.
   `label`, `source` (immutable bytes), `parent`, `operation`, `provenance`, and
   `checks`. Metadata mappings accept finite JSON-shaped values, detached into
   read-only mappings and tuples recursively. Checks are caller-supplied evidence,
-  not checks performed by MatterVis. Unsupported values raise `TypeError`.
+  not checks performed by Atomaestro. Unsupported values raise `TypeError`.
 - IDs must be `RevisionId`; labels and optional operation names must be nonempty.
   Duplicate IDs and unknown/self parents raise `ValueError`. Parents must already
   exist in the same catalog, so insertion cannot create lineage cycles. There is

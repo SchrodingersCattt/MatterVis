@@ -1,4 +1,4 @@
-# MatterVis Selection API
+# Atomaestro Selection API
 
 Selection is a per-scene working set of semantic targets. It is temporary UI
 state, separate from persistent `atom_groups` and from the saved appearance

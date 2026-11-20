@@ -1,6 +1,6 @@
 # Terminal renderer backends
 
-MatterVis owns the structure, the camera, projection, visibility, selection,
+Atomaestro owns the structure, the camera, projection, visibility, selection,
 session lifecycle, and JSONL action transport. A renderer owns only the
 picture: glyphs, depth notation, labels, occlusion, and layout.
 
@@ -148,7 +148,7 @@ to the observation under `renderer`.
 Same display IR, view, config, and implementation digest produce the same
 frame bytes for a deterministic backend. Nondeterministic backends are
 rejected. Renderer choice is an experiment factor. It does not change task
-identity, action names, the scoring oracle, or the allowed tool set. MatterVis
+identity, action names, the scoring oracle, or the allowed tool set. Atomaestro
 does not own those.
 
 ## Trust boundary
@@ -174,7 +174,7 @@ into the agent observation.
 Satisfying the interface does not show that a renderer cannot infer chemistry
 from coordinates. It does not validate a benchmark, a scorer, a task split, or
 a human reading of either picture. It does not implement research harness
-issue 17, and it does not close MatterVis issue 163. Regression coverage here
+issue 17, and it does not close Atomaestro issue 163. Regression coverage here
 is byte identity of the default compositor, fail-closed selection, charset
 bounds, camera and action stability across backends, and canaries for hidden
 chemistry fields.

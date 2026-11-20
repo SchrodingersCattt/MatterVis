@@ -32,7 +32,7 @@ they resolve uniquely; otherwise use `array:NAME`, `column:NAME`, or
   in every selected source frame. Never rescale each frame independently.
 - Use `--color-range MIN MAX` only when a scientifically chosen fixed scale is
   required; values outside it clip and the explicit range skips the prescan.
-- Units are labels/provenance only. MatterVis performs no implicit conversion.
+- Units are labels/provenance only. Atomaestro performs no implicit conversion.
 
 Example:
 

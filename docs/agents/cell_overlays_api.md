@@ -1,6 +1,6 @@
 # Auxiliary cell overlays
 
-MatterVis can draw any number of backend-neutral unit-cell outlines on top of a
+Atomaestro can draw any number of backend-neutral unit-cell outlines on top of a
 canonical structure scene. This is intended for crystallographic comparisons,
 coordinate transforms, simulation boxes, and other cases where one atomistic
 scene must be related to more than one lattice frame.

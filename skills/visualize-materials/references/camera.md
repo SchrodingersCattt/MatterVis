@@ -2,7 +2,7 @@
 
 Read this only when the default view is unsuitable or panels must be compared.
 
-Periodic default: orthographic, normal to the largest lattice face. MatterVis
+Periodic default: orthographic, normal to the largest lattice face. Atomaestro
 compares the areas of `ab`, `ac`, and `bc`, chooses the corresponding
 reciprocal normal `c*`, `b*`, or `a*`, and prefers `c*` for equal-area ties.
 Use `--camera-axis` only when the evidence needs a different crystallographic

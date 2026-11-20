@@ -10,7 +10,7 @@ mat-vis render INPUT -o OUTPUT.png --backend cpu --json \
 If a documented input format fails to load, report an application failure.
 Do not convert it to another format to bypass the error.
 
-MatterVis auto-selects a periodic unit cell with visible cell edges, or a fitted
+Atomaestro auto-selects a periodic unit cell with visible cell edges, or a fitted
 nonperiodic/synthetic-cell object with no cell. Its automatic camera faces the
 largest lattice face. Do not add a camera direction, replication, or cell
 override unless the requested evidence needs one.

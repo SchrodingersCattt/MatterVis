@@ -1,6 +1,6 @@
-# MatterVis State-Machine Redesign
+# Atomaestro State-Machine Redesign
 
-This directory is the target contract for the MatterVis viewer state machine.
+This directory is the target contract for the Atomaestro viewer state machine.
 It does not describe the current implementation as acceptable; it describes
 the shape future refactors should converge on.
 

@@ -12,7 +12,7 @@ In-scope changes update stable docs in this pull request. The review bar is in C
 
 <!--
 Out of scope (pure refactors, test/CI-only, private helpers, docs-only
-pull requests, or a MolCrysKit pin with no MatterVis behavior change):
+pull requests, or a MolCrysKit pin with no Atomaestro behavior change):
 add the exemption token and a one-line reason on the docs-paths line.
 The token is Docs: N/A
 The warn-only check ignores HTML comments and the unfilled label below.

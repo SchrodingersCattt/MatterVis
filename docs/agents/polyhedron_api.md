@@ -19,7 +19,7 @@ Every spec is a flat dict with these fields:
 | `id` | string | Stable identifier; auto-generated if not provided. |
 | `name` | string | Display label for the row. Defaults to `center_species`. |
 | `center_species` | string | **Required.** Stoichiometric formula key from `species_options(structure)` (`"N"`, `"ClO4"`, `"C6N2"`, ...). |
-| `ligand_species` | string \| null | Explicit ligand formula for MolCrysKit molecule-level packing polyhedra. `null` persists but is not rendered. The Analysis panel does not offer `(auto)`. A null, blank, or stored `(auto)` ligand skips the MolCrysKit call and asks for an explicit ligand; a list that also names a real formula forwards only that formula. MatterVis does not derive ligand shells locally. |
+| `ligand_species` | string \| null | Explicit ligand formula for MolCrysKit molecule-level packing polyhedra. `null` persists but is not rendered. The Analysis panel does not offer `(auto)`. A null, blank, or stored `(auto)` ligand skips the MolCrysKit call and asks for an explicit ligand; a list that also names a real formula forwards only that formula. Atomaestro does not derive ligand shells locally. |
 | `color` | string | Hull / shell colour; six-digit hex (`#RRGGBB`). Auto-assigned from a colour-blind-friendly palette when omitted. |
 | `enabled` | bool | `false` rows persist but are skipped at render time. |
 | `enforce_enclosure` | bool | Packing-shell mode. `true` (default) keeps MolCrysKit's gap+enclosure expansion; `false` stops at the distance-gap shell. |
@@ -62,7 +62,7 @@ editable while the overlay is off, and `run_analysis` still computes
 when specs exist. The Analysis panel and `POST /api/v2/topology` also
 use registered specs independently of the overlay and row drawing flags.
 The overlay flag only controls drawing. Empty
-`polyhedron_specs` means "render no named polyhedra"; MatterVis no
+`polyhedron_specs` means "render no named polyhedra"; Atomaestro no
 longer synthesises auto-ligand rows from `topology_species_keys`.
 Non-empty explicit rows drive the overlay. A row's `enabled` flag
 decides whether that spec is drawn once the overlay is on.
@@ -97,7 +97,7 @@ For either level, center_images=false selects only the source image in the
 half-open unit cell. With center_images=true, atom-level centers follow displayed
 atom images and molecule-level centers follow complete displayed fragment
 images. Molecule-level shells are found once for the source center and translated
-as a rigid overlay; MatterVis does not re-search ligands around each display copy.
+as a rigid overlay; Atomaestro does not re-search ligands around each display copy.
 
 Render receipts report unique_source_centers, displayed_centers, and
 center_image_shifts. Periodic images increase only the displayed count.
@@ -144,7 +144,7 @@ so an analysis card can show the miss.
 A JSON `disorder_policy` on one CLI `--polyhedron` object overrides
 `--polyhedron-disorder` for that overlay. Unknown values are rejected.
 
-MatterVis forwards `disorder_policy` to MolCrysKit and does not build a second
+Atomaestro forwards `disorder_policy` to MolCrysKit and does not build a second
 shell from guessed coordinates. The centre moiety is taken from each
 realization of the indexed molecule. The displayed fragment formula selects
 which centre to draw.
@@ -322,7 +322,7 @@ contributes nothing to the trace list.
 
 Named polyhedra are computed by
 `molcrys_kit.analysis.packing_shell.find_polyhedra(level="molecule")`.
-MatterVis passes the spec's compact formulas (`"C6N2"`, `"ClO4"`, ...)
+Atomaestro passes the spec's compact formulas (`"C6N2"`, `"ClO4"`, ...)
 as MolCrysKit moiety strings (`"C6 N2"`, `"Cl O4"`, ...), the matched
 MolCrysKit molecule index as `central_indices`, and the state `cutoff`
 as the MolCrysKit `cutoff=` kwarg. **On `level="molecule"` (per
@@ -352,7 +352,7 @@ flowchart LR
   G --> R["record fields:<br/>mode = 'gap+enclosure'<br/>search_cutoff = state cutoff<br/>hard_cutoff = null"]
 ```
 
-MatterVis only applies display-coordinate offsets and renderer colours
+Atomaestro only applies display-coordinate offsets and renderer colours
 to the returned `shell_coords`; it does not maintain a separate
 fragment-centroid neighbour search.
 

@@ -1,10 +1,10 @@
-# MatterVis — Agent / AI-Coding Guidelines
+# Atomaestro — Agent / AI-Coding Guidelines
 
 Conventions and constraints for AI coding agents *modifying* this repo.
 Design rationale and implementation details live in source-code docstrings;
 read the relevant module before modifying it.
 
-> **For AI agents that want to *call* MatterVis** (not modify it),
+> **For AI agents that want to *call* Atomaestro** (not modify it),
 > see [Caller API Contracts](docs/agents/) instead.
 
 ---
@@ -92,7 +92,7 @@ paper/                 figure-generation scripts for publications
    readable defaults. Overrides must flow through explicit call/state data.
 4. **Reuse before reinventing.** Before adding geometry, chemistry, topology,
    PBC, shape, disorder, or slab logic, check upstream `molcrys_kit` and
-   existing MatterVis modules for the current primitive.
+   existing Atomaestro modules for the current primitive.
 5. **Respect ownership boundaries.** Browser code stays in `frontend/`,
    service code in `api/` or `app/`, reusable library code in `mat_viewer/`,
    and chemistry semantics in `molcrys_kit`.
@@ -115,7 +115,7 @@ paper/                 figure-generation scripts for publications
 
 `molcrys_kit` owns chemistry: molecule grouping, PBC unwrapping, packing
 shells, shape classification, disorder resolution, slabs, and related
-provenance. MatterVis owns loading adapters, scene state, rendering, UI,
+provenance. Atomaestro owns loading adapters, scene state, rendering, UI,
 and service surfaces.
 
 When upstream already computes a chemistry quantity, consume it as the
@@ -147,11 +147,11 @@ reason):
 
 - Pure refactors, test/CI-only changes, private helpers, and docs-only
   pull requests
-- Pinning MolCrysKit without a MatterVis behavior change (note the pin
-  in the pull request body; update docs only if MatterVis contract text
+- Pinning MolCrysKit without a Atomaestro behavior change (note the pin
+  in the pull request body; update docs only if Atomaestro contract text
   mentions the pin)
 
-MatterVis is a pure render interface. Docs stay geometry, bond-graph,
+Atomaestro is a pure render interface. Docs stay geometry, bond-graph,
 and display-mode oriented. Chemistry documentation belongs in MolCrysKit.
 Do not document or add chemistry heuristics (ionic/halide whitelists,
 `is_ionic_solid` gates) in the renderer.
