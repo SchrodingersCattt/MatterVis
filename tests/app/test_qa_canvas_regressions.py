@@ -169,6 +169,58 @@ def test_speck_camera_is_not_treated_as_framed(tmp_path: Path):
         backend.close()
 
 
+def test_ionic_default_still_registers_a_coordination_spec(tmp_path: Path):
+    """The fast ORTEP test clears this spec. The registration must remain."""
+
+    backend = _backend(tmp_path)
+    try:
+        state = backend.get_state()
+        specs = state["polyhedron_specs"]
+        assert len(specs) == 1
+        spec = specs[0]
+        assert spec["enabled"] is True
+        assert spec["id"] == "ionic-coordination"
+        assert spec["center_species"]
+        assert spec["ligand_species"]
+        assert spec["center_species"] != spec["ligand_species"]
+        assert state["display_mode"] == "unit_cell"
+        assert state["topology_enabled"] is True
+    finally:
+        backend.close()
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(90)
+def test_ionic_coordination_shell_is_classified_with_the_default_spec(tmp_path: Path):
+    """Shell classification stays in the full CI job.
+
+    ``test_ortep_style_does_not_change_display_scope_or_leave_a_caption``
+    clears ``polyhedron_specs`` because the shape match is too slow for
+    the fast job. This test calls ``figure_for_state`` with the default
+    spec still enabled.
+    """
+
+    backend = _backend(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        state = backend.get_state(scene_id)
+        spec = state["polyhedron_specs"][0]
+        assert spec["enabled"] is True
+        fig, topology = backend.figure_for_state(state)
+        assert fig.data
+        assert topology is not None
+        results = topology.get("spec_results") or []
+        assert results
+        match = next(item for item in results if item.get("spec_id") == spec["id"])
+        overlays = match.get("overlays") or []
+        assert overlays
+        assert any(len(item.get("shell_coords") or []) >= 4 for item in overlays)
+        assert backend.get_state(scene_id)["display_mode"] == "unit_cell"
+        assert backend.get_state(scene_id)["polyhedron_specs"][0]["id"] == spec["id"]
+    finally:
+        backend.close()
+
+
 def test_ortep_style_does_not_change_display_scope_or_leave_a_caption(tmp_path: Path):
     backend = _backend(tmp_path)
     try:
