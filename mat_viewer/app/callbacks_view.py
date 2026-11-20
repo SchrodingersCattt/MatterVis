@@ -75,8 +75,7 @@ def register_view_callbacks(app, backend):
             if not kind:
                 return no_update
             if kind == UpdateKind.CAMERA.value:
-                payload["camera"] = copy.deepcopy(state.get("camera"))
-                payload["command"] = "state-confirmed"
+                payload.update(confirmed_camera_fields(backend, state))
             return make_update(
                 state, operation=kind, payload=payload, reason="state-confirmed"
             ).to_dict()
@@ -87,7 +86,7 @@ def register_view_callbacks(app, backend):
             update = make_update(
                 state,
                 before=before,
-                payload={**payload, "camera": copy.deepcopy(state.get("camera")), "command": "state-confirmed"},
+                payload={**payload, **confirmed_camera_fields(backend, state)},
                 reason="state-confirmed",
             )
         return update.to_dict()

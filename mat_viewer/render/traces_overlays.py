@@ -358,6 +358,11 @@ def _supercell_counts(scene: dict) -> tuple[int, int, int]:
     return na, nb, nc
 
 
+# Cylinder radius of the unit-cell edge. Fit frames this outer surface,
+# not the corner point the cylinder is centered on.
+UNIT_CELL_TUBE_RADIUS_A = 0.04
+
+
 def _unit_cell_traces(scene: dict, style: dict):
     if scene.get("M") is None or style.get("display_mode") != "unit_cell":
         return []
@@ -386,7 +391,7 @@ def _unit_cell_traces(scene: dict, style: dict):
     segments = [(corners[s], corners[e]) for s, e in edges]
     trace = _segment_cylinder_trace(
         segments,
-        radius=0.04,
+        radius=UNIT_CELL_TUBE_RADIUS_A,
         color="#777777",
         opacity=0.8,
         sides=4,

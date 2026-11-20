@@ -97,6 +97,8 @@ STORED_STATE_KEYS = frozenset(
         "fast_rendering",
         "camera",
         "camera_revision",
+        "camera_aspect_scale",
+        "fit_axis_ranges",
     }
 )
 DERIVED_STATE_KEYS = frozenset(

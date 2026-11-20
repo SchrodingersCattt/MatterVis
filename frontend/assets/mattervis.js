@@ -968,6 +968,32 @@
               statusNode.textContent = "Rendering structure…";
               statusNode.setAttribute("data-level", "busy");
             }
+            if (layout && layout.scene && render && render.scene_id && window.__mvFittedFrames) {
+              const superseded = window.MatterVisViewCamera && typeof window.MatterVisViewCamera.noteFigureFrame === "function" && window.MatterVisViewCamera.noteFigureFrame(render, layout);
+              const fitted = window.__mvFittedFrames[String(render.scene_id)];
+              const identityOk = !window.MatterVisViewCamera || typeof window.MatterVisViewCamera.fittedIdentityMatches !== "function" || window.MatterVisViewCamera.fittedIdentityMatches(fitted, render);
+              const fittedAspect = identityOk && fitted && fitted.aspectratio;
+              if (!superseded && fittedAspect && Number.isFinite(Number(fittedAspect.x))) {
+                /* A figure built before this fit, or a scene update that
+                 * recomputes the ratio from the previous frame, must not
+                 * replace the fitted aspect or the fitted data box. */
+                layout.scene.aspectmode = "manual";
+                layout.scene.aspectratio = {
+                  x: Number(fittedAspect.x),
+                  y: Number(fittedAspect.y),
+                  z: Number(fittedAspect.z),
+                };
+                ["x", "y", "z"].forEach(function (axis) {
+                  const pair = fitted.ranges && fitted.ranges[axis];
+                  if (!pair || pair.length < 2) return;
+                  const key = axis + "axis";
+                  layout.scene[key] = Object.assign({}, layout.scene[key] || {}, {
+                    range: [Number(pair[0]), Number(pair[1])],
+                    autorange: false,
+                  });
+                });
+              }
+            }
             if (layout && layout.scene) {
               gd.__mvCanonicalViewport = {
                 aspectmode: layout.scene.aspectmode || null,
@@ -1025,6 +1051,11 @@
                   ? adoptMountedSceneBox(gd, next && next.scene)
                   : Promise.resolve(result);
                 return Promise.resolve(afterBox).then(function () {
+                  const cameraApi = window.MatterVisViewCamera;
+                  const fittedRestore = cameraApi && typeof cameraApi.reapplyFittedFrame === "function"
+                    ? cameraApi.reapplyFittedFrame(gd)
+                    : null;
+                  return Promise.resolve(fittedRestore).then(function () {
                   const sceneId = render && render.scene_id ? String(render.scene_id) : "";
                   const painted = sceneId
                     ? applyServerCamera(sceneId)
@@ -1036,6 +1067,7 @@
                       gd.__mvSceneCameraOwner = String(render.scene_id || "");
                     }
                     return result;
+                  });
                   });
                 });
               });
@@ -1064,12 +1096,15 @@
             const camera = window.MatterVisViewCamera;
             if (!frameApplied || !frameCameraIsStale(render, gd) || !latest || !camera ||
                 typeof camera.applyAsync !== "function") return result;
+            const fittedNow = window.__mvFittedFrames && window.__mvFittedFrames[String(render.scene_id)];
             return camera.applyAsync(latest.snapshot, {
               scene_id: render.scene_id,
               scene_generation: render.scene_generation,
               camera_version: Number(gd.__mvCameraRevision),
               server_started_at: gd.__mvCameraRevisionEpoch,
               command: latest.command,
+              aspectratio: fittedNow && fittedNow.aspectratio || null,
+              ranges: fittedNow && fittedNow.ranges || null,
             }).then(function () { return result; }, function (error) {
               if (/stale/.test(String(error && error.message || error))) return result;
               throw error;
@@ -2065,10 +2100,25 @@
     const tool = event.target && event.target.closest && event.target.closest("#canvas-view-reset, #canvas-view-fit");
     if (!tool) return;
     const action = tool.id === "canvas-view-fit" ? "fit" : "reset";
+    const plot = document.querySelector("#crystal-graph .js-plotly-plot");
+    const canvas = plot && plot.querySelector("canvas");
+    const rect = (canvas || plot) && (canvas || plot).getBoundingClientRect ? (canvas || plot).getBoundingClientRect() : null;
+    const bar = document.getElementById("mv-status-bar");
+    const controls = document.getElementById("canvas-view-fit");
+    const limits = [rect ? rect.bottom : 0];
+    if (bar && bar.getBoundingClientRect) limits.push(bar.getBoundingClientRect().top);
+    if (controls && controls.getBoundingClientRect) limits.push(controls.getBoundingClientRect().top);
+    const visibleHeight = rect ? Math.max(1, Math.min.apply(null, limits) - rect.top) : undefined;
     fetch("/api/v2/camera/action", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({action: action, scene_id: currentSceneId()}),
+      body: JSON.stringify({
+        action: action,
+        scene_id: currentSceneId(),
+        width: rect ? rect.width : undefined,
+        height: rect ? rect.height : undefined,
+        visible_height: visibleHeight,
+      }),
     }).catch(function () {});
   });
 
