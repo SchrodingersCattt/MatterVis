@@ -36,6 +36,12 @@ def test_hover_and_context_menu_have_no_server_coordinate_fallback():
     assert "mv-status-busy" in select
     assert "mv-render-status" in select
     assert "FRAME_SETTLE_MS" in select
+    assert "selectionAttemptCurrent(token, scene, generation)" in select
+    assert "__mvGraphGeneration" not in select
+    pointerdown = controller[controller.index('addEventListener("pointerdown"'):controller.index("function select(")]
+    assert "generation:currentSceneGeneration()" in pointerdown
+    assert "attempt:selectionAttemptToken" in pointerdown
+    assert "select(e, gesture)" in pointerup
 
 
 def test_appearance_undo_rejects_obsolete_target_revision():

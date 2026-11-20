@@ -59,9 +59,13 @@ All endpoints live under `/api/v2` and accept optional `scene_id`.
   the exact target under the pointer. `Esc` clears the set and closes the
   context menu. A plain click on empty scene space clears every target kind.
   A `Shift`/`Ctrl`/`Cmd` click that does not hit a target leaves the set
-  unchanged. A click that arrives while a frame is still being applied waits
+  unchanged.   A click that arrives while a frame is still being applied waits
   until that frame settles before the pointer is treated as empty space, so
-  the replacement cannot erase the set the gesture is editing.
+  the replacement cannot erase the set the gesture is editing. The wait is
+  bound to the scene id, the layout `scene_generation`, and the pointer
+  attempt captured at pointerdown. A newer pointer, another scene, or a new
+  scene generation cancels it and does not clear the set. The graph
+  generation that advances while the frame settles does not cancel it.
 - A browser gesture carries a numeric `ts`. An older gesture does not
   overwrite a newer one for the same scene. Callers that omit `ts` still
   commit, which is how REST selection edits behave.
