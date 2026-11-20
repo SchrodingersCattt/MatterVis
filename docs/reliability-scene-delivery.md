@@ -66,7 +66,11 @@ must not change scene B, and a stale revision must not replace a newer one.
   the `#ack` suffix of `scene.uirevision` with the pose. Plotly keeps the
   previous WebGL camera while the published token is unchanged, and a
   drag does not advance `camera_revision`, so the token has to change
-  with the eye and center. A store whose
+  with the eye and center. The orbit controller stores distance as a log
+  radius and rebuilds `camera.eye` on the next matrix recalc, so the
+  acknowledged pose is written with `lookAt` and recalculated after the
+  relayout. A wheel zoom does the same after its eye relayout, which is
+  how a zoom survives a tab return without a new camera revision. A store whose
   revision is older than the mounted frame is ignored. Reset, align,
   projection, and a refit that advances the revision still win. A
   camera that leaves the scene, including a unit-cell box with a corner
@@ -125,7 +129,10 @@ must not change scene B, and a stale revision must not replace a newer one.
   ranges is applied as two steps on the same per-graph FIFO task. The
   geometry and ranges are drawn while the live projection is still in
   place, and the requested projection is applied only after that draw
-  resolves. Plotly's gl3d scene redraws on a projection change before it
+  resolves. That projection relayout still redraws the previous glplot
+  before `dataScale` changes, so the frame then relayouts the intended
+  axis ranges alone and rebuilds the clip box with the projection held
+  still. Plotly's gl3d scene redraws on a projection change before it
   updates `dataScale`; doing both in one `Plotly.react` lets that redraw
   write the previous axis ranges back and clip the new meshes. Same-
   projection frames, camera moves, and a projection change whose axis

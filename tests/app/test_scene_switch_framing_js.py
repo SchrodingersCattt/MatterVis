@@ -129,9 +129,11 @@ function relayout(target, patch) {
   const adoptsBox = patch['scene.xaxis.range'] || patch['scene.camera'];
   if (adoptsBox) {
     boxRelayouts.push(JSON.parse(JSON.stringify(patch)));
-    shown.range = patch['scene.xaxis.range'][0];
-    shown.projection = patch['scene.camera'].projection.type;
-    shown.eye = patch['scene.camera'].eye.x;
+    if (patch['scene.xaxis.range']) shown.range = patch['scene.xaxis.range'][0];
+    if (patch['scene.camera']) {
+      shown.projection = patch['scene.camera'].projection.type;
+      shown.eye = patch['scene.camera'].eye.x;
+    }
     syncLive({scene: {
       xaxis: {range: patch['scene.xaxis.range']},
       yaxis: {range: patch['scene.yaxis.range']},
@@ -175,13 +177,16 @@ await sandbox.window.Plotly.react(gd, next);
 assert.equal(projectionRelayouts.length, 1, 'projection change did not get its own follow-up');
 assert.deepEqual(Object.keys(projectionRelayouts[0]), ['scene.camera.projection.type']);
 assert.equal(projectionRelayouts[0]['scene.camera.projection.type'], 'orthographic');
-assert.equal(boxRelayouts.length, 0, 'projection change also rewrote ranges in the same relayout');
+assert.equal(boxRelayouts.length, 1, 'projection follow-up did not rebuild the axis ranges');
+assert.equal(boxRelayouts[0]['scene.camera'], undefined, 'range repair included the camera');
+assert.equal(boxRelayouts[0]['scene.xaxis.range'][0], -1.2);
 assert.equal(gd.layout.scene.xaxis.range[0], -1.2);
 assert.equal(shown.range, -1.2, 'visible axis box is still the previous scene');
 assert.equal(shown.projection, 'orthographic', 'visible camera kept the previous projection');
 assert.equal(events.some((event) => event.name === 'plotly_relayout'), false, 'projection follow-up was reported as a pointer gesture');
 const same = figure('scene-b', 1.2, 'orthographic');
 same.layout.scene.camera.eye.x = 9;
+boxRelayouts.length = 0;
 await sandbox.window.Plotly.react(gd, same);
 assert.equal(boxRelayouts.length, 0, 'same scene replaced the live camera with a box relayout');
 assert.equal(projectionRelayouts.length, 1, 'same scene issued another projection relayout');

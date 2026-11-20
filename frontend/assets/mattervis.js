@@ -864,6 +864,24 @@
       if (!axisRangesDiffer(finiteAxisRanges(currentScene), finiteAxisRanges(layout.scene))) return null;
       return {liveType: liveType, incomingType: incomingType};
     }
+    /* The projection follow-up's setViewport redraws the previous glplot
+     * before dataScale changes and can write that clip back into the
+     * axis ranges. Putting the intended ranges back, without the
+     * projection, runs Scene.plot while the projection stays put so
+     * the clip box is rebuilt from those ranges. */
+    function axisRangeRepairPatch(sceneLayout) {
+      if (!sceneLayout) return null;
+      const patch = {};
+      ["x", "y", "z"].forEach(function (axis) {
+        const pair = sceneLayout[axis + "axis"] && sceneLayout[axis + "axis"].range;
+        if (!Array.isArray(pair) || pair.length < 2) return;
+        const lo = Number(pair[0]);
+        const hi = Number(pair[1]);
+        if (!Number.isFinite(lo) || !Number.isFinite(hi)) return;
+        patch["scene." + axis + "axis.range"] = [lo, hi];
+      });
+      return Object.keys(patch).length === 3 ? patch : null;
+    }
     function layoutWithProjection(layout, projectionType) {
       const scene = Object.assign({}, layout.scene);
       ["xaxis", "yaxis", "zaxis"].forEach(function (name) {
@@ -1032,6 +1050,15 @@
       }
       return Promise.resolve(pending).then(function (value) {
         clear();
+        /* A dotted eye relayout can leave the orbit radius at the
+         * previous distance. The controller eye is what a later read
+         * and the next tab return paint. */
+        const cameraApi = window.MatterVisViewCamera;
+        if (cameraApi && typeof cameraApi.commitControllerPose === "function") {
+          const scene = graph._fullLayout && graph._fullLayout.scene && graph._fullLayout.scene._scene;
+          const controller = scene && (scene.camera || (scene.glplot && scene.glplot.camera));
+          cameraApi.commitControllerPose(controller, ack.camera);
+        }
         return value;
       }, function (err) {
         clear();
@@ -1361,8 +1388,39 @@
                 }
                 return Promise.resolve(follow).then(function () {
                   releaseFollow();
-                  projectionSettled = true;
-                  return result;
+                  const repair = axisRangeRepairPatch(next && next.scene);
+                  if (!repair) {
+                    projectionSettled = true;
+                    return result;
+                  }
+                  /* A range event here is the frame finishing its own box,
+                   * not a pointer gesture for Dash to store. */
+                  const releaseRepair = suppressCameraCapture(gd);
+                  const emit = gd.emit;
+                  if (typeof emit === "function") {
+                    gd.emit = function (eventName) {
+                      if (eventName === "plotly_relayout") return gd;
+                      return emit.apply(this, arguments);
+                    };
+                  }
+                  const restoreEmit = function () {
+                    if (typeof emit === "function" && gd.emit !== emit) gd.emit = emit;
+                    releaseRepair();
+                  };
+                  let repaired;
+                  try { repaired = rawRelayout.call(window.Plotly, gd, repair); }
+                  catch (err) {
+                    restoreEmit();
+                    throw err;
+                  }
+                  return Promise.resolve(repaired).then(function () {
+                    restoreEmit();
+                    projectionSettled = true;
+                    return result;
+                  }, function (err) {
+                    restoreEmit();
+                    throw err;
+                  });
                 }, function (err) {
                   releaseFollow();
                   throw err;

@@ -153,8 +153,10 @@ function frame(sceneId, ranges, projection) {
   assert.equal(reacts[0].coupled, false, 'one react changed projection and axis ranges together');
   assert.equal(reacts[0].projection, 'orthographic', 'geometry react did not keep the live projection');
   assert.deepEqual(reacts[0].ranges, wide);
-  assert.equal(relayouts.length, 1, 'requested projection was not applied');
+  assert.equal(relayouts.length, 2, 'projection was not followed by a range repair');
   assert.equal(relayouts[0]['scene.camera.projection.type'], 'perspective');
+  assert.equal(JSON.stringify(relayouts[1]['scene.xaxis.range']), JSON.stringify(wide[0]));
+  assert.equal(relayouts[1]['scene.camera.projection.type'], undefined, 'range repair changed the projection again');
   assert.equal(queueRunningAtRelayout, true, 'projection relayout left the full-frame task');
   assert.equal(allowFlagAtRelayout, false, 'projection relayout reentered the wrapped relayout');
   assert.equal(gd._fullLayout.scene._scene.camera._ortho, false);
@@ -366,8 +368,10 @@ function cameraEvents() {
   await plot.react(omitted, [], omittedLayout);
   assert.equal(reacts.length, 1, 'an omitted projection shared the geometry react');
   assert.equal(reacts[0].projection, 'orthographic', 'geometry react did not keep the live orthographic camera');
-  assert.equal(relayouts.length, 1, 'omitted projection was not applied as perspective');
+  assert.equal(relayouts.length, 2, 'omitted projection was not applied as perspective');
   assert.equal(relayouts[0]['scene.camera.projection.type'], 'perspective');
+  assert.equal(JSON.stringify(relayouts[1]['scene.zaxis.range']), JSON.stringify(wide[2]));
+  assert.equal(relayouts[1]['scene.camera.projection.type'], undefined);
   assert.equal(omitted._fullLayout.scene._scene.camera._ortho, false);
   assert.ok(omitted.__mvSceneCamera, 'the incoming camera was dropped');
   assert.equal(omitted.__mvSceneCamera.projection, undefined, 'the stored camera invented a projection');

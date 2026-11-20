@@ -433,6 +433,28 @@
         });
       }
     }
+    /* Layout ranges can already name the fit while glplot.bounds still
+     * clips with the previous dataScale. A ranges relayout with the
+     * projection left alone rebuilds that clip box. */
+    if (!mismatch && fitted.ranges && plotlyPrivateStateAllowed()) {
+      var plotForBounds = scene._scene && scene._scene.glplot;
+      var scale = scene._scene && scene._scene.dataScale;
+      var bounds = plotForBounds && plotForBounds.bounds;
+      if (bounds && bounds[0] && bounds[1] && scale) {
+        mismatch = ["x", "y", "z"].some(function (axis, index) {
+          var pair = fitted.ranges[axis];
+          var factor = Number(scale[index]);
+          if (!pair || !Number.isFinite(factor) || factor === 0) return false;
+          var wantMin = Number(pair[0]) * factor;
+          var wantMax = Number(pair[1]) * factor;
+          var span = Math.max(Math.abs(wantMax - wantMin), 1e-6);
+          var haveMin = Number(bounds[0][index]);
+          var haveMax = Number(bounds[1][index]);
+          if (!Number.isFinite(haveMin) || !Number.isFinite(haveMax)) return false;
+          return Math.abs(haveMin - wantMin) / span > 0.02 || Math.abs(haveMax - wantMax) / span > 0.02;
+        });
+      }
+    }
     if (!mismatch && !aspectMismatch) return Promise.resolve();
     var patch = {};
     if (mismatch) {
@@ -470,6 +492,33 @@
     /* Fitted ranges are restored inside the frame task. Wrapping
      * Plotly.react here would relayout again after that task moved on. */
     root.__mvFittedRangeGuard = true;
+  }
+  function commitControllerPose(controller, camera) {
+    /* Plotly's orbit camera stores distance as a log radius and
+     * rebuilds .eye only when the view matrix is recalculated.
+     * lookAt recalculates the previous pose first, so the new
+     * distance is visible only after a second recalc. */
+    if (!controller || typeof controller.lookAt !== "function" || !camera) return;
+    function vec(value) {
+      if (!value) return null;
+      var x = Number(value.x !== undefined && value.x !== null ? value.x : value[0]);
+      var y = Number(value.y !== undefined && value.y !== null ? value.y : value[1]);
+      var z = Number(value.z !== undefined && value.z !== null ? value.z : value[2]);
+      return [x, y, z].every(Number.isFinite) ? [x, y, z] : null;
+    }
+    var eye = vec(camera.eye);
+    var center = vec(camera.center);
+    var up = vec(camera.up);
+    if (!eye || !center || !up) return;
+    try { controller.lookAt(eye, center, up); }
+    catch (_) { return; }
+    var view = controller.view;
+    if (view && typeof view.recalcMatrix === "function") {
+      try {
+        var when = typeof view.lastT === "function" ? view.lastT() : 0;
+        view.recalcMatrix(when);
+      } catch (_) {}
+    }
   }
   function installWheelZoom(gd) {
     /* Plotly's orthographic wheel handler multiplies the scene aspect
@@ -523,12 +572,19 @@
         var named = projectionType(actualCamera(graph));
         if (named) projection = named;
       }
+      var zoomPose = {
+        eye: {x: next[0], y: next[1], z: next[2]},
+        center: {x: axisComponent(center, 0, "x"), y: axisComponent(center, 1, "y"), z: axisComponent(center, 2, "z")},
+        up: {x: axisComponent(up, 0, "x"), y: axisComponent(up, 1, "y"), z: axisComponent(up, 2, "z")},
+      };
       Promise.resolve(root.Plotly.relayout(graph, {
-        "scene.camera.eye": {x: next[0], y: next[1], z: next[2]},
-        "scene.camera.center": {x: axisComponent(center, 0, "x"), y: axisComponent(center, 1, "y"), z: axisComponent(center, 2, "z")},
-        "scene.camera.up": {x: axisComponent(up, 0, "x"), y: axisComponent(up, 1, "y"), z: axisComponent(up, 2, "z")},
+        "scene.camera.eye": zoomPose.eye,
+        "scene.camera.center": zoomPose.center,
+        "scene.camera.up": zoomPose.up,
         "scene.camera.projection.type": projection,
-      })).catch(function () {});
+      })).then(function () {
+        commitControllerPose(controller, zoomPose);
+      }, function () {});
     }, {capture: true, passive: false});
   }
   var resizeTimer = null;
@@ -1292,6 +1348,7 @@
       commitFittedAspect(gd);
       return restoreFittedRanges(gd);
     },
+    commitControllerPose: commitControllerPose,
     fittedIdentityMatches: fittedIdentityMatches,
     noteFigureFrame: noteFigureFrame,
   };
