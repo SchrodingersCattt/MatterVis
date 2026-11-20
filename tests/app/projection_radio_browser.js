@@ -126,12 +126,9 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
     }, {states, expected});
     await clickTab(page, 'DAP-4');
     await waitRadio(sceneA, expected[0]);
-    // Dash controls these radio inputs asynchronously. Assert their final
-    // checked state and server projection together in waitRadio, rather
-    // than requiring Playwright check() to observe the intermediate DOM.
-    await page.locator("#view-projection input[value='perspective']").click();
+    await page.locator("#view-projection input[value='perspective']").check();
     await waitRadio(sceneA, 'perspective');
-    await page.locator("#view-projection input[value='orthographic']").click();
+    await page.locator("#view-projection input[value='orthographic']").check();
     await waitRadio(sceneA, 'orthographic');
     await clickTab(page, 'ionic_nacl');
     await waitRadio(sceneB, expected[1]);
@@ -154,14 +151,14 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
     const releaseBeforeClick = await holdStoreResponse({...sceneB, projection: 'perspective'},
       'delayed-before-native-click');
     try {
-      await page.locator("#view-projection input[value='orthographic']").click();
+      await page.locator("#view-projection input[value='orthographic']").check();
       await waitRadio(sceneB, 'orthographic');
       await releaseBeforeClick();
       await waitRadio(sceneB, 'orthographic');
     } finally {
       await page.evaluate(() => window.dash_clientside.set_props('agent-state-poll', {disabled: false}));
     }
-    await page.locator("#view-projection input[value='perspective']").click();
+    await page.locator("#view-projection input[value='perspective']").check();
     await waitRadio(sceneB, 'perspective');
 
     await clickTab(page, 'DAP-4');
