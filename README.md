@@ -190,7 +190,7 @@ The main subcommands cover:
 |---|---|
 | **Understanding the design** | [Architecture](docs/architecture.md) |
 | **Using the library** | [API Reference](docs/agents/) · [CLI Reference](docs/cli.md) |
-| **AI agent (calling MatterVis)** | [Caller API Contracts](docs/agents/) |
+| **AI agent (calling Atomestro)** | [Caller API Contracts](docs/agents/) |
 | **AI agent (modifying code)** | [AGENTS.md](AGENTS.md) · [Developer Notes](docs/dev-notes.md) |
 | **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Topology scores** | [Scores Reference](docs/scores.md) |
