@@ -69,22 +69,33 @@ must not change scene B, and a stale revision must not replace a newer one.
   outside the frustum, is still replaced by `refit_scene_camera` before
   that pose is what the store paints. Every writer of
   `camera-state-store` uses `allow_duplicate`.
-- A fitted ratio is restored after the frame when `glplot.getAspectratio()`
-  still has the previous ratio, even if `_fullLayout` already shows the
-  fitted ratio. The layout comparison alone leaves the previous ratio on
-  the gl scene.
-- A complete frame whose scene id differs from the mounted scene is followed
-  by a relayout of that figure's camera, axis ranges, aspect mode, aspect
-  ratio, and `uirevision`. `Plotly.react` writes those values onto the
-  layout, and the gl3d scene keeps drawing in the previous axis box until a
-  later relayout rebuilds it. A width or height change is one such rebuild,
-  so the new geometry can sit in the previous box until the plot is resized.
-  The follow-up relayout is not a pointer gesture and is not stored as a
-  drag. A later frame for the same scene still keeps the live camera when
-  its `uirevision` matches. The projection control shows the selected
-  scene's stored projection; the canvas uses the camera on that scene's
-  figure. A failed scene-box relayout rejects the frame and does not mark
-  that frame delivered.
+- One per-graph FIFO task owns a complete frame and the camera writes that
+  belong to it. The projection follow-up, a fitted-range restore, and the
+  acknowledged camera from `camera-state-store` run inside that task, in
+  that order. The delivery key is recorded only after those steps resolve.
+  A rejection leaves the key unset. Those writes use a depth counter on
+  the graph (`__mvOwnedRelayoutDepth`), not a window-wide permission flag.
+  The acknowledged camera is checked again immediately before it is
+  written: scene id, scene generation, camera revision, and server session.
+  A pose stored for scene A is not applied after scene B is mounted.
+- A fitted axis box is remembered with the scene generation and server
+  session that produced it. A later generation, or a restarted session
+  that reused the scene id, does not inherit that box. The fit is stamped
+  onto the layout before `Plotly.react` and restored from the same frame
+  task. It does not wrap `Plotly.react` on its own.
+- `MatterVisSceneBox.adopt` relayouts a figure's camera, axis ranges,
+  aspect mode, aspect ratio, and `uirevision` when a caller asks for that
+  box. A rejected or thrown relayout rejects the adoption. It does not
+  resolve as a delivered frame. The frame task does not issue that
+  relayout in addition to the projection follow-up: one relayout that
+  writes new ranges and a new projection together is the clip the split
+  exists to avoid. A later frame for the same scene still keeps the live
+  camera when its `uirevision` matches.
+- Private gl3d fields (`controller._ortho`, `glplot`, `scene.traces`) are
+  read only when `Plotly.version` is missing or exactly `4.1.1`. Any other
+  published version skips those reads, records `plotly-private-skipped`,
+  and does not split a projection change from those fields. Test doubles
+  omit the version and still use the fields they installed.
 - The browser relayout gate drops a camera gesture whose scene is not the
   mounted canvas. It restores the mounted scene's own saved camera only when
   that camera belongs to the mounted scene. A settled gesture does not copy
@@ -101,6 +112,49 @@ must not change scene B, and a stale revision must not replace a newer one.
   repair. A later relayout reads the transient revision only when its scope
   and session match the mounted figure. A revision left by another scene, or
   by a restarted session that reused the generation number, is not that clock.
+- A full frame that changes both the gl3d projection and the scene axis
+  ranges is applied as two steps on the same per-graph FIFO task. The
+  geometry and ranges are drawn while the live projection is still in
+  place, and the requested projection is applied only after that draw
+  resolves. Plotly's gl3d scene redraws on a projection change before it
+  updates `dataScale`; doing both in one `Plotly.react` lets that redraw
+  write the previous axis ranges back and clip the new meshes. Same-
+  projection frames, camera moves, and a projection change whose axis
+  ranges already match stay on the single-call path. The live projection
+  is the gl camera controller's orthographic flag; an incoming layout
+  that omits `camera.projection` is perspective, which is Plotly's own
+  default. The intermediate frame does not emit a camera relayout, and
+  that suppression is removed if the geometry promise rejects. The
+  follow-up projection is skipped when the selected scene, its
+  generation, or the server epoch changed while the geometry call was
+  in flight. The mounted graph generation still advances after that
+  geometry draw. The delivery key and saved scene camera are recorded
+  only after the projection step settles. A projection change replaces
+  the WebGL canvas, so the context-loss listener is attached again on
+  the canvas the frame left mounted. It is also attached again after a
+  camera relayout, because that relayout can replace the canvas.
+- A disorder-preview update that has no outline traces to add or remove
+  does not read or restore the camera. When outlines do change, the
+  camera is restored only inside the render queue, and only when the
+  scene, graph generation, scene object, and orthographic flag still
+  match. The restore uses dotted eye, center, and up. It does not call
+  `Scene.setViewport`.   A whole `scene.camera` relayout, including Plotly's string-and-value
+  form, is expanded to the dotted fields that were actually supplied.
+  An eye, center, or projection can be sent alone. An omitted projection
+  is not filled in. Dotted keys already on the update win. A payload
+  with no usable camera field is left unchanged. A frame whose visible
+  3D traces have an empty gl3d renderer is not marked delivered. One
+  redraw, with a new `datarevision`, is attempted. If the renderer is
+  still empty the frame promise rejects, the error banner stays up, and
+  the same frame can be submitted again. A later successful draw clears
+  that banner. An owned-camera restore waiting in the render queue is
+  dropped if the scene, generation, or camera revision changed before it
+  runs. An external relayout that arrives while a frame is drawing waits
+  behind that frame. A frame that is only waiting for the pointer to end
+  does not block camera relayouts. Canvas replacements and empty-renderer checks
+  are kept in a 20-entry diagnostic ring. Intentionally hidden traces
+  and non-3D traces are not treated as a missing 3D model. Plotly binary
+  `{dtype, bdata}` coordinates count as geometry.
 - A width/height relayout is a full gl3d replot. During an in-progress drag
   it puts the live drag camera back only when the gesture's scene id and
   scene generation still match the mounted figure, and, when both the gesture

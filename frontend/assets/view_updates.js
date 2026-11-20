@@ -537,7 +537,10 @@
         reconcileParked(gd);
         return "figure";
       }, function (error) {
-        if (root.MatterVisViewCamera && typeof root.MatterVisViewCamera.reportStatus === "function") {
+        var doc = root.document || (typeof document !== "undefined" ? document : null);
+        var node = doc && doc.getElementById && doc.getElementById("mv-render-status");
+        var preserved = node && node.getAttribute && node.getAttribute("data-level") === "error" && node.textContent;
+        if (!preserved && root.MatterVisViewCamera && typeof root.MatterVisViewCamera.reportStatus === "function") {
           root.MatterVisViewCamera.reportStatus("error", "The latest frame did not render. The last good frame is unchanged.");
         }
         throw error;

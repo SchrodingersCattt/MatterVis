@@ -191,6 +191,18 @@ def test_orthographic_unit_cell_drag_keeps_dap4_visible(mattervis_url):
     _run(mattervis_url, "ortho-drag", structure="DAP-4", timeout=220)
 
 
+@pytest.mark.timeout(300)
+def test_projection_and_range_switch_keeps_the_model_visible(mattervis_url):
+    """A scene change that also changes projection must not clip the meshes."""
+    _run(mattervis_url, "projection-scale", timeout=280)
+
+
+@pytest.mark.timeout(300)
+def test_projection_switch_survives_preview_and_whole_camera_relayout(mattervis_url):
+    """A late preview restore or whole-camera relayout must not empty the renderer."""
+    _run(mattervis_url, "renderer-lifecycle", timeout=280)
+
+
 @pytest.mark.timeout(180)
 def test_drag_survives_a_frame_that_was_copied_before_the_orbit(mattervis_url):
     """A frame that captured the pre-drag eye must not erase the orbit.

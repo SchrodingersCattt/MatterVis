@@ -62,6 +62,33 @@ will never apply to the WebGL camera.
 
 `mattervis.js` gates both full-figure Plotly signatures, serializes their
 promises per graph, and records an identity only after successful completion.
+A reused gl3d scene whose incoming frame changes both projection and axis
+ranges is split inside that same task: geometry first at the live
+projection, then the requested projection through the unwrapped relayout.
+The two calls are not queued behind each other. Camera relayout events
+from both calls are swallowed so the intermediate projection is not
+persisted. Delivery identity is recorded only after the projection call
+resolves, and only when the scene, generation, and server epoch still
+match. The mounted graph generation advances as soon as that geometry
+draw replaces the figure, including when the projection follow-up is
+skipped. The live projection is the gl controller's `_ortho` flag, and
+a layout that omits `camera.projection` is perspective. A rejected
+geometry promise restores `emit` before the busy status is cleared.
+The context-loss listener is attached again after the frame, and after
+a camera relayout, because either one can replace the WebGL canvas.
+Disorder preview does not call `Scene.setViewport`. A no-op preview
+returns before scheduling work. A preview that edits outlines restores
+only dotted eye, center, and up, and only while the scene, generation,
+scene object, and orthographic flag still match. Whole `scene.camera` relayouts, including the string-and-value form,
+expand only the supplied eye, center, up, and projection fields.
+Delivery rejects an empty gl3d renderer after one `datarevision`
+redraw, leaves the error banner up, and does not record the frame as
+delivered, so the same submission can run again. A queued owned-camera
+restore checks the scene, generation, and camera revision again when it
+actually runs. External relayouts wait behind the frame that owns the
+queue. `window.__mvRendererDiag` keeps the last 20 canvas replacements
+and empty-renderer checks. Hidden traces and 2D traces are not visible
+3D geometry. Binary `{dtype, bdata}` coordinates are.
 Camera acquisition reuses `liveSceneCamera` (exposed internally as
 `window.mattervisCurrentCamera`), not `_fullLayout.scene.camera` alone. Queued
 frames are revalidated and read the live camera when they actually execute.

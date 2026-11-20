@@ -216,6 +216,66 @@ def test_flat_ortep_accepts_stored_position_camera_and_keeps_other_modes(tmp_pat
         backend.close()
 
 
+def test_plotly_scene_camera_accepts_mappings_sequences_and_partial_payloads() -> None:
+    converted = _plotly_scene_camera(
+        {
+            "eye": {"x": 1.0, "y": 2.0, "z": 3.0},
+            "center": (0.0, 0.5, -0.5),
+            "up": [0.0, 0.0, 1.0],
+            "projection": {"type": "orthographic"},
+        }
+    )
+    assert converted is not None
+
+    def xyz(value):
+        if isinstance(value, dict):
+            return (value["x"], value["y"], value["z"])
+        return tuple(value)
+
+    assert xyz(converted["eye"]) == (1.0, 2.0, 3.0)
+    assert xyz(converted["center"]) == (0.0, 0.5, -0.5)
+    assert xyz(converted["up"]) == (0.0, 0.0, 1.0)
+    assert set(converted) <= {"eye", "center", "up", "projection"}
+    partial = _plotly_scene_camera({"eye": {"x": 0.4, "y": 0.2, "z": 1.1}})
+    assert partial is not None
+    assert set(partial) == {"eye"}
+    with pytest.raises(ValueError):
+        _plotly_scene_camera({"up": {"x": 0.0, "y": float("inf"), "z": 1.0}})
+
+
+def test_flat_ortep_keeps_the_raster_after_orbit_and_projection_change(tmp_path: Path):
+    backend = _backend(tmp_path)
+    try:
+        scene_id = next(iter(backend.scene_store.order))
+        backend.patch_state(
+            {"material": "flat", "style": "ortep"},
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        backend.patch_state(
+            {
+                "camera": {
+                    "eye": {"x": 1.4, "y": 0.2, "z": 0.6},
+                    "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                    "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+                    "projection": {"type": "orthographic"},
+                }
+            },
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        state = backend.get_state(scene_id)
+        figure, _topology = backend.figure_for_state(state)
+        payload = figure.to_plotly_json()
+        scene = payload["layout"]["scene"]
+        assert scene["bgcolor"] == "rgba(0,0,0,0)"
+        assert payload["layout"]["images"]
+        assert scene["camera"]["projection"]["type"] == "orthographic"
+        _assert_plotly_camera(scene["camera"])
+    finally:
+        backend.close()
+
+
 def test_nonfinite_position_camera_is_not_replaced() -> None:
     with pytest.raises(ValueError):
         _plotly_scene_camera(

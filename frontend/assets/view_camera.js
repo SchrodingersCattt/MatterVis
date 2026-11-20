@@ -71,10 +71,31 @@
     enqueue(gd, function () {
       if (!current()) return gd;
       if (postcondition(gd, latest.snapshot)) return gd;
-      return Promise.resolve(root.Plotly.relayout(gd, clone(latest.patch)));
+      return Promise.resolve(relayoutAsQueueOwner(gd, clone(latest.patch)));
     }, {isCurrent: current, group: "camera"}).then(finish, finish).catch(function () {
       if (current()) reportStatus("error", "The camera update could not be restored.");
     });
+  }
+  function relayoutAsQueueOwner(gd, patch) {
+    var state = gd && gd.__mvRenderQueueState;
+    var previous = state && state.reentrantToken;
+    var token = {};
+    if (state && state.running) state.reentrantToken = token;
+    var pending;
+    try {
+      pending = root.Plotly.relayout(gd, patch);
+    } catch (err) {
+      if (state && state.reentrantToken === token) state.reentrantToken = previous;
+      throw err;
+    }
+    function finish() {
+      if (state && state.reentrantToken === token) state.reentrantToken = previous;
+    }
+    if (pending && typeof pending.then === "function") {
+      return pending.then(function (value) { finish(); return value; }, function (err) { finish(); throw err; });
+    }
+    finish();
+    return pending;
   }
   function enqueue(gd, task, options) {
     options = options || {};
@@ -155,7 +176,7 @@
     if (!gd) return null;
     var full = gd._fullLayout || {};
     var scene = full.scene || {};
-    var internal = scene._scene;
+    var internal = plotlyPrivateStateAllowed() ? scene._scene : null;
     if (internal && typeof internal.getCamera === "function") {
       try {
         var camera = internal.getCamera();
@@ -180,18 +201,36 @@
     if (!value) return false;
     var view = typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(value);
     if (Array.isArray(value) || view) return value.length > 0;
-    /* Plotly columns arrive as {dtype, bdata}. The object itself has no
-     * length, so an array check drops coordinates that are on the trace. */
     return typeof value.bdata === "string" && value.bdata.length > 0 && !!value.dtype;
   }
-  function visibleGeometry(gd) {
+  function dataHasVisibleGeometry(gd) {
     var data = gd && Array.isArray(gd.data) ? gd.data : [];
     return data.some(function (trace) {
       if (!trace || trace.visible === false || trace.visible === "legendonly") return false;
       var type = String(trace.type || "").toLowerCase();
       if (type === "mesh3d") return hasCoordinateValues(trace.x) && hasCoordinateValues(trace.i);
-      return hasCoordinateValues(trace.x) || hasCoordinateValues(trace.y) || hasCoordinateValues(trace.z);
+      if (type === "scatter3d" || type === "cone" || type === "streamtube" || type === "surface" || type === "volume" || type === "isosurface") {
+        return hasCoordinateValues(trace.x) || hasCoordinateValues(trace.y) || hasCoordinateValues(trace.z);
+      }
+      return false;
     });
+  }
+  /* A wiped gl3d scene keeps the input traces and loses scene.traces plus
+   * glplot.objects. Hosts that never expose those fields stay on the data
+   * check so a camera-only test double does not look blank. */
+  function liveRendererEmpty(gd) {
+    if (!plotlyPrivateStateAllowed()) return false;
+    var scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    var plot = scene && scene.glplot;
+    if (!plot || !scene.traces || typeof scene.traces !== "object" || Array.isArray(scene.traces) || !Array.isArray(plot.objects)) return false;
+    var gl = plot.canvas && plot.canvas.__mvGL;
+    if (plot.contextLost) return true;
+    if (gl && typeof gl.isContextLost === "function" && gl.isContextLost()) return true;
+    return Object.keys(scene.traces).length === 0 || plot.objects.length === 0;
+  }
+  function visibleGeometry(gd) {
+    if (!dataHasVisibleGeometry(gd)) return false;
+    return !liveRendererEmpty(gd);
   }
   function internalProjection(gd) {
     var scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
@@ -218,9 +257,11 @@
     return Math.hypot(x, y, z);
   }
   function liveEye(gd) {
-    var scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
-    var controller = scene && (scene.camera || (scene.glplot && scene.glplot.camera));
-    if (controller && controller.eye) return controller.eye;
+    if (plotlyPrivateStateAllowed()) {
+      var scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+      var controller = scene && (scene.camera || (scene.glplot && scene.glplot.camera));
+      if (controller && controller.eye) return controller.eye;
+    }
     var camera = actualCamera(gd);
     return camera && camera.eye;
   }
@@ -363,7 +404,7 @@
     }
     /* _fullLayout can already show the fitted ratio while glplot still
      * draws the previous one. That is the ratio a scene plot writes back. */
-    if (!aspectMismatch && fitted.aspectratio) {
+    if (!aspectMismatch && fitted.aspectratio && plotlyPrivateStateAllowed()) {
       var plot = scene._scene && scene._scene.glplot;
       var painted = plot && typeof plot.getAspectratio === "function" ? plot.getAspectratio() : null;
       if (painted) {
@@ -530,6 +571,11 @@
      * on the graph div so a replacement receives a fresh handler.  The old
      * handler remains harmless: it checks __mvContextRetired/detached and
      * compares its canvas with the currently live Plotly canvas below. */
+    if (gd.__mvContextLossCanvas && gd.__mvContextLossCanvas !== canvas) {
+      var ring = root.__mvRendererDiag || (root.__mvRendererDiag = []);
+      ring.push({at: Date.now(), kind: "canvas-replaced"});
+      if (ring.length > 20) ring.splice(0, ring.length - 20);
+    }
     if (gd.__mvContextLossCanvas === canvas) return;
     canvas.addEventListener("webglcontextlost", function (event) {
       if (event && event.preventDefault) event.preventDefault();
@@ -747,8 +793,8 @@
       var got = projectionType(actualCamera(gd));
       if (got && got !== expected) return "projection";
     }
-    /* Coordinates have to be on a trace. A layout image is not geometry,
-     * and its source is not checked against the current scene. */
+    /* Coordinates have to be on a trace. A layout image is not geometry.
+     * A wiped gl scene with traces still present is not drawable either. */
     if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd)) return "geometry";
     if (options && options.requireEye) {
       var expectedDistance = vectorLength(camera && camera.eye);
@@ -1148,7 +1194,7 @@
        * command must not expire Reset before it starts, and a timeout from a
        * command that a newer revision already replaced must not reset the new
        * queue. */
-      var attempt = withTimeout(Promise.resolve(root.Plotly.relayout(gd, clone(patch))), timeoutMs(), function () {
+      var attempt = withTimeout(Promise.resolve(relayoutAsQueueOwner(gd, clone(patch))), timeoutMs(), function () {
         if (gd.__mvRenderQueueState === queueToken) resetQueue(gd, "camera relayout timeout");
       });
       return attempt.then(function () {
@@ -1156,11 +1202,12 @@
           gd.layout.meta.mattervis_render.camera_revision = requestedRevision;
         }
         commitFittedAspect(gd, options.aspectratio);
+        installContextLoss(gd);
         /* A drag relayout can resolve after Reset already replaced the queue.
          * Re-apply the newest command so the late Plotly write cannot stick. */
         if (Number.isFinite(requestedRevision) && Number(gd.__mvCameraRevision) !== requestedRevision) {
           var latest = gd.__mvLatestCamera;
-          var restore = latest && latest.patch ? Promise.resolve(root.Plotly.relayout(gd, clone(latest.patch))) : Promise.resolve();
+          var restore = latest && latest.patch ? Promise.resolve(relayoutAsQueueOwner(gd, clone(latest.patch))) : Promise.resolve();
           return restore.then(function () { diag("staleDrops"); throw new Error("stale camera command"); });
         }
       });
