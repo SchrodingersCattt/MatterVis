@@ -647,6 +647,12 @@ const stale = graph(
 );
 assert.equal(api.visibleGeometry(stale), false);
 assert.equal(api.postcondition(stale, ortho, {command:'projection'}), false, 'a stale layout image masked missing coordinates');
+const companion = graph([
+  {type:'scatter3d', x:[0, 1], y:[0, 1], z:[0, 1]},
+  {type:'mesh3d', x:[], y:[], z:[], i:[], j:[], k:[]},
+]);
+assert.equal(api.visibleGeometry(companion), true);
+assert.equal(api.postcondition(companion, ortho, {command:'projection'}), true, 'an empty companion trace hid a trace that has coordinates');
 const hiddenImage = graph([{type:'scatter3d', x:[], y:[], z:[]}], [{source:'data:image/png;base64,STALE', visible:false}]);
 assert.equal(api.postcondition(hiddenImage, ortho, {command:'projection'}), false);
 """

@@ -62,7 +62,11 @@ must not change scene B, and a stale revision must not replace a newer one.
   figure that was published. It does not rewrite that snapshot from the
   live camera. The browser keeps the camera from `camera-state-store`
   for that scene, revision, and generation, and puts it on the canvas
-  after a tab return or a stale same-revision frame. A store whose
+  after a tab return or a stale same-revision frame. That write replaces
+  the `#ack` suffix of `scene.uirevision` with the pose. Plotly keeps the
+  previous WebGL camera while the published token is unchanged, and a
+  drag does not advance `camera_revision`, so the token has to change
+  with the eye and center. A store whose
   revision is older than the mounted frame is ignored. Reset, align,
   projection, and a refit that advances the revision still win. A
   camera that leaves the scene, including a unit-cell box with a corner
@@ -82,7 +86,11 @@ must not change scene B, and a stale revision must not replace a newer one.
   session that produced it. A later generation, or a restarted session
   that reused the scene id, does not inherit that box. The fit is stamped
   onto the layout before `Plotly.react` and restored from the same frame
-  task. It does not wrap `Plotly.react` on its own.
+  task. It does not wrap `Plotly.react` on its own. The restore also
+  runs when `glplot.getAspectratio()` still has the previous ratio and
+  the layout already shows the fitted one. Fit and Reset send the canvas
+  width, height, and the height above the status bar and the Fit control.
+  The framed camera is solved for that visible viewport.
 - `MatterVisSceneBox.adopt` relayouts a figure's camera, axis ranges,
   aspect mode, aspect ratio, and `uirevision` when a caller asks for that
   box. A rejected or thrown relayout rejects the adoption. It does not
@@ -91,7 +99,8 @@ must not change scene B, and a stale revision must not replace a newer one.
   writes new ranges and a new projection together is the clip the split
   exists to avoid. A later frame for the same scene still keeps the live
   camera when its `uirevision` matches.
-- Private gl3d fields (`controller._ortho`, `glplot`, `scene.traces`) are
+- Private gl3d fields (`controller._ortho`, `glplot`, `glplot.getAspectratio`,
+  `scene.traces`) are
   read only when `Plotly.version` is missing or exactly `4.1.1`. Any other
   published version skips those reads, records `plotly-private-skipped`,
   and does not split a projection change from those fields. Test doubles

@@ -1000,6 +1000,18 @@
       if (painted && camerasClose(painted, ack.camera)) return Promise.resolve();
       const patch = cameraOnlyPatch(ack.camera);
       if (!patch) return Promise.resolve();
+      /* Plotly keeps the WebGL camera while scene.uirevision is unchanged.
+       * A drag does not advance camera_revision, so the published token
+       * still matches and a dotted eye/center write is ignored. Tie the
+       * token to this pose. Replace only the ack suffix so the token
+       * does not grow on every return. */
+      const currentUi = graph.layout && graph.layout.scene && graph.layout.scene.uirevision;
+      const uiBase = String(currentUi || "scene").split("#ack")[0];
+      const eye = patch["scene.camera.eye"];
+      const center = patch["scene.camera.center"];
+      patch["scene.uirevision"] = uiBase + "#ack" + [eye.x, eye.y, eye.z, center.x, center.y, center.z].map(function (value) {
+        return Number(value).toFixed(4);
+      }).join(",");
       const still = renderMetadataFromLayout(graph.layout);
       if (!still || String(still.scene_id || "") !== String(sceneId)) return Promise.resolve();
       if (ack.scene_generation !== undefined && ack.scene_generation !== null &&
@@ -2493,10 +2505,25 @@
     const tool = event.target && event.target.closest && event.target.closest("#canvas-view-reset, #canvas-view-fit");
     if (!tool) return;
     const action = tool.id === "canvas-view-fit" ? "fit" : "reset";
+    const plot = document.querySelector("#crystal-graph .js-plotly-plot");
+    const canvas = plot && plot.querySelector("canvas");
+    const rect = (canvas || plot) && (canvas || plot).getBoundingClientRect ? (canvas || plot).getBoundingClientRect() : null;
+    const bar = document.getElementById("mv-status-bar");
+    const controls = document.getElementById("canvas-view-fit");
+    const limits = [rect ? rect.bottom : 0];
+    if (bar && bar.getBoundingClientRect) limits.push(bar.getBoundingClientRect().top);
+    if (controls && controls.getBoundingClientRect) limits.push(controls.getBoundingClientRect().top);
+    const visibleHeight = rect ? Math.max(1, Math.min.apply(null, limits) - rect.top) : undefined;
     fetch("/api/v2/camera/action", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({action: action, scene_id: currentSceneId()}),
+      body: JSON.stringify({
+        action: action,
+        scene_id: currentSceneId(),
+        width: rect ? rect.width : undefined,
+        height: rect ? rect.height : undefined,
+        visible_height: visibleHeight,
+      }),
     }).catch(function () {});
   });
 

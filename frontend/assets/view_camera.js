@@ -219,13 +219,19 @@
     var data = gd && Array.isArray(gd.data) ? gd.data : [];
     return data.some(traceHasGeometry);
   }
-  /* A visible 3D trace with no coordinates is missing geometry. A hidden
-   * trace, a non-3D trace, and a layout image are not that claim. */
+  /* Geometry is missing when the frame claims 3D traces and none of them
+   * have coordinates. One empty companion, a hidden trace, a non-3D trace,
+   * or a layout image does not erase a trace that does have coordinates. */
   function missingClaimedGeometry(gd) {
     var data = gd && Array.isArray(gd.data) ? gd.data : [];
-    return data.some(function (trace) {
-      return !!geometryTraceKind(trace) && !traceHasGeometry(trace);
+    var claimed = false;
+    var found = false;
+    data.forEach(function (trace) {
+      if (!geometryTraceKind(trace)) return;
+      claimed = true;
+      if (traceHasGeometry(trace)) found = true;
     });
+    return claimed && !found;
   }
   /* A wiped gl3d scene keeps the input traces and loses scene.traces plus
    * glplot.objects. Hosts that never expose those fields stay on the data
