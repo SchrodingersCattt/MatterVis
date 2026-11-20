@@ -27,6 +27,15 @@ switch to the configured fallback. Browser cues use the same variables in
 capture is required; without that attribute the browser's
 `prefers-color-scheme` value is used.
 
+Workbench chrome and native form controls share that same choice. `:root` is
+`color-scheme: light` with the light surface tokens (`--mv-page`, `--mv-soft`,
+`--mv-panel`, `--mv-canvas`, and the control tokens). `data-mattervis-theme="dark"`,
+or a dark `prefers-color-scheme` when the attribute is not `light`, sets
+`color-scheme: dark` and those surface tokens together, including
+`#mv-extension-panels`. An explicit `data-mattervis-theme="light"` keeps the
+light chrome and light native controls on a dark operating system. The plotted
+structure keeps the scene background; this scheme does not recolor it.
+
 ## Pointer/click latency
 
 `mat_viewer.perf.interaction.measure_pointer_latency` and

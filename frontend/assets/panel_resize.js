@@ -32,8 +32,19 @@
   function canvasHostSize() {
     const host = document.getElementById("center-panel") || document.getElementById("crystal-graph");
     if (!host) return null;
-    const width = Math.round(host.clientWidth);
-    const height = Math.round(host.clientHeight);
+    // clientWidth includes padding. The selection dock reserves its column
+    // with paddingRight, so a gutter-only change leaves clientWidth (and the
+    // relayout key) unchanged. Measure the content box. The relayout below
+    // stays a width/height Plotly.relayout; it does not touch the camera.
+    let padX = 0;
+    let padY = 0;
+    if (typeof getComputedStyle === "function") {
+      const style = getComputedStyle(host);
+      padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    }
+    const width = Math.round(host.clientWidth - padX);
+    const height = Math.round(host.clientHeight - padY);
     if (width < 2 || height < 2) return null;
     return {width: width, height: height};
   }

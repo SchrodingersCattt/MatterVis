@@ -352,6 +352,89 @@ assert.notEqual(status.textContent, 'Loaded: stale a');
     assert result.returncode == 0, result.stderr
 
 
+def test_catalog_rename_updates_loaded_line_without_tab_text():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const stop = source.indexOf('  // ── Right-click menu');
+assert.ok(stop > 0);
+const status = {textContent: ''};
+function tab(id, label, displayName) {
+  return {
+    id: 'scene-tab-' + id,
+    getAttribute(name) {
+      return name === 'data-display-name' ? displayName : null;
+    },
+    querySelector(sel) {
+      if (sel === '.scene-tab-text') return {textContent: label, getAttribute() { return ''; }};
+      return null;
+    },
+  };
+}
+const dom = {tabs: [tab('a', 'Stale tab text', 'Stale attribute')], selected: 'a'};
+const tabs = {
+  querySelector(sel) {
+    if (String(sel).indexOf('aria-selected') >= 0) return {id: 'scene-tab-' + dom.selected};
+    return null;
+  },
+  querySelectorAll() { return dom.tabs; },
+};
+const sandbox = {
+  console, Date, JSON, Number, String, Object, Array, Promise,
+  setTimeout() {}, clearTimeout() {}, requestAnimationFrame() {},
+  MutationObserver: function () { this.observe = function () {}; },
+  window: {
+    location: {protocol: 'http:', host: 'localhost'},
+    Plotly: null,
+    WebSocket: null,
+    dash_clientside: {set_props() { return true; }},
+  },
+  document: {
+    getElementById(id) {
+      if (id === 'scene-tabs') return tabs;
+      if (id === 'upload-status') return status;
+      return null;
+    },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+  },
+};
+vm.createContext(sandbox);
+vm.runInContext(source.slice(0, stop) + '\n})();', sandbox);
+const reconcile = sandbox.window.MatterVisReconcileSceneCatalog;
+reconcile({
+  scene_catalog_seq: 1,
+  scenes: [{id: 'a', label: 'Renamed from catalog'}],
+  active_id: 'a',
+  focus: false,
+});
+assert.equal(status.textContent, 'Loaded: Renamed from catalog');
+assert.equal(dom.tabs[0].querySelector('.scene-tab-text').textContent, 'Stale tab text');
+assert.equal(dom.tabs[0].getAttribute('data-display-name'), 'Stale attribute');
+reconcile({
+  scene_catalog_seq: 2,
+  scenes: [{id: 'a', label: 'Renamed again'}],
+  active_id: 'a',
+  focus: false,
+});
+assert.equal(status.textContent, 'Loaded: Renamed again');
+assert.equal(dom.tabs[0].querySelector('.scene-tab-text').textContent, 'Stale tab text');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_http_fallback_and_snapshot_feed_the_same_reconciler():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
     assert "if (body && body.scene_catalog) reconcileSceneCatalog(body.scene_catalog);" in source

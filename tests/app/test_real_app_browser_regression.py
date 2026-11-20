@@ -202,6 +202,15 @@ def test_drag_survives_a_frame_that_was_copied_before_the_orbit(mattervis_url):
     _run(mattervis_url, "drag-replot", structure="DAP-4", timeout=160)
 
 
+@pytest.mark.timeout(180)
+def test_color_scheme_matches_workbench_and_native_controls(mattervis_url):
+    """Light and dark preferences keep chrome and native controls together.
+
+    An explicit data-mattervis-theme pin overrides the operating system.
+    """
+    _run(mattervis_url, "theme")
+
+
 @pytest.mark.timeout(240)
 def test_semantic_atom_click_survives_gl_fallback(mattervis_url):
     """A native click keeps the atom and an additive non-atom target.

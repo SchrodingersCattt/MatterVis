@@ -89,6 +89,9 @@ def test_canvas_refit_uses_the_center_panel_box() -> None:
     gate = (ASSETS / "mattervis.js").read_text(encoding="utf-8")
 
     assert "function canvasHostSize()" in script
+    size = script.split("function canvasHostSize()", 1)[1].split("function finishSceneResize", 1)[0]
+    assert "paddingRight" in size
+    assert "clientWidth - padX" in size
     assert 'document.getElementById("center-panel")' in script
     assert "width: size.width" in script
     assert "height: size.height" in script
