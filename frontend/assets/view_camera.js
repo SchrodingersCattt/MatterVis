@@ -203,16 +203,28 @@
     if (Array.isArray(value) || view) return value.length > 0;
     return typeof value.bdata === "string" && value.bdata.length > 0 && !!value.dtype;
   }
+  function geometryTraceKind(trace) {
+    if (!trace || trace.visible === false || trace.visible === "legendonly") return "";
+    var type = String(trace.type || "").toLowerCase();
+    if (type === "mesh3d" || type === "scatter3d" || type === "cone" || type === "streamtube" || type === "surface" || type === "volume" || type === "isosurface") return type;
+    return "";
+  }
+  function traceHasGeometry(trace) {
+    var type = geometryTraceKind(trace);
+    if (!type) return false;
+    if (type === "mesh3d") return hasCoordinateValues(trace.x) && hasCoordinateValues(trace.i);
+    return hasCoordinateValues(trace.x) || hasCoordinateValues(trace.y) || hasCoordinateValues(trace.z);
+  }
   function dataHasVisibleGeometry(gd) {
     var data = gd && Array.isArray(gd.data) ? gd.data : [];
+    return data.some(traceHasGeometry);
+  }
+  /* A visible 3D trace with no coordinates is missing geometry. A hidden
+   * trace, a non-3D trace, and a layout image are not that claim. */
+  function missingClaimedGeometry(gd) {
+    var data = gd && Array.isArray(gd.data) ? gd.data : [];
     return data.some(function (trace) {
-      if (!trace || trace.visible === false || trace.visible === "legendonly") return false;
-      var type = String(trace.type || "").toLowerCase();
-      if (type === "mesh3d") return hasCoordinateValues(trace.x) && hasCoordinateValues(trace.i);
-      if (type === "scatter3d" || type === "cone" || type === "streamtube" || type === "surface" || type === "volume" || type === "isosurface") {
-        return hasCoordinateValues(trace.x) || hasCoordinateValues(trace.y) || hasCoordinateValues(trace.z);
-      }
-      return false;
+      return !!geometryTraceKind(trace) && !traceHasGeometry(trace);
     });
   }
   /* A wiped gl3d scene keeps the input traces and loses scene.traces plus
@@ -793,9 +805,11 @@
       var got = projectionType(actualCamera(gd));
       if (got && got !== expected) return "projection";
     }
-    /* Coordinates have to be on a trace. A layout image is not geometry.
-     * A wiped gl scene with traces still present is not drawable either. */
-    if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd)) return "geometry";
+    /* Coordinates have to be on a trace that claims to draw them. A layout
+     * image is not geometry. Hidden traces are not a missing model. A wiped
+     * gl scene with coordinates still present is not drawable. */
+    if (missingClaimedGeometry(gd)) return "geometry";
+    if (dataHasVisibleGeometry(gd) && liveRendererEmpty(gd)) return "geometry";
     if (options && options.requireEye) {
       var expectedDistance = vectorLength(camera && camera.eye);
       var gotDistance = vectorLength(liveEye(gd));
