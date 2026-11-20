@@ -241,3 +241,66 @@ def test_real_identifier_rebases_periodic_bonds_to_global_indices() -> None:
         assert molecule_indices[left] == molecule_indices[right]
         assert {left, right} != {0, 1}
         assert shift == expected[(left, right)]
+
+
+def _molecule(local_indices, records):
+    return SimpleNamespace(
+        info={
+            'atom_indices': list(local_indices),
+            'bond_pairs': [(int(record['left']), int(record['right'])) for record in records],
+            'bond_records': records,
+        }
+    )
+
+
+def test_one_partition_keeps_every_component_and_reordered_sites() -> None:
+    atoms, _molecule_indices = _interleaved_frame()
+    indices = np.array([4, 4, 4, 9], dtype=int)
+
+    def identify(subset, **_kwargs):
+        count = len(subset)
+        assert count >= 1
+        if count == 1:
+            return [_molecule([0], [])]
+        # Local index 1 is listed before 0, and the slice splits in two.
+        return [
+            _molecule(
+                [1, 0],
+                [{
+                    'left': 1,
+                    'right': 0,
+                    'right_image_shift': [0, 1, 0],
+                    'role': 'covalent',
+                    'note': 'kept',
+                }],
+            ),
+            _molecule([2], []),
+        ]
+
+    molecules = identify_source_partitions(atoms, identify, {}, indices)
+    assert [molecule.info['atom_indices'] for molecule in molecules] == [[1, 0], [2], [3]]
+    record = molecules[0].info['bond_records'][0]
+    assert (record['left'], record['right']) == (1, 0)
+    assert record['right_image_shift'] == [0, 1, 0]
+    assert record['note'] == 'kept'
+    assert molecules[0].info['bond_pairs'] == [(1, 0)]
+
+
+def test_upstream_partition_argument_is_forwarded_without_a_second_remap() -> None:
+    atoms, molecule_indices = _interleaved_frame()
+    seen = {}
+
+    def identify(frame, molecule_indices=None, **_kwargs):
+        seen['length'] = len(frame)
+        seen['indices'] = np.asarray(molecule_indices).copy()
+        return [_molecule([0, 2], [{
+            'left': 0,
+            'right': 2,
+            'right_image_shift': [1, 0, 0],
+        }])]
+
+    molecules = identify_source_partitions(atoms, identify, {'bond_scale': 1.0}, molecule_indices)
+    assert seen['length'] == len(atoms)
+    assert np.array_equal(seen['indices'], molecule_indices)
+    assert molecules[0].info['atom_indices'] == [0, 2]
+    assert molecules[0].info['bond_records'][0]['left'] == 0
