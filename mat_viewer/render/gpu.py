@@ -31,6 +31,7 @@ from .gpu_packets import (
     lower_plan,
     lower_render_plan,
     lower_to_draw_packets,
+    raster_passes,
 )
 from .gpu_raster import wgpu_rgba as _wgpu_rgba
 from .gpu_readback import map_readback_sync as _map_readback_sync_impl
@@ -154,6 +155,7 @@ def render(
             "gpu": probed.to_dict(),
             "formats": {"color": "rgba8unorm", "depth": "depth32float"},
             "packet_count": len(lowered.packets),
+            "raster_passes": raster_passes(lowered),
             "timing_s": {
                 # Keep stage names stable for machine-readable receipts. The
                 # packet compiler currently runs as part of plan lowering;
@@ -280,6 +282,7 @@ __all__ = [
     "lower_plan",
     "lower_render_plan",
     "lower_to_draw_packets",
+    "raster_passes",
     "probe",
     "probe_gpu",
     "render",

@@ -49,9 +49,33 @@ the CPU camera-space light in world space. They are not pixel-identical to
 the analytic CPU sphere and cylinder rasters, and they do not honour CPU
 supersampling or sphere and cylinder tessellation controls.
 
+The GPU packet stores one opaque colour. It does not define a surface
+material or a lighting rig, and it does not look up preset names. A missing
+`surface_material` is the historical camera-space shade. A coefficient
+record is accepted only when its id is `matte`, its specular weight is 0,
+and its Fresnel power is 0: that record asks for no highlight. Any other
+id (`hard_plastic`, `metal_like`, `glass_like`, `metal`, `glass`, or
+another name), a specular highlight, a Fresnel term, or a string where a
+coefficient record belongs raises `GPUUnsupportedError`. Those presets are
+not redrawn as the matte shade. A missing `lighting` value, or
+`studio_soft` at `light_scale` 1, is the same historical light. `unlit`
+would still be shaded by that light, so it is rejected. `studio_three_point`
+is rejected and is not replaced with `studio_soft`. Any other rig name or
+a non-unit `light_scale` is rejected the same way.
+
+`raster_passes()` reports which packet ids are drawn in the GPU pass and
+which are in the CPU overlay. The overlay is the intended path for lines
+wider than one pixel, depth-disabled strokes, ORTEP hatch, and ORTEP
+principal axes. It is not a fallback for unsupported geometry. Each
+viewport is composited with its own camera and pixel crop. A depth-disabled
+stroke stays in front of a later depth-tested stroke. A depth-tested stroke
+is hidden where the GPU depth is nearer than the stroke. Colour from one
+viewport is not drawn into another.
+
 The Python seam is `mat_viewer.render.gpu`: `probe()`, `lower_plan()`,
-`render()`, `render_animation()`, and the lifecycle-compatible
-`GpuSession`/`GPUBackend` wrapper. `close()` releases cached instance buffers
-and the device. Results retain the original plan fingerprint and include
-requested/actual backend metadata, GPU identity, packet count, and stage
-timing fields. Animation results report `backend: gpu`.
+`raster_passes()`, `render()`, `render_animation()`, and the
+lifecycle-compatible `GpuSession`/`GPUBackend` wrapper. `close()` releases
+cached instance buffers and the device. Results retain the original plan
+fingerprint and include requested/actual backend metadata, GPU identity,
+packet count, the raster-pass report, and stage timing fields. Animation
+results report `backend: gpu`.

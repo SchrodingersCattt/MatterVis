@@ -961,3 +961,262 @@ def test_missing_vertex_normals_select_flat_instance_shading() -> None:
     ] == pytest.approx(0.0)
 
 
+def _appearance_plan(metadata: dict, primitive_metadata: dict | None = None) -> RenderPlan:
+    camera = CameraSpec.looking_along((0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0))
+    primitive = TriangleMeshPrimitive(
+        semantic_id="triangle",
+        vertices=np.asarray([[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]]),
+        triangles=np.asarray([[0, 1, 2]], dtype=int),
+        rgba=(0.2, 0.4, 0.8, 1.0),
+        metadata=primitive_metadata or {},
+    )
+    return RenderPlan(
+        width=16,
+        height=16,
+        background=(1.0, 1.0, 1.0, 1.0),
+        viewports=(ViewportPlan("main", camera=camera, primitives=(primitive,)),),
+        metadata=metadata,
+    )
+
+
+def test_gpu_accepts_historical_matte_and_studio_soft_shade() -> None:
+    matte = {
+        "id": "matte",
+        "ambient": 0.68,
+        "diffuse": 0.32,
+        "specular": 0.0,
+        "shininess": 32.0,
+        "specular_tint": "none",
+        "fresnel_power": 0.0,
+    }
+    lowered = gpu.lower_plan(
+        _appearance_plan({"surface_material": matte, "lighting": "studio_soft"})
+    )
+    assert lowered.packets[0].rgba == (0.2, 0.4, 0.8, 1.0)
+    omitted = gpu.lower_plan(_appearance_plan({}))
+    assert omitted.packets[0].kind == "mesh"
+
+
+@pytest.mark.parametrize(
+    "preset",
+    ["hard_plastic", "metal_like", "glass_like", "metal", "glass"],
+)
+def test_gpu_rejects_non_matte_surface_presets(preset: str) -> None:
+    record = {
+        "id": preset,
+        "ambient": 0.3,
+        "diffuse": 0.5,
+        "specular": 0.4,
+        "shininess": 48.0,
+        "fresnel_power": 1.5 if preset == "glass_like" else 0.0,
+    }
+    with pytest.raises(gpu.GPUUnsupportedError, match=preset) as raised:
+        gpu.lower_plan(_appearance_plan({}, {"surface_material": record}))
+    message = str(raised.value)
+    assert "opaque colour" in message
+    assert "matte" not in message.split(preset, 1)[-1] or "would not apply" in message
+
+
+def test_gpu_does_not_look_up_a_surface_preset_name() -> None:
+    with pytest.raises(gpu.GPUUnsupportedError, match="will not look up preset 'matte'"):
+        gpu.lower_plan(_appearance_plan({"surface_material": "matte"}))
+
+
+def test_gpu_rejects_a_matte_record_that_requests_a_highlight() -> None:
+    record = {"id": "matte", "specular": 0.2, "fresnel_power": 0.0}
+    with pytest.raises(gpu.GPUUnsupportedError, match="matte"):
+        gpu.lower_plan(_appearance_plan({"surface_material": record}))
+    fresnel = {"id": "matte", "specular": 0.0, "fresnel_power": 1.5}
+    with pytest.raises(gpu.GPUUnsupportedError, match="Fresnel"):
+        gpu.lower_plan(_appearance_plan({"surface_material": fresnel}))
+
+
+def test_gpu_rejects_light_scale_stored_on_the_surface_record() -> None:
+    record = {"id": "matte", "specular": 0.0, "light_scale": 1.0}
+    with pytest.raises(gpu.GPUUnsupportedError, match="light_scale stays on the lighting rig"):
+        gpu.lower_plan(_appearance_plan({"surface_material": record}))
+
+
+def test_gpu_rejects_unlit_and_three_point_without_substituting() -> None:
+    with pytest.raises(gpu.GPUUnsupportedError, match="unlit") as unlit:
+        gpu.lower_plan(_appearance_plan({"lighting": "unlit"}))
+    assert "studio_soft light" in str(unlit.value)
+    with pytest.raises(gpu.GPUUnsupportedError, match="studio_three_point") as three:
+        gpu.lower_plan(_appearance_plan({"lighting": "studio_three_point"}))
+    assert "will not substitute studio_soft" in str(three.value)
+
+    class _Rig:
+        id = "studio_three_point"
+        light_scale = 1.0
+
+    with pytest.raises(gpu.GPUUnsupportedError, match="will not substitute studio_soft"):
+        gpu.lower_plan(_appearance_plan({"lighting": _Rig()}))
+
+
+def test_gpu_rejects_a_non_unit_light_scale() -> None:
+    with pytest.raises(gpu.GPUUnsupportedError, match="light_scale"):
+        gpu.lower_plan(_appearance_plan({"lighting": "studio_soft", "light_scale": 2.0}))
+
+
+def test_raster_passes_separate_gpu_meshes_from_the_intended_line_overlay() -> None:
+    edge = LinePrimitive(
+        "cell-edge",
+        np.asarray([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]], dtype=float),
+        rgba=(0.0, 0.0, 0.0, 1.0),
+        width_px=2.0,
+        metadata={"kind": "cell_edge"},
+    )
+    axis = LinePrimitive(
+        "ortep-axis",
+        np.asarray([[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]], dtype=float),
+        rgba=(1.0, 0.0, 0.0, 1.0),
+        width_px=1.0,
+        depth_test=False,
+        metadata={"kind": "ortep_axes"},
+    )
+    lowered = gpu.lower_plan(_plan(_triangle(), edge, axis))
+    report = gpu.raster_passes(lowered)
+    assert report["gpu"] == ["triangle"]
+    assert report["cpu_overlay"] == ["cell-edge", "ortep-axis"]
+    assert report["cpu_overlay_is_fallback"] is False
+    assert "Intended composite" in report["cpu_overlay_reason"]
+    assert "GPUUnsupportedError" in report["cpu_overlay_reason"]
+    assert lowered.to_dict()["raster_passes"] == report
+
+
+def test_depth_tested_line_is_hidden_where_gpu_depth_is_near() -> None:
+    from mat_viewer.render.gpu_raster import composite_overlay_lines
+
+    camera = CameraSpec.looking_along(
+        (0.0, 0.0, 1.0),
+        up=(0.0, 1.0, 0.0),
+        distance=8.0,
+        ortho_scale=2.0,
+        near=0.1,
+        far=30.0,
+    )
+    width = height = 32
+    background = np.full((height, width, 4), 255, dtype=np.uint8)
+    depth = np.ones((height, width), dtype=np.float32)
+    depth[:, : width // 2] = 0.0
+    lowered = gpu.LoweredPlan(
+        width=width,
+        height=height,
+        background=(1.0, 1.0, 1.0, 1.0),
+        packets=(),
+        plan_sha256="depth",
+        cameras={"main": camera},
+    )
+    packet = gpu.DrawPacket(
+        kind="line",
+        semantic_id="cell-edge",
+        viewport_id="main",
+        vertices=np.asarray([[(-0.8, 0.0, 0.0), (0.8, 0.0, 0.0)]], dtype=np.float32).reshape(
+            -1, 3
+        ),
+        indices=None,
+        rgba=(0.0, 0.0, 1.0, 1.0),
+        rect=(0.0, 0.0, 1.0, 1.0),
+        metadata={"depth_test": True, "width_px": 4.0, "kind": "cell_edge"},
+    )
+    painted = np.frombuffer(
+        composite_overlay_lines(background.tobytes(), depth, lowered, (packet,)),
+        dtype=np.uint8,
+    ).reshape(height, width, 4)
+    mid = height // 2
+    hidden = painted[mid, width // 4]
+    visible = painted[mid, width // 2 + 2]
+    assert hidden.tolist() == [255, 255, 255, 255]
+    assert int(visible[2]) > 200 and int(visible[0]) < 30
+
+
+def test_ortep_axis_stays_in_front_of_a_cell_edge_inside_each_viewport() -> None:
+    from mat_viewer.render.gpu_raster import composite_overlay_lines
+
+    def packet(name, viewport, rect, end, rgba, width, depth, kind):
+        return gpu.DrawPacket(
+            kind="line",
+            semantic_id=name,
+            viewport_id=viewport,
+            vertices=np.asarray([[(0.0, 0.0, 0.0), end]], dtype=np.float32).reshape(-1, 3),
+            indices=None,
+            rgba=rgba,
+            rect=rect,
+            metadata={"depth_test": depth, "width_px": width, "kind": kind},
+        )
+
+    camera = CameraSpec.looking_along(
+        (0.0, 0.0, 1.0),
+        up=(0.0, 1.0, 0.0),
+        distance=8.0,
+        ortho_scale=2.0,
+        near=0.1,
+        far=30.0,
+    )
+    width, height = 32, 32
+    background = np.full((height, width, 4), 255, dtype=np.uint8)
+    lowered = gpu.LoweredPlan(
+        width=width,
+        height=height,
+        background=(1.0, 1.0, 1.0, 1.0),
+        packets=(),
+        plan_sha256="panels",
+        cameras={"top": camera, "bottom": camera},
+    )
+    painted = np.frombuffer(
+        composite_overlay_lines(
+            background.tobytes(),
+            np.ones((height, width), dtype=np.float32),
+            lowered,
+            (
+                packet(
+                    "top-axis",
+                    "top",
+                    (0.0, 0.0, 1.0, 0.5),
+                    (0.6, 0.0, 0.0),
+                    (1.0, 0.0, 0.0, 1.0),
+                    1.0,
+                    False,
+                    "ortep_axes",
+                ),
+                packet(
+                    "top-edge",
+                    "top",
+                    (0.0, 0.0, 1.0, 0.5),
+                    (0.0, 0.6, 0.0),
+                    (0.0, 0.0, 1.0, 1.0),
+                    8.0,
+                    True,
+                    "cell_edge",
+                ),
+                packet(
+                    "bottom-axis",
+                    "bottom",
+                    (0.0, 0.5, 1.0, 0.5),
+                    (0.6, 0.0, 0.0),
+                    (0.0, 1.0, 0.0, 1.0),
+                    1.0,
+                    False,
+                    "ortep_axes",
+                ),
+                packet(
+                    "bottom-edge",
+                    "bottom",
+                    (0.0, 0.5, 1.0, 0.5),
+                    (0.0, 0.6, 0.0),
+                    (1.0, 0.0, 0.0, 1.0),
+                    8.0,
+                    True,
+                    "cell_edge",
+                ),
+            ),
+        ),
+        dtype=np.uint8,
+    ).reshape(height, width, 4)
+    top = painted[height // 4, width // 2]
+    bottom = painted[3 * height // 4, width // 2]
+    assert top[0] > top[2]
+    assert bottom[1] > bottom[0]
+    assert not np.any((painted[: height // 2, :, 1] > 200) & (painted[: height // 2, :, 0] < 30))
+
+

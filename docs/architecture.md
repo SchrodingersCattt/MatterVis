@@ -91,12 +91,17 @@ at the operation that needs them:
 The GPU backend is explicit. It lowers the same immutable `RenderPlan`,
 draws opaque meshes and instanced spheres, cylinders, and solid ellipsoids,
 and composites depth-disabled lines together with lines that are not one
-pixel wide, using each viewport's own camera and pixel crop. It does not apply CPU
-supersampling or the CPU sphere and cylinder tessellation controls.
-Transparent primitives, dashed lines, and text are rejected. It never
-substitutes the CPU renderer when the optional dependency, the device, or a
-primitive is unavailable. CPU PNG and true-vector PDF/SVG remain the
-reference paths.
+pixel wide, using each viewport's own camera and pixel crop. That composite
+is an intended line pass. A depth-disabled stroke stays in front of a
+depth-tested one, and a depth-tested stroke is hidden where the GPU depth
+is nearer. The backend does not apply CPU supersampling or the CPU sphere
+and cylinder tessellation controls. It does not evaluate surface-material
+coefficients or lighting rigs other than the historical matte `studio_soft`
+shade; any other preset or rig raises `GPUUnsupportedError` instead of
+being drawn as that shade. Transparent primitives, dashed lines, and text
+are rejected. It never substitutes the CPU renderer when the optional
+dependency, the device, or a primitive is unavailable. CPU PNG and
+true-vector PDF/SVG remain the reference paths.
 
 `mat-vis capabilities` and `mat-vis render --check` are the authoritative
 dependency resolver. No skill or installer maintains a second dependency

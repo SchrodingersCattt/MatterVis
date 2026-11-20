@@ -143,6 +143,7 @@ class LoweredPlan:
             "packet_count": len(self.packets),
             "plan_sha256": self.plan_sha256,
             "viewport_count": len(self.cameras),
+            "raster_passes": raster_passes(self),
         }
 
 
@@ -204,6 +205,34 @@ def lowered_plan_digest(lowered: LoweredPlan) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def raster_passes(lowered: LoweredPlan) -> dict[str, Any]:
+    """Report which packets are drawn on the GPU and which are composited.
+
+    The CPU overlay is the intended path for wide lines, depth-disabled
+    strokes, ORTEP hatch, and ORTEP principal axes. It is not a fallback
+    for geometry the GPU packet cannot represent.
+    """
+
+    gpu_ids: list[str] = []
+    overlay_ids: list[str] = []
+    for packet in lowered.packets:
+        if line_needs_cpu_overlay(packet):
+            overlay_ids.append(packet.semantic_id)
+        else:
+            gpu_ids.append(packet.semantic_id)
+    return {
+        "gpu": gpu_ids,
+        "cpu_overlay": overlay_ids,
+        "cpu_overlay_is_fallback": False,
+        "cpu_overlay_reason": (
+            "Intended composite for lines wider than one pixel, "
+            "depth-disabled strokes, ORTEP hatch, and ORTEP principal axes. "
+            "Unsupported geometry raises GPUUnsupportedError instead of "
+            "moving to this pass."
+        ),
+    }
+
+
 def line_needs_cpu_overlay(packet: DrawPacket) -> bool:
     """Return whether a line must be composited on the CPU.
 
@@ -242,6 +271,158 @@ def _opaque_rgba(value: Any, semantic_id: str) -> tuple[float, float, float, flo
     return rgba  # type: ignore[return-value]
 
 
+def _appearance_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, Mapping):
+        raw = value.get("id", value.get("preset"))
+    else:
+        raw = getattr(value, "id", None)
+        if raw is None:
+            raw = getattr(value, "preset", None)
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise GPUUnsupportedError(
+            f"GPU appearance field {value!r} is not a number"
+        ) from exc
+    if not np.isfinite(number):
+        raise GPUUnsupportedError(f"GPU appearance field {value!r} is not finite")
+    return number
+
+
+def _reject_surface_material(value: Any, where: str) -> None:
+    """Accept only the historical no-highlight shade.
+
+    The GPU packet stores one opaque colour. It does not look up a preset
+    and it does not apply specular or Fresnel coefficients. A missing
+    record is that historical shade. A coefficient record is accepted only
+    when it asks for ``matte`` with no highlight and no Fresnel. Any other
+    preset is an error, not a silent flatten to that shade.
+    """
+
+    if value is None:
+        return
+    if isinstance(value, str):
+        raise GPUUnsupportedError(
+            "surface_material must be a coefficient record. The GPU backend "
+            f"will not look up preset {value!r} or ignore the field ({where})"
+        )
+    if not isinstance(value, Mapping) and not hasattr(value, "id"):
+        raise GPUUnsupportedError(
+            f"surface_material on {where} must be a coefficient record"
+        )
+    if isinstance(value, Mapping):
+        rejected = sorted({"light_scale", "opacity"} & set(value))
+        if rejected:
+            raise GPUUnsupportedError(
+                "surface material does not accept "
+                f"{', '.join(rejected)}; light_scale stays on the lighting rig "
+                "and opacity stays on the object"
+            )
+        specular = _as_float(value.get("specular"), 0.0)
+        fresnel = _as_float(value.get("fresnel_power"), 0.0)
+        fresnel_specular = _as_float(value.get("fresnel_specular"), 0.0)
+        tint = value.get("specular_tint", "none")
+    else:
+        specular = _as_float(getattr(value, "specular", 0.0), 0.0)
+        fresnel = _as_float(getattr(value, "fresnel_power", 0.0), 0.0)
+        fresnel_specular = _as_float(getattr(value, "fresnel_specular", 0.0), 0.0)
+        tint = getattr(value, "specular_tint", "none")
+    name = _appearance_name(value)
+    highlight = (
+        abs(specular) > 1e-8
+        or abs(fresnel) > 1e-8
+        or abs(fresnel_specular) > 1e-8
+        or str(tint or "none").strip().lower() not in {"", "none"}
+    )
+    if name in {None, "matte"} and not highlight:
+        return
+    shown = name or "unnamed"
+    raise GPUUnsupportedError(
+        f"GPU backend does not evaluate surface material {shown!r} on {where}. "
+        "The draw packet stores one opaque colour and would not apply that "
+        "preset's specular or Fresnel response"
+    )
+
+
+def _unit_light_scale(scale: Any) -> bool:
+    if scale is None:
+        return True
+    return abs(_as_float(scale) - 1.0) <= 1e-6
+
+
+def _reject_lighting(value: Any, scale: Any, where: str) -> None:
+    """Accept only ``studio_soft`` at unit scale.
+
+    Instanced meshes use the historical camera-space light. ``unlit`` would
+    still receive that light. ``studio_three_point`` is not replaced with
+    ``studio_soft``.
+    """
+
+    if isinstance(value, Mapping) and scale is None:
+        scale = value.get("light_scale")
+    elif scale is None and value is not None and not isinstance(value, (str, Mapping)):
+        scale = getattr(value, "light_scale", None)
+    name = _appearance_name(value)
+    if name in {None, "studio_soft"} and _unit_light_scale(scale):
+        return
+    if name in {None, "studio_soft"}:
+        raise GPUUnsupportedError(
+            f"GPU backend does not evaluate light_scale {scale!r} on {where}. "
+            "Instanced shading uses the historical camera-space light at unit scale"
+        )
+    if name == "unlit":
+        raise GPUUnsupportedError(
+            "GPU backend does not evaluate lighting rig 'unlit' on "
+            f"{where}. Instanced meshes would still be shaded by the "
+            "camera-space studio_soft light"
+        )
+    if name == "studio_three_point":
+        raise GPUUnsupportedError(
+            "GPU backend does not evaluate lighting rig 'studio_three_point' "
+            f"on {where}. It will not substitute studio_soft"
+        )
+    raise GPUUnsupportedError(
+        f"GPU backend does not evaluate lighting rig {name!r} on {where}. "
+        "It will not substitute studio_soft"
+    )
+
+
+def _reject_gpu_appearance(plan: RenderPlan) -> None:
+    metadata = plan.metadata
+    _reject_surface_material(metadata.get("surface_material"), "the render plan")
+    _reject_lighting(
+        metadata.get("lighting"),
+        metadata.get("light_scale"),
+        "the render plan",
+    )
+    for viewport in plan.viewports:
+        for primitive in viewport.primitives:
+            primitive_metadata = getattr(primitive, "metadata", None) or {}
+            where = str(getattr(primitive, "semantic_id", "") or type(primitive).__name__)
+            if not isinstance(primitive_metadata, Mapping):
+                continue
+            _reject_surface_material(primitive_metadata.get("surface_material"), where)
+            _reject_lighting(
+                primitive_metadata.get("lighting"),
+                primitive_metadata.get("light_scale", metadata.get("light_scale")),
+                where,
+            )
+
+
 def lower_plan(plan: RenderPlan) -> LoweredPlan:
     """Lower a :class:`RenderPlan` into validated opaque GPU draw packets.
 
@@ -252,6 +433,7 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
 
     if not isinstance(plan, RenderPlan):
         raise TypeError("GPU backend expects a RenderPlan")
+    _reject_gpu_appearance(plan)
     packets: list[DrawPacket] = []
     for viewport in plan.viewports:
         for primitive in viewport.primitives:
