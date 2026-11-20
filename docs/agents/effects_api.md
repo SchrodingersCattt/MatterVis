@@ -1,6 +1,6 @@
 # Scientific effects API
 
-MatterVis separates three effects:
+Atomaestro separates three effects:
 
 | Effect | Contract | Writes |
 |---|---|---|

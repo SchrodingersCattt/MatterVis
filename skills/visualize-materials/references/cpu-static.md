@@ -1,6 +1,6 @@
 # CPU Static PNG/PDF/SVG
 
-Read this for the default browser-independent static path. Base MatterVis draws
+Read this for the default browser-independent static path. Base Atomaestro draws
 atoms, bonds, thermal ellipsoids, aromatic rings, unit cells, and polyhedra with
 one camera and backend-neutral geometry. Use `cpu` for 3D geometry or
 `matplotlib` for a projected 2D drawing.

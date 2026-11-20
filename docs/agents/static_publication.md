@@ -1,7 +1,7 @@
 # Static Publication Figures
 
-The agent-facing MatterVis CLI produces one explicitly specified view per
-output. Base MatterVis provides true-vector PDF/SVG and depth-tested PNG through
+The agent-facing Atomaestro CLI produces one explicitly specified view per
+output. Base Atomaestro provides true-vector PDF/SVG and depth-tested PNG through
 the CPU backend. It does not expose the historical private publication
 compositor.
 

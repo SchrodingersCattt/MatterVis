@@ -1,20 +1,20 @@
-# Atomestro: Atomistic Structure Visualization and Scientific Workbench
+# Atomaestro: Atomistic Structure Visualization and Scientific Workbench
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](#)
 [![PyPI](https://img.shields.io/pypi/v/matter-vis.svg)](https://pypi.org/project/matter-vis/)
-[![CI](https://github.com/SchrodingersCattt/Atomestro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SchrodingersCattt/Atomestro/actions/workflows/ci.yml)
+[![CI](https://github.com/SchrodingersCattt/Atomaestro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SchrodingersCattt/Atomaestro/actions/workflows/ci.yml)
 
-> **Rebranding in progress.** This repository has been renamed from **MatterVis** to **Atomestro**. The new GitHub name is effective now; the **PyPI distribution is still `matter-vis`**, the CLI is still **`mat-vis`**, and Python imports still use **`mat_viewer`**. The next release is planned to introduce the new package/CLI names while preserving compatible legacy entry points. Until that release, follow the install and CLI commands below. See [the migration tracker](https://github.com/SchrodingersCattt/Atomestro/issues/316) for details.
+> **Repository rename:** **MatterVis is now Atomaestro** on GitHub. The current PyPI distribution remains [`matter-vis`](https://pypi.org/project/matter-vis/), with the `mat-vis` CLI and `mat_viewer` Python imports unchanged. A future release is planned to introduce `atomaestro` packaging and a matching CLI command while keeping the existing interfaces compatible. For exact current-versus-planned behavior, see the [migration guide](docs/rebranding.md) and [tracking issue #316](https://github.com/SchrodingersCattt/Atomaestro/issues/316).
 
 ## Overview
 
-Atomestro (formerly MatterVis) is a Python toolkit for deterministic,
+Atomaestro (formerly MatterVis) is a Python toolkit for deterministic,
 publication-quality atomistic structure visualization and scientific analysis.
 Its lightweight core renders PNG/PDF/SVG on the CPU; Plotly, Dash/Web APIs,
 Textual, Cube isosurfaces, and animation encoders are optional frontends.
-The broader roadmap includes integrated structure modeling, composition, and
-agent-driven scientific workflows.
+The broader roadmap includes integrated structure modeling, multi-structure scene
+composition, and agent-driven scientific workflows.
 
 ## Scenes and scientific revisions
 
@@ -51,6 +51,10 @@ can use the revision/write APIs directly without adopting the catalog.
 
 ## Installation
 
+The GitHub repository is now named **Atomaestro**, but the published package
+and its executable have not yet been renamed. The commands below are the
+currently supported installation and usage paths. See the [migration guide](docs/rebranding.md).
+
 ### From PyPI (recommended)
 
 ```bash
@@ -60,8 +64,8 @@ pip install matter-vis
 ### From source (development)
 
 ```bash
-git clone https://github.com/SchrodingersCattt/Atomestro.git
-cd Atomestro
+git clone https://github.com/SchrodingersCattt/Atomaestro.git
+cd Atomaestro
 pip install -e .
 ```
 
@@ -88,7 +92,7 @@ mat-vis capabilities --require web-screenshot --json
 mat-vis capabilities --require static-web-export --json
 ```
 
-MolCrysKit is required and is the only chemistry structure source. Atomestro
+MolCrysKit is required and is the only chemistry structure source. Atomaestro
 does not fall back to private MolCrysKit fields or local chemistry heuristics.
 Extended versus molecular presentation comes from
 ``MolecularCrystal.get_connectivity_report()``. Ball-and-stick strokes both
@@ -161,7 +165,7 @@ result = render(plan, output="dap4.svg", backend="cpu")
 
 ## Command Line Interface
 
-Installing the current `matter-vis` distribution provides the `mat-vis` command. The forthcoming Atomestro release will introduce a new primary command while keeping `mat-vis` compatible. The CLI is self-documenting;
+Installing the current `matter-vis` distribution provides the `mat-vis` command. The next planned release will introduce `atomaestro` as a new primary command while keeping `mat-vis` compatible. The CLI is self-documenting;
 use `--help` at any level to see the exact arguments:
 
 ```bash
@@ -190,7 +194,7 @@ The main subcommands cover:
 |---|---|
 | **Understanding the design** | [Architecture](docs/architecture.md) |
 | **Using the library** | [API Reference](docs/agents/) · [CLI Reference](docs/cli.md) |
-| **AI agent (calling Atomestro)** | [Caller API Contracts](docs/agents/) |
+| **AI agent (calling Atomaestro)** | [Caller API Contracts](docs/agents/) |
 | **AI agent (modifying code)** | [AGENTS.md](AGENTS.md) · [Developer Notes](docs/dev-notes.md) |
 | **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Topology scores** | [Scores Reference](docs/scores.md) |

@@ -1,6 +1,6 @@
 # ORTEP / thermal ellipsoid API
 
-MatterVis supports two ORTEP-style paths:
+Atomaestro supports two ORTEP-style paths:
 
 - `material="mesh", style="ortep"` for real interactive Plotly Mesh3d
   ellipsoids.

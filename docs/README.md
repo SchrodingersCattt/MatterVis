@@ -1,9 +1,9 @@
-# MatterVis Documentation Map
+# Atomaestro Documentation Map
 
 Use this directory by intent:
 
 - `agents/` documents caller-facing API contracts (REST + WebSocket, scene, cube, ORTEP, compass, polyhedra, atom/bond groups, transforms, config, selection, TUI).
-- `architecture.md` documents the render interface, backends, and display ownership. MatterVis docs stay geometry, bond-graph, and display-mode oriented.
+- `architecture.md` documents the render interface, backends, and display ownership. Atomaestro docs stay geometry, bond-graph, and display-mode oriented.
 - `cli.md` documents the command-line interface for headless rendering.
 - `derivations/` documents geometry, camera, lattice, ORTEP, and display-mode invariants.
 - `redesign/` documents target architecture and migration notes for ongoing refactors.
@@ -13,3 +13,5 @@ Use this directory by intent:
 
 Developer rules and module ownership live in `AGENTS.md` at the repo root.
 The documentation review bar lives in [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+
+- [`rebranding.md`](rebranding.md) tracks the Atomaestro repository rename and current versus planned PyPI/CLI compatibility.

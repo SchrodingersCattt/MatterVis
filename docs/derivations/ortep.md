@@ -1,7 +1,7 @@
 # ORTEP Geometry Derivations
 
 ORTEP rendering converts atomic displacement parameters into probability
-ellipsoids.  MatterVis has two rendering languages for the same mathematics:
+ellipsoids.  Atomaestro has two rendering languages for the same mathematics:
 3D ellipsoid meshes and camera-facing 2D billboard ellipses.
 
 Both render paths share the same eigendecomposition step; only the projection
@@ -205,7 +205,7 @@ An octant is front-lit when
 
 ### Visual Uiso Clamp
 
-Some CIFs encode disorder by inflating Uiso.  MatterVis clamps only the visual
+Some CIFs encode disorder by inflating Uiso.  Atomaestro clamps only the visual
 ellipsoid size, not the underlying atom data.
 
 For isotropic atoms:

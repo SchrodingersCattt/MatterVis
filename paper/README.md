@@ -1,6 +1,6 @@
 # Paper Reproducibility Data
 
-This directory contains figure-generation scripts for MatterVis publication figures.
+This directory contains figure-generation scripts for Atomaestro publication figures.
 
 ## Contents
 

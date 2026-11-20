@@ -1,6 +1,6 @@
 # View update protocol
 
-MatterVis uses one delivery envelope for Dash, HTTP fallback, and the figure
+Atomaestro uses one delivery envelope for Dash, HTTP fallback, and the figure
 WebSocket:
 
 ```json

@@ -1,12 +1,12 @@
 ---
 name: visualize-materials
-description: "Use first for every atomistic drawing, model preview, or animation with MatterVis, including structures, trajectories, polyhedra, and vibrations."
+description: "Use first for every atomistic drawing, model preview, or animation with Atomaestro, including structures, trajectories, polyhedra, and vibrations."
 ---
 
 # Visualize Materials
 
 Use the public `mat-vis` CLI for coordinate-based visuals. Do not replace it
-with ASE plotting, raw matplotlib, or private MatterVis imports.
+with ASE plotting, raw matplotlib, or private Atomaestro imports.
 
 ## Visible-text default
 Unless explicitly requested by the user, render no visible text in figures: no titles, panel letters, legends, axis labels, tick numbers, atom labels, annotations, units, formulas, or watermarks.

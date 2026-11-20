@@ -1,10 +1,10 @@
-# MatterVis Config API
+# Atomaestro Config API
 
-MatterVis exposes a read-only built-in configuration plus a user TOML
-override file. The built-in config owns MatterVis rendering defaults
+Atomaestro exposes a read-only built-in configuration plus a user TOML
+override file. The built-in config owns Atomaestro rendering defaults
 (style, colours, radii used by the renderer, selection highlight
 colour, and cube rendering palettes). MolCrysKit chemistry defaults
-remain MolCrysKit-owned; MatterVis only exposes optional
+remain MolCrysKit-owned; Atomaestro only exposes optional
 `mck_overrides` fields and forwards them when explicitly set.
 
 ## Python
@@ -23,7 +23,7 @@ reload_config()  # re-read ~/.config/mattervis/config.toml
 `CONFIG` is read-only. To change defaults, edit the TOML override file
 or use the REST API below.
 
-`element_color(symbol)` resolves the canonical MatterVis palette used by the
+`element_color(symbol)` resolves the canonical Atomaestro palette used by the
 scene, publication, ORTEP, and terminal renderers. Charged labels such as
 `Fe2+` are normalized before lookup. Pass `theme="cpk"` only when a cube or
 orbital caller explicitly needs the historical CPK palette; the CPK theme has
@@ -55,7 +55,7 @@ Top-level sections:
 
 - `style`: default render style keys, mirroring
   `mat_viewer.presets.DEFAULT_STYLE`.
-- `colors`: MatterVis scene palette, radii, polyhedron auto-colours,
+- `colors`: Atomaestro scene palette, radii, polyhedron auto-colours,
   and `selection_highlight`.
 - `cube`: cube/orbital panel palette and radii.
 - `mck_overrides`: optional MolCrysKit kwargs. `None` / absent means
@@ -84,5 +84,5 @@ bright cube/CPK values remain available only through the explicit
 theme implicitly. The terminal UI converts the canonical RGB result to an
 ANSI-256 code only at its output boundary.
 
-Unknown keys are ignored so older MatterVis builds can safely read
+Unknown keys are ignored so older Atomaestro builds can safely read
 newer config files.

@@ -3,12 +3,12 @@
 Read this for journal figures, N-up panels, compact subfigures, whitespace,
 cropping, compass placement, or comparable structural scale.
 
-This document contains composition guidance, not a supported MatterVis agent
+This document contains composition guidance, not a supported Atomaestro agent
 entry point. The backend-neutral `mat-vis render` command currently produces
 one view per output and explicitly rejects legacy `--publication-*` options.
 Render each source through the CPU PNG/PDF/SVG path, verify every artifact, and
 compose panels in a separate explicitly authorized document/graphics step. Do
-not call private MatterVis compositors from an agent.
+not call private Atomaestro compositors from an agent.
 
 For any image containing more than one molecular/crystal structure, also read
 [multi-structure panels](./multi-structure-panels.md). It defines the required
@@ -29,8 +29,8 @@ Render a packed unit cell and each isolated coordination environment as
 separate verified CPU SVG/PDF outputs. Use repeatable `--polyhedron` JSON on
 the individual renders; see [polyhedra](./polyhedra.md). Keep the camera,
 projection, physical scale, colours, and opacity explicit and identical where
-the panels are scientifically comparable. Base MatterVis is sufficient for
-this rendering step; panel composition is not a MatterVis optional extra.
+the panels are scientifically comparable. Base Atomaestro is sufficient for
+this rendering step; panel composition is not a Atomaestro optional extra.
 
 ```bash
 mat-vis render INPUT.cif -o PANEL.svg --backend cpu --view unit_cell \

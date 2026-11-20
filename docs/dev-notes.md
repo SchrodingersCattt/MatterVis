@@ -131,7 +131,7 @@ only optimization requires a separately verified compatible geometry base.
 
 ## MolCrysKit delegation — detailed rules
 
-The boundary rule ("molcrys_kit owns chemistry, MatterVis owns
+The boundary rule ("molcrys_kit owns chemistry, Atomaestro owns
 rendering") is in AGENTS.md. Below are the concrete delegation
 points and pitfalls.
 
@@ -186,7 +186,7 @@ points and pitfalls.
 3. If the replacement is more expensive, push it into a cache layer
    with a key that includes every input affecting the result.
 
-## MatterVis-only code — intentionally not upstream
+## Atomaestro-only code — intentionally not upstream
 
 These paths look like duplicate chemistry but are intentional.
 Do not delete them in favour of a `molcrys_kit` call unless the
@@ -199,11 +199,11 @@ upstream API has grown the exact hook.
   still require explicit MolCrysKit BondRecords.
 - **Minor-disorder outlines** (`renderer.py`): visual annotations
   coloured from per-atom render colours, not hard-coded ink.
-- **Lattice matrix convention**: MatterVis uses row vectors
+- **Lattice matrix convention**: Atomaestro uses row vectors
   (`cart = frac @ M`), matching ASE/pymatgen/molcrys_kit. The static
   CIF parser returns column vectors — convert once at the boundary.
 - **CIF symmetry expansion**: MolCrysKit owns the expanded public SiteRecords;
-  MatterVis does not run an independent symmetry path.
+  Atomaestro does not run an independent symmetry path.
 
 ## Terminal semantic controller boundary
 

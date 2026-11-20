@@ -56,7 +56,7 @@ MolCrysKit partition raw atoms into molecules \(m_j\), assign species
 \(s(m_j)\), and compute the simplest unit counts \(q_s\) by dividing species
 counts by their greatest common divisor. MolCrysKit's
 `FormulaUnitSelection` chooses \(q_s\) molecules for every species \(s\) and
-supplies each member's integer image shift. MatterVis only materialises that
+supplies each member's integer image shift. Atomaestro only materialises that
 result.
 
 The selected molecules are translated by integer fractional vectors so the
@@ -152,7 +152,7 @@ cell boundary.
 
 ### Bond Endpoints
 
-For a bond \(i,j\), MatterVis chooses a start point
+For a bond \(i,j\), Atomaestro chooses a start point
 
 \[
 \vec p_i = \vec x_i.
@@ -264,7 +264,7 @@ work, but it is subtle: replacing it with per-atom image shifts would recreate
 orphan fragments at cell faces.
 
 `formula_unit` relies on MolCrysKit's molecule graph and stoichiometry.  It
-must not fall back to MatterVis-local PBC bond perception for molecule
+must not fall back to Atomaestro-local PBC bond perception for molecule
 identity; that is the failure mode documented in `AGENTS.md`.
 
 The lattice `M` is preserved across display modes.  The incomplete cell-box

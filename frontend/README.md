@@ -1,4 +1,4 @@
-# MatterVis Frontend Assets
+# Atomaestro Frontend Assets
 
 This directory contains browser-only JavaScript and CSS loaded by the Dash app.
 Do not place Python service or library code here.

@@ -1,11 +1,11 @@
 ---
 name: inspect-structure-tui
-description: "Use when a non-visual agent must inspect an atomistic structure through the MatterVis terminal session. Teaches the JSONL action loop only. Does not judge stereochemistry or supply answers."
+description: "Use when a non-visual agent must inspect an atomistic structure through the Atomaestro terminal session. Teaches the JSONL action loop only. Does not judge stereochemistry or supply answers."
 ---
 
 # Inspect a structure in the terminal
 
-Use this only for a perception-level MatterVis session. Do not select or focus
+Use this only for a perception-level Atomaestro session. Do not select or focus
 atoms. Selection opens a chemistry inspector that prints names, CIP labels, and
 measurements; those are a different capability.
 

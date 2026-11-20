@@ -1,6 +1,6 @@
-# MatterVis Geometry Derivations
+# Atomaestro Geometry Derivations
 
-This directory is the geometry contract for MatterVis.  It is intentionally
+This directory is the geometry contract for Atomaestro.  It is intentionally
 separate from the public API notes in `docs/agents/`: those files describe what
 callers may rely on, while these notes derive the coordinate, display, camera,
 transform, and ORTEP formulae that the implementation must obey.
@@ -27,7 +27,7 @@ Each document has the same structure:
 
 ## Global Symbols
 
-MatterVis stores all live lattice matrices as row-vector matrices:
+Atomaestro stores all live lattice matrices as row-vector matrices:
 
 \[
 M =
@@ -48,7 +48,7 @@ Fractional coordinates are row vectors.  The conversion is
 \]
 
 This is the same convention used by ASE, pymatgen, and MolCrysKit.  The legacy
-parser still returns the old column-vector matrix; MatterVis converts it once
+parser still returns the old column-vector matrix; Atomaestro converts it once
 at the loader boundary with `M = legacy_M.T` in `mat_viewer/scene/core.py`.
 Any later `M.T` should be treated as an explicit bridge back into legacy code,
 not as a second convention.
@@ -132,7 +132,7 @@ k_{2D}(p)=\sqrt{-2\ln(1-p)}.
 ## Boundary Rule
 
 There must be exactly one row/column convention conversion at any boundary.
-The normal MatterVis path is row-vector `M`.  Exceptions must be narrow and
+The normal Atomaestro path is row-vector `M`.  Exceptions must be narrow and
 named:
 
 - `mat_viewer/scene/core.py` converts the static-publication parser output into row

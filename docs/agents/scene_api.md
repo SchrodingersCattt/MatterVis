@@ -83,7 +83,7 @@ Parses a CIF and returns a scene dict consumable by
 - `formula_unit` (default) — single formula unit centred in the cell.
   Per-species counts come from MolCrysKit's
   `StoichiometryAnalyzer.get_simplest_unit()` (unit-cell species counts
-  divided by their GCD), not MatterVis-local hard-coded heuristics.
+  divided by their GCD), not Atomaestro-local hard-coded heuristics.
   An extended connectivity regime (`MolecularCrystal.get_connectivity_report()`,
   rank 1–3, coordination edges included) does not keep that molecular unwrap:
   displayed formula-unit centres are folded into the home cell so a cell
@@ -110,7 +110,7 @@ Parses a CIF and returns a scene dict consumable by
   Stick-capable styles (`ball_stick`, `stick`, `wireframe`, `ortep`) draw
   every MolCrysKit neighbor-list edge whose manifested length matches
   `BondRecord.distance`. `role` is `"covalent"` or `"coordination"` and is
-  copied onto `scene["bonds"]`; MatterVis does not reclassify elements to
+  copied onto `scene["bonds"]`; Atomaestro does not reclassify elements to
   decide which contacts are sticks. A half-cell contact keeps the displayed
   centres instead of an ambiguous minimum-image end outside the cell.
   `scene["connectivity_regime"]` is `"molecular"` or `"extended"`, and

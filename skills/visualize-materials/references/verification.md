@@ -30,7 +30,7 @@ do not replace visual inspection.
 
 ## Requested versus effective
 
-MatterVis does not silently fall back. Preserve CLI output and confirm that the
+Atomaestro does not silently fall back. Preserve CLI output and confirm that the
 actual backend, representation, shading, camera, and selection equal the
 request. A failed requested backend is a failure, not permission to substitute.
 

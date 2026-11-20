@@ -1,7 +1,7 @@
 # Cube and isosurface API
 
 Cube support is a volumetric-data adapter, not an independent chemistry
-renderer. MatterVis parses the grid, sends the embedded atoms and periodic
+renderer. Atomaestro parses the grid, sends the embedded atoms and periodic
 cell through the canonical MolCrysKit structure contract, and then adds the
 positive and negative isosurface meshes to the backend-neutral scene.
 
@@ -58,7 +58,7 @@ the canonical loader before adding the isosurface overlay.
 - `CubeAtom` and `CubeData` hold embedded atoms, origin, axes, and scalar data.
 - `read_cube(path) -> CubeData` performs pure Cube IO.
 - `cube_atom_trace(cube, theme="canonical")` and
-  `atom_sphere_traces(cube, theme="canonical")` use the canonical MatterVis
+  `atom_sphere_traces(cube, theme="canonical")` use the canonical Atomaestro
   element palette by default. Pass `theme="cpk"` explicitly for the legacy
   bright CPK colors; this choice affects only the cube atom/bond overlays.
 - `tile_cube` and `tile_cube_data` explicitly replicate a scalar grid.

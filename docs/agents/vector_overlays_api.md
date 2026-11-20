@@ -96,7 +96,7 @@ make an occluded force visible: that changes the displayed physical anchor.
 ## Coordinate spaces
 
 `origin_space`, `direction_space`, and `end_space` independently accept
-`cartesian` or `fractional`. Fractional values use MatterVis row-vector cells:
+`cartesian` or `fractional`. Fractional values use Atomaestro row-vector cells:
 
 ```text
 cart = frac @ M
@@ -160,7 +160,7 @@ perspective paper projection are deferred.
 ## Per-tab state
 
 `vector_overlays` is a supported scene-state key and can be written through
-`POST /api/v2/state`. MatterVis deep-copies it onto the rendered scene so vector
+`POST /api/v2/state`. Atomaestro deep-copies it onto the rendered scene so vector
 content does not leak across tabs. A geometry change clears the saved camera and
 bumps `camera_revision` because include-policy bounds may change.
 

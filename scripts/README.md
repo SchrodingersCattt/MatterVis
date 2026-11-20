@@ -1,4 +1,4 @@
-# MatterVis Scripts
+# Atomaestro Scripts
 
 The numbered scripts are runnable examples for the public API:
 

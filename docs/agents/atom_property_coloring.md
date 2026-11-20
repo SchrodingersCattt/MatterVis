@@ -1,6 +1,6 @@
 # Per-atom property coloring API
 
-MatterVis uses one backend-neutral scalar reduction, exact range, and 256-entry
+Atomaestro uses one backend-neutral scalar reduction, exact range, and 256-entry
 LUT for CPU raster/vector, Matplotlib, Plotly, animations, and the browser.
 Omitting property coloring leaves existing output, caching, and renderer
 selection unchanged.

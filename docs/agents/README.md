@@ -1,6 +1,6 @@
-# Calling MatterVis
+# Calling Atomaestro
 
-This folder is for agents and humans **calling** MatterVis — either via
+This folder is for agents and humans **calling** Atomaestro — either via
 its HTTP/WebSocket service or by importing `mat_viewer` from Python.
 If you are **modifying** the codebase itself, read [`../../AGENTS.md`](../../AGENTS.md)
 instead.
@@ -52,7 +52,7 @@ The same routing as a quick table:
 | Attach optional in-process panels to the existing Web or TUI viewer | [`extensions_api.md`](extensions_api.md) |
 | Use the Web sidebar's Display / Analysis / Operations tabs and optional right-side extension panel | [`extensions_api.md#web-tool-placement`](extensions_api.md#web-tool-placement) |
 | Control a local terminal view, select stable atom IDs, or run a stateful Python/JSONL agent session | [`tui_api.md`](tui_api.md) |
-| Select an external terminal frame renderer without forking MatterVis | [`tui_renderer_api.md`](tui_renderer_api.md) |
+| Select an external terminal frame renderer without forking Atomaestro | [`tui_renderer_api.md`](tui_renderer_api.md) |
 | Read terminal pictures with element symbols, molecule silhouettes, text depth bands, crossing-bond gaps, layer slicing, and optional rotation parallax | [`tui_api.md`](tui_api.md) |
 | Render CIF, Cube, VASP, XYZ, ASE trajectory, or LAMMPS files from the CLI | [`../cli.md`](../cli.md) |
 | Label trajectory frames with physical simulation time while keeping playback FPS independent | [`../cli.md`](../cli.md#frames-and-animations) |
@@ -79,13 +79,13 @@ The same routing as a quick table:
 | Draw unit-cell ball-and-stick sticks from MolCrysKit bond role and connectivity regime | [`scene_api.md`](scene_api.md) |
 | Audit which backend-neutral render controls are available from the CLI | [`cli-api-parity.md`](cli-api-parity.md) |
 | Use the optional native offscreen GPU PNG backend | [`gpu_backend.md`](gpu_backend.md) |
-| Read or override global MatterVis defaults | [`config_api.md`](config_api.md) |
+| Read or override global Atomaestro defaults | [`config_api.md`](config_api.md) |
 | Select atoms/fragments in the live viewer and promote a selection to a group | [`selection_api.md`](selection_api.md) |
 | Pick visible atoms, bonds, polyhedron/mesh faces and BFDH facets; edit selected appearance with per-property inheritance | [`selection_api.md`](selection_api.md) |
 
 ## Repo ownership for agents
 
-When you are modifying MatterVis rather than just calling it, keep the
+When you are modifying Atomaestro rather than just calling it, keep the
 top-level ownership boundaries clear:
 
 | Directory | Owns |
@@ -97,7 +97,7 @@ top-level ownership boundaries clear:
 
 ## Layered API stack
 
-Every static-figure module in MatterVis follows the same three-layer
+Every static-figure module in Atomaestro follows the same three-layer
 shape. When a convenience wrapper does not fit your case, drop one
 layer down rather than monkey-patching the wrapper. The arrows below
 are "is composed from", not "must call".

@@ -3,11 +3,11 @@
 Read this whenever one delivered image contains two or more molecular, crystal,
 polyhedral, orbital, or trajectory panels. The central rule is:
 
-MatterVis currently has no agent-facing multi-panel compositor. Render and
+Atomaestro currently has no agent-facing multi-panel compositor. Render and
 verify each panel separately with the explicit CPU or Plotly path, then use a
 separate authorized composition tool. Do not invoke legacy private publication
 builders. The installation requirement is determined by each panel render; no
-additional MatterVis extra exists for composition.
+additional Atomaestro extra exists for composition.
 
 > A panel has a world-space structure, a camera projection, a renderer-owned
 > scene domain, a composition cell, and a paper canvas. Diagnose those layers in
@@ -196,7 +196,7 @@ marked pending.
 
 For HOMO, LUMO, spin-density, or electron-density comparisons:
 
-- render each cube as a separate MatterVis panel before external composition;
+- render each cube as a separate Atomaestro panel before external composition;
 - remove interaction-only picking traces (`atom-selection`, `bond-selection`,
    and disorder-preview helpers) from static exports;
 - use one explicit isovalue for every panel representing the same scalar field;

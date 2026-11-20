@@ -1,4 +1,4 @@
-# MatterVis performance notes
+# Atomaestro performance notes
 
 This file records developer benchmark results for the Phase 1 performance
 cleanup. Benchmarks are run with:
@@ -22,7 +22,7 @@ python -m pytest tests/ -n 4 --dist loadfile \
 
 `loadfile` keeps every test module on one worker, preserving module-level
 fixture and state assumptions while allowing independent files to run in
-parallel. Four workers are fixed deliberately: MatterVis tests create Plotly,
+parallel. Four workers are fixed deliberately: Atomaestro tests create Plotly,
 Matplotlib, Dash, and topology objects, so unbounded `-n auto` can trade wall
 time for excessive memory pressure.
 
@@ -64,7 +64,7 @@ Each scene and figure report keeps one explicit cold sample separate from the
 warm repeated samples. Do not compare cProfile wall time with these values: the
 profiler changes the absolute runtime substantially.
 
-The JSON report includes the fixture SHA-256, MatterVis revision, dependency
+The JSON report includes the fixture SHA-256, Atomaestro revision, dependency
 provenance, peak RSS, existing perf events, and a versioned oracle with separate
 section digests. A section digest changing is a chemistry/rendering regression
 signal, not a performance result by itself.

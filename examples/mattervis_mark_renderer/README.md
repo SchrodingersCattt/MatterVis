@@ -1,7 +1,7 @@
 # mattervis-mark-renderer
 
-Example terminal renderer for MatterVis. It is a separate distribution: install
-it beside MatterVis and select it by id. The package is not part of
+Example terminal renderer for Atomaestro. It is a separate distribution: install
+it beside Atomaestro and select it by id. The package is not part of
 `mat_viewer` and does not replace `mattervis.native-v1`.
 
 The picture is ASCII only. Each visible site is one character: `1` (front),
@@ -13,13 +13,13 @@ camera.
 
 ## Install
 
-From a checkout that already has MatterVis installed:
+From a checkout that already has Atomaestro installed:
 
 ```bash
 python -m pip install --no-deps examples/mattervis_mark_renderer
 ```
 
-`--no-deps` avoids resolving MatterVis again. The package version is `0.1.0`.
+`--no-deps` avoids resolving Atomaestro again. The package version is `0.1.0`.
 
 ## Select it
 
@@ -74,7 +74,7 @@ python -c "from mattervis_mark_renderer import create_renderer; print(create_ren
 ```
 
 A missing id, a wrong API version, an unknown option, a pin mismatch, or a
-malformed frame fails the session. MatterVis does not draw the native picture
+malformed frame fails the session. Atomaestro does not draw the native picture
 instead.
 
 Python entry points run with host privileges. This package is a trusted local
