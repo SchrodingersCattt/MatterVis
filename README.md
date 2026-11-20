@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](#)
 [![PyPI](https://img.shields.io/pypi/v/matter-vis.svg)](https://pypi.org/project/matter-vis/)
-[![CI](https://github.com/SchrodingersCattt/Atomestro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml)
+[![CI](https://github.com/SchrodingersCattt/Atomestro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SchrodingersCattt/Atomestro/actions/workflows/ci.yml)
 
 > **Rebranding in progress.** This repository has been renamed from **MatterVis** to **Atomestro**. The new GitHub name is effective now; the **PyPI distribution is still `matter-vis`**, the CLI is still **`mat-vis`**, and Python imports still use **`mat_viewer`**. The next release is planned to introduce the new package/CLI names while preserving compatible legacy entry points. Until that release, follow the install and CLI commands below. See [the migration tracker](https://github.com/SchrodingersCattt/Atomestro/issues/316) for details.
 
