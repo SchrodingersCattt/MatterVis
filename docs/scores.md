@@ -217,18 +217,23 @@ Not strictly a *score* but a very useful geometric summary for visualisation:
 | `vertices` | `list[list[float]]` | Cartesian coordinates of every shell atom |
 | `simplices` | `list[list[int]]` | triangle indices of the convex hull |
 | `edges` | `list[list[int]]` | unique undirected edges of the hull |
-| `degenerate` | bool, optional | present when the points do not span a 3D polyhedron |
-| `reason` | str, optional | `not_a_3d_polyhedron` for that flat shell |
+| `degenerate` | bool, optional | present when no hull faces were generated |
+| `reason` | str, optional | `not_a_3d_polyhedron` when the affine rank is below 3; `qhull_numerical_failure` when the points span 3D and Qhull still rejects them |
+| `affine_rank` | int, optional | rank used to choose `reason` after a `QhullError` |
 
 The renderer draws `hull.simplices` as a translucent mesh and `hull.edges` as
 a thick line trace to produce the purple polyhedra in the README screenshots.
 If `scipy.spatial.ConvexHull` is unavailable the hull gracefully falls back
 to `{vertices: [...], simplices: [], edges: []}` and only the vertices are
-shown. Coplanar or collinear ligands make Qhull raise `QhullError` instead.
-MatterVis then returns the same empty face list with `degenerate: true` and
-does not assign a 3D shape label. The coordination number and ligand
-coordinates stay as MolCrysKit reported them. A hull Qhull accepts is
-unchanged.
+shown. Coplanar or collinear ligands make Qhull raise `QhullError`. MatterVis
+calls that flat only when the centered coordinates have affine rank below 3
+(`AFFINE_RANK_RELATIVE_TOLERANCE` 1e-8 of the largest singular value, and at
+least 1e-8 absolute). The empty face list then has `degenerate: true` and
+`reason: not_a_3d_polyhedron`, and the shape card does not assign a 3D label.
+A full-rank set that Qhull still rejects keeps the empty face list with
+`reason: qhull_numerical_failure` and is not described as a planar shell.
+The coordination number and ligand coordinates stay as MolCrysKit reported
+them. A hull Qhull accepts is unchanged.
 
 ---
 

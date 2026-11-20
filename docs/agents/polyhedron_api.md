@@ -143,14 +143,19 @@ so an analysis card can show the miss.
 
 Four or more ligands can still fail to be a polyhedron when they are
 coplanar or collinear. MolCrysKit `convex_hull_payload` asks Qhull for a
-volume and raises `QhullError` (QH6154) on that flat set. MatterVis keeps
+volume and raises `QhullError` (QH6154) on that flat set. Atomaestro keeps
 the ligand coordinates and coordination number MolCrysKit reported, stores
-`hull.simplices = []` and `hull.edges = []`, and sets `hull.degenerate` plus
-`hull.reason = "not_a_3d_polyhedron"`. `gap_info.rejection_reason` is
-`not_a_3d_polyhedron` when MolCrysKit did not already record a rejection.
-The shape card does not assign a 3D catalogue label. The analysis text says
-that no faces were generated. A shell Qhull accepts, including an
-octahedron with continuous shape measure 0, is unchanged.
+`hull.simplices = []` and `hull.edges = []`, and sets `hull.degenerate`.
+`hull.reason` is `not_a_3d_polyhedron` only when the affine rank of the
+centered coordinates is below 3. The rank tolerance is 1e-8 times the
+largest singular value, and at least 1e-8 absolute. A full-rank set that
+Qhull still rejects uses `hull.reason = "qhull_numerical_failure"` and
+`hull.affine_rank = 3`. `gap_info.rejection_reason` copies that hull reason
+when MolCrysKit did not already record a rejection. The shape card does not
+assign a 3D catalogue label. The analysis text says that no faces were
+generated, and it calls the shell coplanar or collinear only for the rank
+failure. A shell Qhull accepts, including an octahedron with continuous
+shape measure 0, is unchanged.
 
 A JSON `disorder_policy` on one CLI `--polyhedron` object overrides
 `--polyhedron-disorder` for that overlay. Unknown values are rejected.

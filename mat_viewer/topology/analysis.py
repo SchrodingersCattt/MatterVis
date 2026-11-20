@@ -32,7 +32,7 @@ from .disorder_policy import (
     invoke_find_polyhedra,
     normalize_disorder_policy,
 )
-from .hull_payload import note_degenerate_hull, render_hull_payload
+from .hull_payload import note_degenerate_hull, rejected_hull_card, render_hull_payload
 from .mck_record import _mck_polyhedron_record
 
 # Dropdown and persisted rows may still carry the historical "(auto)" token.
@@ -680,7 +680,7 @@ def _analyze_topology_uncached(
     if hull.get("degenerate"):
         # A flat shell is not an octahedron with a large CShM. Skip the
         # 3D catalogue so the card does not invent a polyhedron label.
-        shape = _degenerate_shape_payload(len(np.asarray(shell_coords)))
+        shape = _degenerate_shape_payload(len(np.asarray(shell_coords)), hull.get("reason"))
     else:
         shape = classify_shell_payload_impl(shell_coords, center)
     # The diagnostics panel also asks MolCrysKit for a best planar subset;
@@ -821,15 +821,15 @@ def _sanitize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
-def _degenerate_shape_payload(coordination_number: int) -> dict[str, Any]:
-    """Shape card for ligands that do not span a 3D polyhedron."""
+def _degenerate_shape_payload(
+    coordination_number: int,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Shape card when the renderer did not build hull faces."""
     payload = _empty_shape_payload()
     payload["coordination_number"] = int(coordination_number)
     payload["degenerate"] = True
-    payload["error"] = (
-        "Ligand positions do not span a 3D polyhedron "
-        "(coplanar or collinear). No faces were generated."
-    )
+    payload["hull_reason"], payload["error"] = rejected_hull_card(reason)
     return payload
 
 
