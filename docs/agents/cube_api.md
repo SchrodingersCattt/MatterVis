@@ -74,9 +74,12 @@ reference plan's direction and up vector, keeps orthographic projection, and
 uses the largest fitted half-height. Passing a different percentile isovalue
 per panel is not that contract.
 
-MatterVis does not Taubin-smooth isosurfaces. The fit reads the vertex array
-that will be drawn, so a smoother that replaces those vertices first is what
-the camera uses.
+The automatic camera reads the isosurface vertices stored on the scene.
+Those vertices are the visible mesh after a density mask, a cell clip, and
+any smoothing. An empty stored list means nothing of the surface is drawn;
+the fit does not march the cube again and restore the removed lobes. Zoom,
+framing margin, orthographic scale, and an explicit view direction or
+lattice axis go through `resolve_content_view`.
 
 `--check` resolves `[cube]` without loading the file or creating output.
 

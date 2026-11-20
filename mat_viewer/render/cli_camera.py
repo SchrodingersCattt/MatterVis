@@ -107,9 +107,8 @@ def _camera_spec(
         bounds_corners,
         content_direction_or_none,
         isosurface_content_fit,
-        projected_half_extents,
+        orthographic_scale_for_points,
         remember_camera_fit,
-        scale_orthographic_half_height,
         scale_perspective_distance,
         zoom_and_margin,
     )
@@ -244,16 +243,13 @@ def _camera_spec(
             up = np.array([1.0, 0.0, 0.0])
     up /= np.linalg.norm(up)
     if args.projection == "orthographic" and requested_ortho_scale is None:
-        view_to_camera = direction / direction_norm
-        forward = -view_to_camera
-        right = np.cross(forward, up)
-        right /= np.linalg.norm(right)
-        screen_up = np.cross(right, forward)
-        half_width, half_height = projected_half_extents(
-            fit_points, fit_radii, target, right, screen_up
-        )
-        ortho_scale = scale_orthographic_half_height(
-            max(half_height, half_width / aspect, 0.5),
+        ortho_scale = orthographic_scale_for_points(
+            fit_points,
+            fit_radii,
+            target,
+            direction / direction_norm,
+            up,
+            aspect=aspect,
             zoom=zoom,
             framing_margin=framing_margin,
         )

@@ -16,6 +16,8 @@ from mat_viewer.render.geometry import unit_cell_primitive
 from mat_viewer.render.isosurface_framing import (
     cube_grid_corner_extents,
     isosurface_mesh_extents,
+    isosurface_mesh_vertices,
+    resolve_content_view,
     view_direction_for_content,
 )
 from mat_viewer.render.planning import prepare_render
@@ -371,6 +373,71 @@ def test_cpu_render_of_a_pz_pair_shows_a_waist_rather_than_a_speck_or_disk() -> 
     blue = (image[:, :, 2] > image[:, :, 0] + 20) & foreground
     assert int(orange.sum()) > 20
     assert int(blue.sum()) > 20
+
+
+def test_content_view_resolver_pins_scale_and_direction_precedence() -> None:
+    lobe_a = np.stack(
+        (
+            np.linspace(-3.2, -2.2, 12),
+            np.zeros(12),
+            np.linspace(-0.2, 0.2, 12),
+        ),
+        axis=1,
+    )
+    lobe_b = lobe_a.copy()
+    lobe_b[:, 0] *= -1.0
+    both = np.vstack((lobe_a, lobe_b))
+    base = resolve_content_view(both, width=200, height=100)
+    zoomed = resolve_content_view(both, width=200, height=100, zoom=2.0)
+    wider = resolve_content_view(both, width=200, height=100, framing_margin=2.24)
+    pinned = resolve_content_view(
+        both, width=200, height=100, ortho_scale=7.5, zoom=4.0
+    )
+    directed = resolve_content_view(
+        both, width=200, height=100, view_direction=[0.0, 0.0, 1.0], zoom=3.0
+    )
+    lattice = resolve_content_view(both, width=200, height=100, camera_axis="c*")
+    kept = resolve_content_view(lobe_a, width=200, height=100)
+
+    assert zoomed["ortho_scale"] == pytest.approx(base["ortho_scale"] / 2.0)
+    assert zoomed["direction"] == pytest.approx(base["direction"])
+    assert wider["ortho_scale"] == pytest.approx(base["ortho_scale"] * 2.0)
+    assert pinned["ortho_scale"] == pytest.approx(7.5)
+    assert pinned["scale_authority"] == "ortho_scale"
+    assert pinned["direction"] == pytest.approx(base["direction"])
+    assert directed["authority"] == "view_direction"
+    assert directed["direction"] == pytest.approx([0.0, 0.0, 1.0])
+    assert lattice["authority"] == "camera_axis"
+    assert lattice["direction"] is None
+    assert not np.allclose(kept["target"], base["target"])
+    assert kept["ortho_scale"] < base["ortho_scale"]
+
+
+def test_empty_stored_isosurface_is_not_replaced_by_the_grid(monkeypatch) -> None:
+    structure, _cube, atom = _padded_orbital()
+    scene = structure.frames[0].bundle.scene
+    scene["isosurfaces"] = []
+
+    def _must_not_march(*_args, **_kwargs):
+        raise AssertionError("stored isosurface list must not be remeshed")
+
+    monkeypatch.setattr(
+        "mat_viewer.cube.cpu.cube_isosurface_meshes", _must_not_march
+    )
+    vertices = isosurface_mesh_vertices(scene, {"isosurface_enabled": True})
+    assert len(vertices) == 0
+    camera = _camera_spec(
+        structure, _camera_args(show_unit_cell=True), display="unit_cell"
+    )
+    assert scene["isosurfaces"] == []
+    assert np.linalg.norm(np.asarray(camera.target) - atom) < 1.6
+
+    monkeypatch.undo()
+    full = _padded_orbital()
+    full_camera = _camera_spec(
+        full[0], _camera_args(show_unit_cell=True), display="unit_cell"
+    )
+    assert camera.ortho_scale < full_camera.ortho_scale
 
 
 def test_camera_request_reports_zoom_and_framing_margin() -> None:

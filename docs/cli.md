@@ -359,9 +359,11 @@ periodic cell, automatic framing likewise fits the visible atoms rather than
 hidden cell edges or vacuum padding.
 
 Cube and other isosurface renders use a different automatic fit. The frame is
-the displayed atom spheres plus the marching-cubes vertices of both phases,
+the displayed atom spheres plus the isosurface vertices stored for drawing,
 in the same origin-subtracted scene coordinates as the atoms, plus
-`--framing-margin`. Voxel-grid corners, the cube box, and cell-box or axis
+`--framing-margin`. A density mask, a clip, or a smoother has to replace
+those vertices first. An empty stored list is not filled back in from the
+grid. Voxel-grid corners, the cube box, and cell-box or axis
 lines do not own that frame, even when `--show-cell` draws the cell. A lobed
 or elongated surface is viewed from its thin side with a small tilt, so a
 2pz orbital reads as a dumbbell rather than a disk. A nearly round surface

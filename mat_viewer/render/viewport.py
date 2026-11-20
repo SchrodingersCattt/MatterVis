@@ -522,9 +522,9 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     # A cube isosurface is framed on atom spheres plus mesh vertices. The
     # unit-cell box and the voxel grid stay out of that fit even when the
     # cell is drawn, so a small orbital in a large cell is not a speck.
-    isosurface_content_fit = (
-        scene.get("cube_data") is not None and style.get("isosurface_enabled", True)
-    )
+    from .isosurface_framing import frames_isosurface_content
+
+    isosurface_content_fit = frames_isosurface_content(scene, style)
     cell_owns_cube = mode == "unit_cell" and not isosurface_content_fit
 
     def _cell_corners() -> list[np.ndarray]:
@@ -694,8 +694,7 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     # Expand viewport to include isosurface mesh extents when present.
     # Without this, low-isovalue surfaces that extend beyond the atom
     # positions get clipped at the Plotly axis boundary.
-    cube_data = scene.get("cube_data")
-    if cube_data is not None and style.get("isosurface_enabled", True):
+    if frames_isosurface_content(scene, style):
         from .traces_isosurface import isosurface_mesh_extents
 
         iso_min, iso_max = isosurface_mesh_extents(scene, style)

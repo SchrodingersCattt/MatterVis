@@ -5,9 +5,10 @@ will be drawn, in the same origin-subtracted Cartesian frame as
 ``draw_atoms``. Cube-grid corners, the cube box, and cell or axis lines are
 not framing content.
 
-MatterVis does not run Taubin smoothing. Framing reads the vertex array that
-is stored for drawing. A smoother that replaces those vertices before the
-fit, including a future Taubin pass, is therefore what the camera sees.
+Framing reads the vertex array stored for drawing. A density mask, a clip,
+or a smoother has to replace those vertices first. This module does not
+march the cube again when that list is already present, including when the
+list is empty because every triangle was removed.
 
 Plotly and the CPU rasterizer do not produce the same pixels. This module
 only decides which points own the automatic camera.
@@ -125,26 +126,40 @@ def _stored_mesh_vertices(scene: Mapping[str, Any], cube: Any) -> np.ndarray | N
     return np.vstack(chunks)
 
 
+def frames_isosurface_content(
+    scene: Mapping[str, Any] | None,
+    style: Mapping[str, Any] | None = None,
+) -> bool:
+    """Whether automatic ranges should follow the isosurface instead of the cell."""
+    if not isinstance(scene, Mapping) or scene.get("cube_data") is None:
+        return False
+    style = style or {}
+    return bool(style.get("isosurface_enabled", True))
+
+
 def isosurface_mesh_vertices(
     scene: Mapping[str, Any],
     style: Mapping[str, Any] | None = None,
 ) -> np.ndarray | None:
     """Return drawn isosurface vertices in the scene frame, both phases.
 
-    ``None`` means the scene has no cube. An empty array means a cube whose
-    active isovalue produced no surface. Stored mesh vertices win, so the
-    fit matches the triangles that will be drawn.
+    ``None`` means the scene has no cube and no stored mesh. An empty array
+    means nothing is drawn: either the isovalue produced no surface, or a
+    later mask or clip removed every triangle. A stored ``isosurfaces`` list
+    is that visible mesh and is not replaced by a fresh marching-cubes pass.
     """
     style = style or {}
     cube = scene.get("cube_data")
-    if cube is None:
-        stored = _stored_mesh_vertices(scene, None)
-        return stored
-    if not style.get("isosurface_enabled", True):
+    if cube is not None and not style.get("isosurface_enabled", True):
         return None
-    stored = _stored_mesh_vertices(scene, cube)
-    if stored is not None and len(stored):
-        return stored
+    if isinstance(scene, Mapping) and "isosurfaces" in scene:
+        stored = _stored_mesh_vertices(scene, None)
+        return stored if stored is not None else np.empty((0, 3), dtype=float)
+    if cube is None:
+        return None
+    if getattr(cube, "surface_meshes", None) is not None:
+        stored = _stored_mesh_vertices({}, cube)
+        return stored if stored is not None else np.empty((0, 3), dtype=float)
     isovalue = style.get("isosurface_isovalue", style.get("isovalue"))
     stride = int(style.get("isosurface_stride", 2) or 2)
     percentile = float(style.get("isosurface_percentile", 98.5))
@@ -225,6 +240,131 @@ def scale_orthographic_half_height(
 ) -> float:
     """Apply ``half * framing_margin / zoom`` (``>1`` zooms in)."""
     return float(fitted_half_height) * float(framing_margin) / float(zoom)
+
+
+def orthographic_scale_for_points(
+    points: np.ndarray,
+    radii: np.ndarray,
+    target: np.ndarray,
+    direction: np.ndarray,
+    up: np.ndarray,
+    *,
+    aspect: float,
+    zoom: float,
+    framing_margin: float,
+) -> float:
+    """Orthographic half-height of ``points`` after zoom and framing margin.
+
+    ``zoom > 1`` tightens the fit. ``framing_margin`` pads it. Callers that
+    already have an explicit ``--ortho-scale`` do not call this.
+    """
+    view_to_camera = np.asarray(direction, dtype=float)
+    view_to_camera = view_to_camera / max(float(np.linalg.norm(view_to_camera)), 1e-12)
+    screen_up = np.asarray(up, dtype=float)
+    forward = -view_to_camera
+    right = np.cross(forward, screen_up)
+    right_norm = float(np.linalg.norm(right))
+    if right_norm < 1e-8:
+        screen_up = np.asarray([0.0, 1.0, 0.0])
+        right = np.cross(forward, screen_up)
+        right_norm = float(np.linalg.norm(right))
+    right /= right_norm
+    screen_up = np.cross(right, forward)
+    screen_up /= max(float(np.linalg.norm(screen_up)), 1e-12)
+    half_width, half_height = projected_half_extents(
+        points, radii, target, right, screen_up
+    )
+    return scale_orthographic_half_height(
+        max(half_height, half_width / max(float(aspect), 1e-6), 0.5),
+        zoom=zoom,
+        framing_margin=framing_margin,
+    )
+
+
+def resolve_content_view(
+    points: Any,
+    radii: Any = None,
+    *,
+    width: int,
+    height: int,
+    zoom: float = DEFAULT_VIEW_ZOOM,
+    framing_margin: float = DEFAULT_FRAMING_MARGIN,
+    ortho_scale: float | None = None,
+    view_direction: Any = None,
+    camera_axis: str | None = None,
+    camera_up: Any = None,
+    target: Any = None,
+) -> dict[str, Any]:
+    """One automatic orthographic view for content points.
+
+    Precedence, in order:
+
+    - ``camera_axis`` leaves the direction to the lattice helper. This
+      function returns no direction in that case.
+    - ``view_direction`` replaces the content direction and does not follow
+      the point cloud.
+    - otherwise the content cloud chooses the direction.
+    - ``ortho_scale`` replaces the fitted half-height and ignores zoom and
+      framing margin.
+    - otherwise the half-height is ``projected * framing_margin / zoom``.
+
+    ``points`` must already be the visible geometry. A mask, clip, or
+    smoother belongs before this call.
+    """
+    cloud = _finite_points(points)
+    if target is None:
+        centre = cloud.mean(axis=0) if len(cloud) else np.zeros(3)
+    else:
+        centre = np.asarray(target, dtype=float)
+    pad = np.asarray([] if radii is None else radii, dtype=float)
+    authority = "content"
+    direction: np.ndarray | None
+    up: np.ndarray | None
+    if camera_axis is not None:
+        authority = "camera_axis"
+        direction = None
+        up = None
+    elif view_direction is not None:
+        authority = "view_direction"
+        direction = np.asarray(view_direction, dtype=float)
+        norm = float(np.linalg.norm(direction))
+        if norm < 1e-12:
+            raise ValueError("direction must be non-zero")
+        direction = direction / norm
+        up = np.asarray(
+            [0.0, 0.0, 1.0] if camera_up is None else camera_up, dtype=float
+        )
+    else:
+        direction, up = view_direction_for_content(cloud)
+        if camera_up is not None:
+            up = np.asarray(camera_up, dtype=float)
+    scale_authority = "fit"
+    if ortho_scale is not None:
+        scale = float(ortho_scale)
+        if not np.isfinite(scale) or scale <= 0.0:
+            raise ValueError("ortho_scale must be finite and positive")
+        scale_authority = "ortho_scale"
+    elif direction is None or up is None or len(cloud) == 0:
+        scale = None
+    else:
+        scale = orthographic_scale_for_points(
+            cloud,
+            pad,
+            centre,
+            direction,
+            up,
+            aspect=float(width) / float(height),
+            zoom=zoom,
+            framing_margin=framing_margin,
+        )
+    return {
+        "authority": authority,
+        "scale_authority": scale_authority,
+        "direction": direction,
+        "up": up,
+        "ortho_scale": scale,
+        "target": centre,
+    }
 
 
 def scale_perspective_distance(
@@ -442,10 +582,12 @@ def isosurface_content_fit(structure: Any, bundle: Any, scene: Any, args: Any, p
     once; later animation frames reuse that cache.
     """
     cube = bundle_cube(bundle, scene if isinstance(scene, Mapping) else None)
-    stored = isinstance(scene, Mapping) and bool(scene.get("isosurfaces"))
+    stored = isinstance(scene, Mapping) and "isosurfaces" in scene
     if cube is None and not stored:
         return None
-    if prepare and cube is not None:
+    # A list already on the scene is the visible mesh, including an empty
+    # list left by a mask or clip. Re-extracting here would ignore that.
+    if prepare and cube is not None and not stored:
         ensure_structure_isosurfaces(structure, args)
     return content_samples_for_scene(
         bundle, scene if isinstance(scene, Mapping) else {}, args
@@ -503,7 +645,8 @@ def content_direction_or_none(mode: str, args: Any, orientation: np.ndarray | No
         return None
     if orientation is None or len(orientation) == 0:
         return None
-    return view_direction_for_content(orientation)
+    resolved = resolve_content_view(orientation, width=1, height=1)
+    return resolved["direction"], resolved["up"]
 
 
 def projected_half_extents(
@@ -591,34 +734,22 @@ def fit_primitives(primitives: Any, *, width: int, height: int):
     target = 0.5 * (minimum + maximum)
     radius = max(float(np.linalg.norm(combined - target, axis=1).max()), 0.5)
     if isosurface_fit:
-        direction, up = view_direction_for_content(combined)
+        resolved = resolve_content_view(
+            combined,
+            width=width,
+            height=height,
+            target=target,
+        )
+        direction = resolved["direction"]
+        up = resolved["up"]
+        ortho_scale = resolved["ortho_scale"]
     else:
         direction = np.asarray([1.0, 1.0, 0.8], dtype=float)
         direction = direction / np.linalg.norm(direction)
         up = np.asarray([0.0, 0.0, 1.0])
-    distance = max(radius * 3.2, 2.0)
-    aspect = float(width) / float(height)
-    if isosurface_fit:
-        forward = -np.asarray(direction, dtype=float)
-        right = np.cross(forward, up)
-        right_norm = float(np.linalg.norm(right))
-        if right_norm < 1e-8:
-            up = np.asarray([0.0, 1.0, 0.0])
-            right = np.cross(forward, up)
-            right_norm = float(np.linalg.norm(right))
-        right /= right_norm
-        screen_up = np.cross(right, forward)
-        screen_up /= max(float(np.linalg.norm(screen_up)), 1e-12)
-        half_width, half_height = projected_half_extents(
-            combined, np.zeros(len(combined)), target, right, screen_up
-        )
-        ortho_scale = scale_orthographic_half_height(
-            max(half_height, half_width / aspect, 0.5),
-            zoom=1.0,
-            framing_margin=DEFAULT_FRAMING_MARGIN,
-        )
-    else:
+        aspect = float(width) / float(height)
         ortho_scale = radius * 1.18 / min(1.0, aspect)
+    distance = max(radius * 3.2, 2.0)
     return CameraSpec.looking_along(
         direction,
         target=target,
@@ -645,7 +776,7 @@ def content_samples_for_scene(
     """
     cube = bundle_cube(bundle, scene)
     if cube is None and not (
-        isinstance(scene, Mapping) and scene.get("isosurfaces")
+        isinstance(scene, Mapping) and "isosurfaces" in scene
     ):
         return None
     if isinstance(scene, Mapping) and scene.get("cube_data") is None and cube is not None:
@@ -687,9 +818,12 @@ __all__ = [
     "content_samples_for_scene",
     "cube_grid_corner_extents",
     "ensure_structure_isosurfaces",
+    "frames_isosurface_content",
     "isosurface_mesh_extents",
     "isosurface_mesh_vertices",
+    "orthographic_scale_for_points",
     "primitive_is_frame_decoration",
+    "resolve_content_view",
     "scale_orthographic_half_height",
     "scale_perspective_distance",
     "view_direction_for_content",
