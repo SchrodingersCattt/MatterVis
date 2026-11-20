@@ -63,6 +63,7 @@ The same routing as a quick table:
 | Render cube isosurfaces as complete triangulated wireframes | [`cube_api.md`](cube_api.md#isosurface-wireframe) |
 | Color a cube isosurface from a second scalar cube | [`cube_api.md`](cube_api.md#isosurface-color) |
 | Write one offscreen PyVista PNG of a cube isosurface | [`cube_api.md`](cube_api.md#vtk-offscreen-figures) |
+| Clip displayed cube geometry to the primitive cell (experimental PyVista entry today) | [`cube_api.md`](cube_api.md#cell-boundary-policy) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Color atoms by charge, velocity, stress, or another per-atom field | [`atom_property_coloring.md`](atom_property_coloring.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |

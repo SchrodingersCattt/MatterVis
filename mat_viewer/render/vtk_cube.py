@@ -6,11 +6,17 @@ output may differ from the CPU and Plotly backends; this entry does not
 claim cross-backend pixel parity. Depth peeling, Taubin smoothing, and
 the native window class remain VTK-specific options.
 
-Isosurface shade uses the shared
+Isosurface shade uses
 :class:`~mat_viewer.render.figure_shade.FigureShade` coefficients
-(ambient, diffuse, specular, shininess). This module lowers those four
-numbers onto a VTK property and maps ``shininess`` to specular power.
-It does not choose elements, radii, or bond cutoffs. Positions use the cube
+(ambient, diffuse, specular, shininess). Those names match a surface
+response. This module lowers the four numbers onto a VTK property and
+maps ``shininess`` to specular power. It does not define material presets
+or lighting rigs. The default three lights are experimental: they are not
+``studio_soft`` and not ``studio_three_point``.
+Cell clipping follows :class:`~mat_viewer.render.cell_clip.CellBoundaryPolicy`
+and :func:`~mat_viewer.render.cell_clip.cell_clip_planes`. This module only
+installs those planes on VTK mappers. The helper does not choose elements,
+radii, or bond cutoffs. Positions use the cube
 frame ``origin + index @ axes`` (voxel vectors are rows), the same frame as
 :class:`mat_viewer.cube.io.CubeData`. The color grid shares that origin,
 those axes, and that shape.
@@ -47,6 +53,7 @@ import numpy as np
 from ._vtk_cube_color import _color_limits, _paint
 from ._vtk_cube_color import _colormap as _colormap  # noqa: PLC0414
 from ._vtk_cube_geometry import (
+    _CAMERA_DISTANCE_IN_RADII,
     _SCALAR,
     _as_atoms,
     _as_axes,
@@ -78,7 +85,12 @@ from ._vtk_cube_geometry import (
     _unit_interval,
     _view_rig,
 )
-from .figure_shade import FigureShade
+from .cell_clip import CellBoundaryPolicy, cell_clip_planes
+from .figure_shade import (
+    FigureShade,
+    evaluate_vtk_shade,
+    studio_soft_world_direction,
+)
 
 _BOND_TUBE_SIDES = 8
 _SURFACE_SPECULAR = 0.08
@@ -173,6 +185,8 @@ def render_cube_figure(
     cell_edge_color: tuple[float, float, float] = (0.15, 0.15, 0.15),
     cell_edge_width: float = 2.0,
     cell_edge_mode: str = "box",
+    boundary_policy: str = "none",
+    lighting: str | Mapping | None = None,
 ) -> None:
     """Write one PNG. ``look`` points from the camera toward the scene.
 
@@ -200,7 +214,20 @@ def render_cube_figure(
     so opposite ``look`` directions select opposite faces.
     Omit both cell arguments to leave the box off. ``bond_color=None``
     draws each half of a bond in the endpoint atom color; a single RGB triple
-    keeps a uniform stick.
+    keeps a uniform stick. ``boundary_policy`` is a
+    :class:`~mat_viewer.render.cell_clip.CellBoundaryPolicy` mode.
+    Planes come from :func:`~mat_viewer.render.cell_clip.cell_clip_planes`.
+    ``boundary_policy='surface'`` clips only the
+    isosurface to the supplied cell, preserving explicit atoms and bonds.
+    ``'strict'`` clips surfaces, atom spheres and bond tubes; ``'none'``
+    preserves the historical uncut geometry. Clipping is visual and uncapped,
+    after smoothing/repetition; it does not wrap or delete source atoms.
+    ``surface`` and ``strict`` aim the camera at the clipping cell and at
+    geometry that policy still draws, rather than at the uncut repeated bounds.
+    ``lighting=None`` keeps the experimental three-light rig. ``"studio_soft"``
+    installs the one historical camera-space light. ``"unlit"`` draws
+    inherited colors with no directional light. ``"studio_three_point"`` and
+    a Fresnel material raise :class:`~mat_viewer.render.figure_shade.VtkShadeUnsupported`.
     """
 
     iso_grid = _as_grid("iso", iso)
@@ -227,13 +254,41 @@ def render_cube_figure(
     if not np.isfinite(radius) or radius <= 0.0:
         raise ValueError("bond_radius must be finite and positive")
     bond_rgb = None if bond_color is None else _rgb01("bond_color", bond_color)
-    surface_shade = _resolve_surface_shade(
-        surface,
-        surface_ambient,
-        surface_diffuse,
-        surface_specular,
-        surface_specular_power,
-    )
+    if lighting is not None or _surface_has_contract_fields(surface):
+        _reject_combined_shade(
+            surface,
+            surface_ambient,
+            surface_diffuse,
+            surface_specular,
+            surface_specular_power,
+        )
+        material = (
+            surface
+            if surface is not None
+            else FigureShade(
+                ambient=_shade_number(surface_ambient),
+                diffuse=_shade_number(surface_diffuse),
+                specular=_shade_number(surface_specular),
+                shininess=_shade_number(surface_specular_power),
+            )
+        )
+        evaluated = evaluate_vtk_shade(material, lighting)
+        surface_shade = (
+            evaluated.ambient,
+            evaluated.diffuse,
+            evaluated.specular,
+            evaluated.shininess,
+        )
+        light_mode = evaluated.lighting
+    else:
+        surface_shade = _resolve_surface_shade(
+            surface,
+            surface_ambient,
+            surface_diffuse,
+            surface_specular,
+            surface_specular_power,
+        )
+        light_mode = "experimental"
     atom_shade = _shade(
         "atom", atom_ambient, atom_diffuse, atom_specular, atom_specular_power
     )
@@ -243,6 +298,9 @@ def render_cube_figure(
         _unit_interval("bond_specular", bond_specular),
     )
     cell_box = _cell_box(cell_origin, cell_vectors)
+    policy = CellBoundaryPolicy(boundary_policy)
+    if policy.mode != "none" and cell_box is None:
+        raise ValueError("boundary_policy requires cell_origin and cell_vectors")
     cell_rgb = _rgb01("cell_edge_color", cell_edge_color)
     edge_width = float(cell_edge_width)
     if not np.isfinite(edge_width) or edge_width <= 0.0:
@@ -333,11 +391,26 @@ def render_cube_figure(
         cell_rgb,
         edge_width,
         edge_mode,
+        policy.mode,
+        light_mode,
     )
 
 
+def _clip_actors(actors, cell_box):
+    """Install primitive-cell planes on VTK mappers.
 
+    The half-spaces come from :func:`cell_clip_planes`. Scalar colors and
+    materials stay on the clipped primitives. The planes are uncapped.
+    """
 
+    from vtkmodules.vtkCommonDataModel import vtkPlane
+
+    for actor in actors:
+        for point, normal in cell_clip_planes(*cell_box):
+            plane = vtkPlane()
+            plane.SetOrigin(*point)
+            plane.SetNormal(*normal)
+            actor.mapper.AddClippingPlane(plane)
 
 
 
@@ -357,6 +430,48 @@ def _shade_number(value: float | _ShadeDefault) -> float:
     if isinstance(value, _ShadeDefault):
         return value.value
     return value
+
+
+_CONTRACT_FIELDS = {
+    "specular_tint",
+    "specular_color",
+    "fresnel_power",
+    "fresnel_center",
+    "fresnel_rim",
+    "fresnel_specular",
+    "fresnel_albedo",
+    "opacity",
+    "light_scale",
+}
+
+
+def _surface_has_contract_fields(surface: FigureShade | Mapping | None) -> bool:
+    return isinstance(surface, Mapping) and bool(set(surface) & _CONTRACT_FIELDS)
+
+
+def _reject_combined_shade(
+    surface: FigureShade | Mapping | None,
+    surface_ambient: float | _ShadeDefault,
+    surface_diffuse: float | _ShadeDefault,
+    surface_specular: float | _ShadeDefault,
+    surface_specular_power: float | _ShadeDefault,
+) -> None:
+    provided = [
+        name
+        for name, value in (
+            ("surface_ambient", surface_ambient),
+            ("surface_diffuse", surface_diffuse),
+            ("surface_specular", surface_specular),
+            ("surface_specular_power", surface_specular_power),
+        )
+        if not isinstance(value, _ShadeDefault)
+    ]
+    if surface is not None and provided:
+        names = ", ".join(provided)
+        raise ValueError(
+            "pass surface or the surface_* shade arguments, not both "
+            f"({names})"
+        )
 
 
 def _figure_shade(surface: FigureShade | Mapping) -> FigureShade:
@@ -434,6 +549,29 @@ def _resolve_surface_shade(
 
 
 
+def _framed_extent(
+    mesh_points: np.ndarray,
+    xyz: np.ndarray,
+    cell_points: np.ndarray,
+    boundary_policy: str,
+) -> tuple[np.ndarray, float]:
+    """Camera bounds for the geometry a boundary policy leaves visible.
+
+    ``none`` frames the uncut mesh, atoms, and cell. ``surface`` and
+    ``strict`` drop isosurface copies outside the clipping cell. ``strict``
+    also drops explicit atoms and bonds outside that cell, so a repeated
+    supercell cropped back to the primitive cell stays centered.
+    """
+
+    if boundary_policy == "none":
+        points = (
+            np.vstack([np.asarray(mesh_points, dtype=float), cell_points])
+            if len(cell_points)
+            else np.asarray(mesh_points, dtype=float)
+        )
+        return _scene_extent(points, xyz)
+    visible_atoms = xyz if boundary_policy == "surface" else np.zeros((0, 3))
+    return _scene_extent(cell_points, visible_atoms)
 
 
 def _shared_library(name: str) -> str | None:
@@ -467,7 +605,7 @@ def _prepare_vtk_window() -> None:
         "render_cube_figure needs a display or an offscreen OpenGL library "
         "(OSMesa or EGL) on Linux. Windows and macOS use the native VTK "
         "window. On headless Linux install the OSMesa package "
-        "(Debian/Ubuntu: libosmesa6). MatterVis does not install system "
+        "(Debian/Ubuntu: libosmesa6). Atomaestro does not install system "
         "libraries. Set VTK_DEFAULT_OPENGL_WINDOW to choose a window class "
         "this VTK build provides."
     )
@@ -518,19 +656,31 @@ def _draw(
     cell_edge_color,
     cell_edge_width,
     cell_edge_mode,
+    boundary_policy="none",
+    light_mode="experimental",
 ) -> None:
     from matplotlib.colors import ListedColormap
 
     cell_points = np.empty((0, 3))
     if cell_box is not None:
         cell_points = _cell_corners(*cell_box)
-    center, radius = _scene_extent(
-        np.vstack([np.asarray(mesh.points), cell_points])
-        if len(cell_points)
-        else np.asarray(mesh.points),
-        xyz,
+    center, radius = _framed_extent(
+        np.asarray(mesh.points),
+        np.asarray(xyz),
+        cell_points,
+        boundary_policy,
     )
     camera, focal, screen_up, lights, clipping = _view_rig(center, radius, look, up)
+    if light_mode == "unlit":
+        lights = []
+        surface_shade = (1.0, 0.0, 0.0, surface_shade[3])
+        atom_shade = (1.0, 0.0, 0.0, atom_shade[3])
+        bond_shade = (1.0, 0.0, 0.0)
+    elif light_mode == "studio_soft":
+        direction = studio_soft_world_direction(look, up)
+        direction = direction / float(np.linalg.norm(direction))
+        distance = float(radius) * _CAMERA_DISTANCE_IN_RADII
+        lights = [(center + direction * distance, 1.0)]
     # Do not assign pv.OFF_SCREEN. The plotter flag is local; the global
     # switches later plots in this process to offscreen mode.
     plotter = pv.Plotter(
@@ -543,7 +693,7 @@ def _draw(
         plotter.renderer.SetAmbient(*_RENDERER_AMBIENT)
         plotter.renderer.SetTwoSidedLighting(True)
         _apply_depth_peeling(plotter, depth_peels)
-        plotter.add_mesh(
+        surface_actor = plotter.add_mesh(
             mesh,
             scalars=_SCALAR,
             cmap=ListedColormap(lut),
@@ -595,6 +745,12 @@ def _draw(
                 specular=atom_shade[2],
                 specular_power=atom_shade[3],
             )
+        if boundary_policy != "none":
+            actors = (
+                [surface_actor] if boundary_policy == "surface"
+                else list(plotter.renderer.actors.values())
+            )
+            _clip_actors(actors, cell_box)
         if cell_box is not None:
             plotter.add_mesh(
                 _cell_edge_polydata(

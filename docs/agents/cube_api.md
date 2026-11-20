@@ -203,7 +203,7 @@ python -m pip install "matter-vis[vtk]"
 PyVista is imported only when the function is called. Windows selects
 `vtkWin32OpenGLRenderWindow` and macOS selects `vtkCocoaOpenGLRenderWindow`.
 Neither platform needs `DISPLAY`, OSMesa, or EGL. Headless Linux needs a
-system OSMesa or EGL library (Debian/Ubuntu: `libosmesa6`). MatterVis does
+system OSMesa or EGL library (Debian/Ubuntu: `libosmesa6`). Atomaestro does
 not install system libraries. On Linux, if no display and neither library is
 loadable, the call raises `RuntimeError` before opening a window. A missing
 library used to abort the interpreter inside VTK. Set
@@ -241,12 +241,25 @@ surface = FigureShade(ambient=0.7, diffuse=0.45, specular=0.08, shininess=15)
 ```
 
 Pass it as `surface=surface`. The fields are ambient, diffuse, specular,
-and shininess. Those are the same four numbers as `IsosurfaceMaterial`
-when that API is present. This helper does not import
-`IsosurfaceMaterial`, and it does not read opacity or light scale from
-that record. A mapping with exactly those four keys is accepted in place
-of `FigureShade`. `shininess` is the highlight exponent. This helper
-lowers it to VTK specular power (the Phong exponent), not a 0–1 weight.
+and shininess. Those names are the shared Blinn–Phong coefficients: three
+independent weights and a highlight exponent. This helper does not define
+`SurfaceMaterial` or `LightingRig`, does not look up presets, and does not
+rename or rescale the four numbers. A mapping with exactly those four keys
+is accepted in place of `FigureShade`. `shininess` is the highlight
+exponent. This helper lowers it to VTK specular power (the Phong exponent),
+not a 0–1 weight.
+
+`lighting` selects how those coefficients are evaluated. Omit it to keep
+the experimental three-light rig. That rig is not `studio_soft` and not
+`studio_three_point`. `lighting="studio_soft"` installs one camera-space
+light along `(-0.32, 0.42, 1.0)` (`+Z` toward the camera) at `light_scale`
+1. `lighting="unlit"` draws inherited colors and does not apply the
+directional shade; the stored coefficients stay as given.
+`studio_three_point` is rejected because that rig stores no directions and
+this helper will not invent a rig under that name. Fresnel fields
+(`glass_like`), `specular_tint="base"`, a non-white `specular_color`, and
+`opacity` or `light_scale` on the material record are rejected the same
+way. The adapter does not claim CPU or Plotly pixel parity.
 
 Omit `surface` to keep `surface_ambient`, `surface_diffuse`,
 `surface_specular`, and `surface_specular_power`. Those arguments are the
@@ -274,9 +287,11 @@ paints each half of a stick with the endpoint atom color, starting at the
 atom sphere surface so the midpoint join stays visible; a single RGB triple
 keeps a uniform stick.
 
-`look` and `up` are directions. The camera distance and the three lights
-scale with the scene radius, and the focal point is the center of the mesh
-and atom bounds, so a volume with no atoms still frames. `parallel_scale` is
+`look` and `up` are directions. With the experimental rig, the camera
+distance and the three lights scale with the scene radius. `studio_soft`
+replaces those three lights with the one historical light and does not
+reuse their intensities. The focal point is the center of the mesh and
+atom bounds, so a volume with no atoms still frames. `parallel_scale` is
 the orthographic half-height in the length unit of `axes`. `depth_peels`
 above 1 turns on depth peeling for this window. Taubin smoothing runs before
 colors are sampled onto the moved vertices. A pass that collapses the mesh
@@ -284,3 +299,45 @@ bounds is discarded. Smoothing can pull a periodic boundary off the cell face.
 
 Two calls with the same arrays write the same PNG on one machine. A different
 VTK build can move a few edge pixels.
+
+### Cell boundary policy
+
+`CellBoundaryPolicy` and `cell_clip_planes` in `mat_viewer.render.cell_clip`
+are the shared clipping contract. The domain is the primitive cell, not a
+repeated supercell. The six planes are inward Cartesian half-spaces of the
+fractional faces 0 and 1. Skew and left-handed cells take the outward
+direction from the reciprocal-lattice column and store the inward normal.
+Boundaries are uncapped. `"surface"` clips the isosurface only. `"strict"`
+also clips atoms and bonds. `"none"` does not clip. Source coordinates are
+not modified.
+
+Only the experimental PyVista helper `render_cube_figure` implements this
+policy today. CPU, Plotly, and other backends do not apply these planes and
+do not claim the same clipping or the same pixels. `boundary_policy` on that
+helper is the current implementation of this contract, not a separate VTK
+scene rule.
+
+`render_cube_figure(..., boundary_policy=...)` separates drawing a cell edge
+from clipping geometry. The default `"none"` keeps all explicit atoms, bonds,
+and isosurfaces, including content outside the drawn box. `"surface"` clips
+only the isosurface and respects all explicit atoms and supplied bonds.
+`"strict"` clips the isosurface, atom spheres, and bond tubes at all six cell
+planes. Both clipping modes require `cell_origin` and `cell_vectors`.
+They use the full three-dimensional parallelepiped, including skew and
+left-handed cells, not the screen rectangle of `cell_edge_mode="face"`.
+A projected face outline does not enclose every projection of a skew 3D cell.
+
+Clipping happens in the renderer after smoothing and repetition. It preserves
+color interpolation and does not wrap, remove, or alter the input atoms or
+bond graph. Cuts are uncapped; these modes do not invent a scalar surface or
+solid material on a cut plane. `repeat` does not enlarge the clipping box:
+pass supercell vectors explicitly to clip to a repeated domain, or keep the
+primitive vectors to clip to one cell. With `surface` or `strict`, the camera
+focal point and light distance follow that clipping cell plus geometry the
+policy still draws. `strict` frames the cell, because atoms and bonds outside
+it are removed. `surface` also includes explicit atoms and bonds, which stay
+whole. A repeated isosurface cropped to the primitive cell therefore remains
+in view when `parallel_scale` covers that cell. Image-selection policies such as
+`nearest_atom` choose periodic surface images; they are distinct from these
+clipping policies. The backend-neutral CLI and interactive viewer do not
+take `boundary_policy`.

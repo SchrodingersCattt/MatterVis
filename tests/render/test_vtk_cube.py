@@ -13,7 +13,14 @@ import pytest
 from PIL import Image
 
 from mat_viewer.render import vtk_cube
-from mat_viewer.render.figure_shade import FigureShade
+from mat_viewer.render.cell_clip import CellBoundaryPolicy, cell_clip_planes
+from mat_viewer.render.figure_shade import (
+    STUDIO_SOFT_CAMERA_DIRECTION,
+    FigureShade,
+    VtkShadeUnsupported,
+    evaluate_vtk_shade,
+    studio_soft_world_direction,
+)
 from mat_viewer.render.vtk_cube import (
     _SCALAR,
     _apply_depth_peeling,
@@ -23,6 +30,7 @@ from mat_viewer.render.vtk_cube import (
     _closed_values,
     _color_limits,
     _colormap,
+    _framed_extent,
     _marching_indices,
     _prepare_vtk_window,
     _repeat_mesh,
@@ -881,3 +889,290 @@ def _assert_figure(path: Path) -> None:
     rows, cols = np.nonzero(~near_white)
     assert int(cols.max() - cols.min()) >= 8
     assert int(rows.max() - rows.min()) >= 8
+_INSIDE_FRACTION = 1.0e-4
+_SKEW_CELL = np.array(
+    [
+        [2.0, 0.45, 0.05],
+        [0.35, 1.7, -0.2],
+        [0.15, 0.25, 2.3],
+    ]
+)
+_LEFT_HANDED_CELL = np.array(
+    [
+        [1.6, 0.3, 0.1],
+        [0.2, 1.4, 0.45],
+        [0.15, -0.35, -1.8],
+    ]
+)
+
+
+def _half_space_signs(point: np.ndarray, planes) -> np.ndarray:
+    return np.array(
+        [float(np.dot(point - plane_point, normal)) for plane_point, normal in planes]
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "vectors"),
+    [("skew", _SKEW_CELL), ("left", _LEFT_HANDED_CELL)],
+)
+def test_primitive_cell_planes_exclude_a_lattice_translation(
+    name: str,
+    vectors: np.ndarray,
+) -> None:
+    if name == "skew":
+        gram = vectors @ vectors.T
+        assert not np.allclose(gram, np.diag(np.diag(gram)))
+    else:
+        assert np.linalg.det(vectors) < 0
+    origin = np.array([0.7, -1.1, 0.4])
+    planes = cell_clip_planes(origin, vectors)
+    assert len(planes) == 6
+    inside = origin + np.full(3, _INSIDE_FRACTION) @ vectors
+    assert np.all(_half_space_signs(inside, planes) > 0.0)
+    for axis in range(3):
+        repeated = inside + vectors[axis]
+        assert np.any(_half_space_signs(repeated, planes) < 0.0)
+
+
+def test_boundary_policy_names_are_the_shared_modes() -> None:
+    assert CellBoundaryPolicy(" Surface ").mode == "surface"
+    for mode in ("none", "surface", "strict"):
+        assert CellBoundaryPolicy(mode).mode == mode
+    with pytest.raises(ValueError, match="boundary_policy must"):
+        CellBoundaryPolicy("unknown")
+    with pytest.raises(ValueError, match="linearly independent"):
+        cell_clip_planes(np.zeros(3), np.zeros((3, 3)))
+
+
+@pytest.mark.parametrize('vectors', [np.eye(3), np.array([[2., 0., 0.], [.6, 1.5, 0.], [.2, -.3, 1.]]), np.diag([-2., 3., 1.])])
+def test_cell_clip_planes_keep_only_fractional_cell(vectors):
+    origin = np.array([4., -2., 1.])
+    fractions = np.array([[.5, .5, .5], [0., 0., 0.], [1., 1., 1.],
+                          [-.1, .5, .5], [.5, 1.1, .5], [.5, .5, -.1]])
+    points = origin + fractions @ vectors
+    distances = np.array([(points - p) @ n for p, n in cell_clip_planes(origin, vectors)])
+    assert np.array_equal(np.all(distances >= -1e-12, axis=0), [True, True, True, False, False, False])
+
+
+@pytest.mark.parametrize('policy', ['surface', 'strict'])
+def test_boundary_policy_clips_selected_actors_and_preserves_input(tmp_path, monkeypatch, policy):
+    pytest.importorskip('pyvista')
+    if sys.platform == 'win32':
+        monkeypatch.setenv('VTK_DEFAULT_OPENGL_WINDOW', 'vtkWin32OpenGLRenderWindow')
+    original = vtk_cube._clip_actors
+    captured = []
+    def capture(actors, box):
+        original(actors, box)
+        captured.extend(actors)
+        assert all(a.mapper.GetNumberOfClippingPlanes() == 6 for a in actors)
+    monkeypatch.setattr(vtk_cube, '_clip_actors', capture)
+    rho, color, origin, axes, numbers, xyz = _blob()
+    xyz[1] += np.array([0., 2., 0.])  # explicit atom beyond the displayed box
+    before = xyz.copy()
+    render_cube_figure(rho, color, origin, axes, numbers, xyz, tmp_path / f'{policy}.png',
+                       cell_origin=origin, cell_vectors=axes * np.array(rho.shape)[:, None],
+                       boundary_policy=policy, **_figure_kwargs())
+    assert len(captured) == (1 if policy == 'surface' else 3)  # surface, bonds, H glyph
+    assert np.array_equal(xyz, before)
+
+
+@pytest.mark.parametrize('policy, message', [('unknown', 'boundary_policy must'), ('strict', 'requires cell_origin')])
+def test_boundary_policy_validation_precedes_window(tmp_path, policy, message):
+    rho, color, origin, axes, numbers, xyz = _blob()
+    with pytest.raises(ValueError, match=message):
+        render_cube_figure(rho, color, origin, axes, numbers, xyz, tmp_path / 'x.png',
+                           boundary_policy=policy, **_figure_kwargs())
+
+
+def test_clip_frame_uses_the_visible_cell_not_the_repeated_mesh() -> None:
+    mesh = np.array([[0.0, 0.0, 0.0], [8.0, 0.0, 0.0]])
+    atoms = np.array([[0.2, 0.2, 0.2], [7.5, 0.2, 0.2]])
+    cell = vtk_cube._cell_corners(np.zeros(3), np.eye(3))
+    strict, _radius = _framed_extent(mesh, atoms, cell, "strict")
+    surface, _radius = _framed_extent(mesh, atoms, cell, "surface")
+    uncut, _radius = _framed_extent(mesh, atoms, cell, "none")
+    assert np.allclose(strict, [0.5, 0.5, 0.5])
+    assert surface[0] > 3.0
+    assert uncut[0] > 3.0
+
+
+def _policy_color_hits(path: Path) -> dict[str, int]:
+    rgb = np.asarray(Image.open(path).convert("RGB")).astype(int)
+    red, green, blue = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+    return {
+        "yellow": int(((red > 180) & (green > 180) & (blue < 70)).sum()),
+        "green": int(((green > 180) & (red < 70) & (blue < 70)).sum()),
+        "blue": int(((blue > 150) & (blue > red + 40) & (green < 70)).sum()),
+        "red": int(((red > 150) & (red > blue + 40) & (green < 70)).sum()),
+    }
+
+
+def test_boundary_policy_keeps_or_drops_outside_geometry(tmp_path: Path) -> None:
+    pytest.importorskip("pyvista")
+    pytest.importorskip("skimage")
+    shape = (32, 32, 32)
+    axes = np.eye(3) * (4.0 / shape[0])
+    origin = np.zeros(3)
+    coords = np.stack(np.indices(shape, dtype=float), axis=-1)
+    world = origin + coords @ axes
+    center = np.array([1.5, 0.8, 0.8])
+    rho = np.exp(-np.sum((world - center) ** 2, axis=-1) / 0.5)
+    # The red cap sits entirely outside the x=1.5 clip plane.
+    color = np.where(world[..., 0] < 1.9, -1.0, 1.0)
+    hits = {}
+    for policy in ("none", "surface", "strict"):
+        output = tmp_path / f"{policy}.png"
+        render_cube_figure(
+            rho,
+            color,
+            origin,
+            axes,
+            np.array([1, 2]),
+            np.array([[0.25, 0.25, 0.80], [3.20, 0.30, 0.80]]),
+            output,
+            look=np.array([0.0, 0.0, 1.0]),
+            up=np.array([0.0, 1.0, 0.0]),
+            parallel_scale=3.4,
+            width=160,
+            height=160,
+            element_color={1: (0.0, 1.0, 0.0), 2: (1.0, 1.0, 0.0)},
+            element_radius={1: 0.25, 2: 0.25},
+            isovalue=0.45,
+            color_min=-1.0,
+            color_max=1.0,
+            color_center=0.0,
+            opacity=1.0,
+            taubin_iterations=0,
+            bonds=np.zeros((0, 2), dtype=int),
+            depth_peels=1,
+            sphere_resolution=16,
+            colormap_stops=((0, 0, 220), (220, 0, 0)),
+            surface_ambient=1.0,
+            surface_diffuse=0.0,
+            surface_specular=0.0,
+            atom_ambient=1.0,
+            atom_diffuse=0.0,
+            atom_specular=0.0,
+            cell_origin=origin,
+            cell_vectors=np.eye(3) * 1.5,
+            boundary_policy=policy,
+        )
+        hits[policy] = _policy_color_hits(output)
+    assert hits["none"]["green"] > 25
+    assert hits["none"]["yellow"] > 25
+    assert hits["none"]["blue"] > 25
+    assert hits["none"]["red"] > 25
+    assert hits["surface"]["green"] > 25
+    assert hits["surface"]["yellow"] > 25
+    assert hits["surface"]["blue"] > 25
+    assert hits["surface"]["red"] < hits["none"]["red"] / 4
+    assert hits["strict"]["green"] > 25
+    assert hits["strict"]["blue"] > 25
+    assert hits["strict"]["yellow"] < 8
+    assert hits["strict"]["red"] < hits["none"]["red"] / 4
+
+
+def test_strict_repeat_frames_the_primitive_cell(tmp_path: Path) -> None:
+    pytest.importorskip("pyvista")
+    pytest.importorskip("skimage")
+    shape = (8, 8, 8)
+    axes = np.eye(3) * 0.25
+    origin = np.zeros(3)
+    world = np.stack(np.indices(shape, dtype=float), axis=-1) @ axes
+    blob = np.array([1.15, 1.0, 1.0])
+    rho = np.exp(-np.sum((world - blob) ** 2, axis=-1) / 0.08)
+    output = tmp_path / "repeat.png"
+    render_cube_figure(
+        rho,
+        np.zeros_like(rho),
+        origin,
+        axes,
+        np.array([8]),
+        np.array([[0.45, 1.0, 1.0]]),
+        output,
+        look=np.array([0.0, 0.0, 1.0]),
+        up=np.array([0.0, 1.0, 0.0]),
+        parallel_scale=1.35,
+        width=96,
+        height=96,
+        element_color={8: (1.0, 0.0, 0.0)},
+        element_radius={8: 0.22},
+        isovalue=0.5,
+        opacity=1.0,
+        taubin_iterations=0,
+        repeat=(6, 1, 1),
+        bonds=np.zeros((0, 2), dtype=int),
+        depth_peels=1,
+        sphere_resolution=12,
+        colormap_stops=((0, 0, 180), (0, 0, 255)),
+        surface_ambient=1.0,
+        surface_diffuse=0.0,
+        surface_specular=0.0,
+        atom_ambient=1.0,
+        atom_diffuse=0.0,
+        atom_specular=0.0,
+        cell_origin=origin,
+        cell_vectors=axes * np.asarray(shape, dtype=float)[:, None],
+        boundary_policy="strict",
+    )
+    rgb = np.asarray(Image.open(output).convert("RGB"))
+    red = (rgb[:, :, 0] > 180) & (rgb[:, :, 1] < 60) & (rgb[:, :, 2] < 60)
+    assert int(red.sum()) > 15
+    rows, cols = np.nonzero(red)
+    assert abs(float(cols.mean()) - rgb.shape[1] / 2.0) < rgb.shape[1] * 0.3
+    assert abs(float(rows.mean()) - rgb.shape[0] / 2.0) < rgb.shape[0] * 0.3
+
+
+def test_skew_cell_frame_clip_and_shade_stay_on_one_policy() -> None:
+    """One skew cell: planes, scaled domain, strict frame, and shade adapter."""
+
+    vectors = _SKEW_CELL
+    origin = np.array([0.4, -0.2, 0.1])
+    planes = cell_clip_planes(origin, vectors)
+    inside = origin + np.array([0.5, 0.5, 0.5]) @ vectors
+    repeated = np.vstack([inside, inside + 3.0 * vectors[0], inside + 2.0 * vectors[1]])
+    cell = vtk_cube._cell_corners(origin, vectors)
+    center, _radius = _framed_extent(repeated, repeated, cell, "strict")
+    centroid = origin + 0.5 * vectors.sum(axis=0)
+    assert np.allclose(center, centroid)
+    assert not np.allclose(center, repeated.mean(axis=0))
+    outside = origin + np.array([1.5, 0.5, 0.5]) @ vectors
+    assert np.any(_half_space_signs(outside, planes) < 0.0)
+    doubled = cell_clip_planes(origin, 2.0 * vectors)
+    assert np.all(_half_space_signs(outside, doubled) > 0.0)
+
+    record = {
+        "ambient": 0.22,
+        "diffuse": 0.38,
+        "specular": 0.75,
+        "shininess": 96.0,
+        "specular_tint": "white",
+        "fresnel_power": 0.0,
+    }
+    evaluated = evaluate_vtk_shade(record, lighting="studio_soft")
+    assert evaluated.lighting == "studio_soft"
+    assert evaluated.shade.specular == 0.75
+    assert evaluated.specular == 0.75
+    assert evaluated.shade.ambient == 0.22
+    look = np.array([0.0, 0.0, 1.0])
+    up = np.array([0.0, 1.0, 0.0])
+    world = studio_soft_world_direction(look, up)
+    side = np.cross(look, up)
+    expected = (
+        STUDIO_SOFT_CAMERA_DIRECTION[0] * side
+        + STUDIO_SOFT_CAMERA_DIRECTION[1] * up
+        + STUDIO_SOFT_CAMERA_DIRECTION[2] * (-look)
+    )
+    assert np.allclose(world, expected)
+    flat = evaluate_vtk_shade(record, lighting="unlit")
+    assert flat.lighting == "unlit"
+    assert (flat.ambient, flat.diffuse, flat.specular) == (1.0, 0.0, 0.0)
+    assert flat.shade.specular == 0.75
+    glass = {**record, "fresnel_power": 1.5, "fresnel_center": 0.12}
+    with pytest.raises(VtkShadeUnsupported, match="Fresnel"):
+        evaluate_vtk_shade(glass, lighting="studio_soft")
+    with pytest.raises(VtkShadeUnsupported, match="studio_three_point"):
+        evaluate_vtk_shade(FigureShade(0.3, 0.6, 0.35, 48.0), lighting="studio_three_point")
+    with pytest.raises(VtkShadeUnsupported, match="base"):
+        evaluate_vtk_shade({**record, "specular_tint": "base"})
