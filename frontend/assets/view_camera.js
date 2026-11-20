@@ -176,16 +176,21 @@
     if (gd.layout && gd.layout.scene && gd.layout.scene.camera) return gd.layout.scene.camera;
     return null;
   }
+  function hasCoordinateValues(value) {
+    if (!value) return false;
+    var view = typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(value);
+    if (Array.isArray(value) || view) return value.length > 0;
+    /* Plotly columns arrive as {dtype, bdata}. The object itself has no
+     * length, so an array check drops coordinates that are on the trace. */
+    return typeof value.bdata === "string" && value.bdata.length > 0;
+  }
   function visibleGeometry(gd) {
     var data = gd && Array.isArray(gd.data) ? gd.data : [];
-    function hasValues(value) {
-      return (Array.isArray(value) || (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(value))) && value.length > 0;
-    }
     return data.some(function (trace) {
       if (!trace || trace.visible === false || trace.visible === "legendonly") return false;
       var type = String(trace.type || "").toLowerCase();
-      if (type === "mesh3d") return hasValues(trace.x) && hasValues(trace.i);
-      return hasValues(trace.x) || hasValues(trace.y) || hasValues(trace.z);
+      if (type === "mesh3d") return hasCoordinateValues(trace.x) && hasCoordinateValues(trace.i);
+      return hasCoordinateValues(trace.x) || hasCoordinateValues(trace.y) || hasCoordinateValues(trace.z);
     });
   }
   function internalProjection(gd) {
@@ -397,8 +402,8 @@
       var got = projectionType(actualCamera(gd));
       if (got && got !== expected) return false;
     }
-    /* If Plotly exposes a scene/data model, require geometry to remain
-     * drawable. Isolated hosts with no data model still get the camera check. */
+    /* Coordinates have to be on a trace. A layout image is not geometry,
+     * and its source is not checked against the current scene. */
     if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd)) return false;
     if (options && options.requireEye) {
       var expectedDistance = vectorLength(camera && camera.eye);

@@ -341,5 +341,5 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
     ax.set_xlim(xlim[0] - margin, xlim[1] + margin)
     ax.set_ylim(ylim[0] - margin, ylim[1] + margin)
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
