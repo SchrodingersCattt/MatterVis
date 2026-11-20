@@ -4,13 +4,16 @@ A long-lived web process used to retain Mesh3d payloads by entry count
 only. Sixteen figure-JSON copies plus a 32-deep broadcast journal, an
 unbounded per-scene mesh cache, and unbounded scene/transform maps can
 pin hundreds of megabytes once a supercell or a dense ellipsoid mesh is
-involved. The caps below keep the hot entry for the current style (so a
-repeat view does not rebuild) and evict the least-recently-used entries
-until both the entry count and the byte budget hold.
+involved. The caps below are hard ceilings. A payload larger than its cache's
+byte budget is not retained, and eviction continues until both the
+entry count and the byte budget hold, including when the newest entry
+is the one that does not fit. The caller still receives the value it
+just built. The next identical request rebuilds it.
 
-A single newest payload is kept even when it alone exceeds its byte
-budget. Evicting that entry would force every repeat of the same style
-to rebuild, which is the regression the figure cache exists to prevent.
+``accounted_bytes`` on one cache includes every buffer that cache can
+keep alive. ``unique_retained_nbytes`` counts a shared numpy buffer
+once across caches. The process mesh pool uses that distinct total, so
+a buffer held by two maps is not treated as two reclaimable copies.
 """
 
 from __future__ import annotations
@@ -76,7 +79,8 @@ _LIMITS: dict[str, _CacheLimit] = {
     ),
 }
 
-_LOCK = threading.Lock()
+# Re-entrant: trim holds the lock and then drops entries through pop.
+_LOCK = threading.RLock()
 # Identity refs, not a WeakSet: BudgetedCache compares by contents, so it
 # cannot be a WeakSet key without collapsing equal caches together.
 _POOLS: dict[str, list[weakref.ref]] = {"mesh": []}
@@ -120,7 +124,10 @@ def _nbytes(value: Any, seen: set[int]) -> int:
         return 0
     seen.add(ident)
     if isinstance(value, np.ndarray):
-        return sys.getsizeof(value) + int(value.nbytes)
+        # ``getsizeof`` already includes the buffer of an owning array.
+        # Adding ``nbytes`` counted that buffer twice and let a single
+        # mesh through a budget it did not fit.
+        return sys.getsizeof(value)
     if isinstance(value, (bytes, bytearray, memoryview, str)):
         return sys.getsizeof(value)
     if isinstance(value, dict):
@@ -144,7 +151,9 @@ def _nbytes(value: Any, seen: set[int]) -> int:
 class BudgetedCache(OrderedDict):
     """LRU map that evicts by entry count and by accounted bytes.
 
-    ``remember`` always leaves ``key`` in the map. Older entries are
+    ``remember`` keeps ``key`` when the payload fits. A payload larger
+    than this cache's byte budget, or the only pool entry that is still
+    over the pool budget, is not stored. Older fitting entries are
     dropped until the per-cache cap holds, then until the shared pool
     that this kind belongs to holds. Callers must ``touch`` on a hit so
     the entry stays newer than idle scenes.
@@ -163,7 +172,8 @@ class BudgetedCache(OrderedDict):
                 _POOLS[pool].append(weakref.ref(self))
 
     def accounted_bytes(self) -> int:
-        return sum(self._sizes.get(key, 0) for key in self)
+        with _LOCK:
+            return sum(self._sizes.get(key, 0) for key in self)
 
     def touch(self, key: Any) -> None:
         with _LOCK:
@@ -172,9 +182,21 @@ class BudgetedCache(OrderedDict):
             self.move_to_end(key)
             self._stamps[key] = _tick()
 
-    def remember(self, key: Any, value: Any) -> None:
+    def remember(self, key: Any, value: Any) -> bool:
+        """Retain ``value`` when it fits. Return whether ``key`` stayed.
+
+        A payload larger than this cache's byte budget is not inserted.
+        An older value under the same key is dropped, so a later lookup
+        cannot return the smaller body in place of the one that did not fit.
+        """
+
         size = payload_nbytes(value)
+        limit = _LIMITS[self.kind]
         with _LOCK:
+            if size > limit.max_bytes:
+                if key in self:
+                    self._pop_locked(key)
+                return False
             self[key] = value
             self._sizes[key] = size
             self._stamps[key] = _tick()
@@ -183,8 +205,13 @@ class BudgetedCache(OrderedDict):
             pool = _LIMITS[self.kind].pool
             if pool is not None:
                 _trim_pool_locked(pool, protect=(self, key))
+            return key in self
 
     def pop(self, key: Any, *default: Any) -> Any:
+        with _LOCK:
+            return self._pop_locked(key, *default)
+
+    def _pop_locked(self, key: Any, *default: Any) -> Any:
         present = key in self
         if not present:
             if default:
@@ -195,9 +222,10 @@ class BudgetedCache(OrderedDict):
         return value
 
     def popitem(self, last: bool = True) -> tuple[Any, Any]:
-        key, value = super().popitem(last=last)
-        self._forget(key)
-        return key, value
+        with _LOCK:
+            key, value = super().popitem(last=last)
+            self._forget(key)
+            return key, value
 
     def clear(self) -> None:
         with _LOCK:
@@ -206,8 +234,9 @@ class BudgetedCache(OrderedDict):
             self._stamps.clear()
 
     def __delitem__(self, key: Any) -> None:
-        super().__delitem__(key)
-        self._forget(key)
+        with _LOCK:
+            super().__delitem__(key)
+            self._forget(key)
 
     def _forget(self, key: Any) -> None:
         self._sizes.pop(key, None)
@@ -217,14 +246,16 @@ class BudgetedCache(OrderedDict):
         limit = _LIMITS[self.kind]
         while self._over_limit(limit):
             oldest = next(iter(self), None)
-            if oldest is None or oldest == protect:
+            if oldest is None:
                 return
-            self.pop(oldest)
+            self._pop_locked(oldest)
+            if oldest == protect:
+                return
 
     def _over_limit(self, limit: _CacheLimit) -> bool:
         if len(self) > limit.max_entries:
             return True
-        return self.accounted_bytes() > limit.max_bytes and len(self) > 1
+        return self.accounted_bytes() > limit.max_bytes
 
 
 def ensure_budgeted_cache(existing: Any, kind: str) -> BudgetedCache:
@@ -275,7 +306,36 @@ def _live_caches_locked(pool: str) -> list[BudgetedCache]:
 
 
 def _pool_bytes_locked(pool: str) -> int:
-    return sum(cache.accounted_bytes() for cache in _live_caches_locked(pool))
+    """Distinct retained bytes across the live caches in ``pool``.
+
+    A numpy buffer stored by two caches counts once. Summing
+    ``accounted_bytes`` would treat that buffer as two reclaimable copies.
+    """
+
+    seen: set[int] = set()
+    total = 0
+    for cache in _live_caches_locked(pool):
+        for key in cache:
+            total += _nbytes(cache[key], seen)
+    return total
+
+
+def unique_retained_nbytes(caches: Any) -> int:
+    """Count distinct buffer bytes across ``caches``.
+
+    Each cache's ``accounted_bytes`` still includes a shared buffer,
+    because either cache can keep it alive. This total does not.
+    """
+
+    seen: set[int] = set()
+    total = 0
+    with _LOCK:
+        for cache in caches:
+            if not isinstance(cache, dict):
+                continue
+            for key in list(cache.keys()):
+                total += _nbytes(cache[key], seen)
+    return total
 
 
 def _trim_pool_locked(pool: str, *, protect: tuple[BudgetedCache, Any]) -> None:
@@ -288,14 +348,17 @@ def _trim_pool_locked(pool: str, *, protect: tuple[BudgetedCache, Any]) -> None:
             return
         victim = _oldest_in_pool_locked(pool, protect)
         if victim is None:
+            if (
+                protected_key in protected_cache
+                and _pool_bytes_locked(pool) > budget
+            ):
+                protected_cache._pop_locked(protected_key)
             return
         cache, key = victim
-        if cache is protected_cache and key == protected_key:
-            return
         if key not in cache:
             cache._forget(key)
             continue
-        cache.pop(key)
+        cache._pop_locked(key)
 
 
 def _oldest_in_pool_locked(
@@ -330,18 +393,25 @@ def remember_plain_lru(
     ordered: OrderedDict = (
         cache if isinstance(cache, OrderedDict) else OrderedDict(cache or {})
     )
-    ordered[key] = value
-    ordered.move_to_end(key)
-    sizes[key] = int(measure(value))
-    _evict_plain(
-        ordered,
-        sizes,
-        max_entries=max_entries,
-        max_bytes=max_bytes,
-        protect=key,
-        measure=measure,
-    )
-    return ordered
+    size = int(measure(value))
+    with _LOCK:
+        if size > max_bytes:
+            if key in ordered:
+                ordered.pop(key)
+            sizes.pop(key, None)
+            return ordered
+        ordered[key] = value
+        ordered.move_to_end(key)
+        sizes[key] = size
+        _evict_plain(
+            ordered,
+            sizes,
+            max_entries=max_entries,
+            max_bytes=max_bytes,
+            protect=key,
+            measure=measure,
+        )
+        return ordered
 
 
 def touch_plain_lru(cache: dict | None, key: Any) -> None:
@@ -366,12 +436,14 @@ def _evict_plain(
             accounted += sizes[item]
         return accounted
 
-    while len(cache) > max_entries or (total() > max_bytes and len(cache) > 1):
-        oldest = next(iter(cache))
-        if oldest == protect:
+    while len(cache) > max_entries or total() > max_bytes:
+        if not cache:
             break
+        oldest = next(iter(cache))
         cache.pop(oldest)
         sizes.pop(oldest, None)
+        if oldest == protect:
+            break
     for stale in [item for item in sizes if item not in cache]:
         sizes.pop(stale, None)
 
@@ -480,4 +552,5 @@ __all__ = [
     "retain_scene_render_caches",
     "scene_geometry_nbytes",
     "touch_plain_lru",
+    "unique_retained_nbytes",
 ]

@@ -31,8 +31,8 @@ from .view_updates import (
 from .wire import json_safe_wire
 
 # Entry cap for ``ViewerBackend._figure_cache``. The byte cap lives in
-# ``mat_viewer.render.retention``; both apply, and the newest entry is kept
-# even when it alone exceeds the byte budget. 16 entries still covers
+# ``mat_viewer.render.retention``. Both are hard ceilings: a payload
+# larger than the byte budget is not retained. 16 entries still covers
 # a normal tab / display-mode / slider set of small figures.
 
 # Ionic and extended inorganic lattices are read more clearly with a thin

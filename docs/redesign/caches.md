@@ -103,10 +103,11 @@ but must refresh camera-dependent overlays such as compass annotations.
 The stored value is `fig.to_plotly_json()` plus the topology wrapper. A
 Mesh3d supercell makes one entry much larger than a molecule, so the cache
 is an LRU with both an entry cap and a byte cap (`FIGURE_CACHE_MAX_ENTRIES`
-and `FIGURE_CACHE_MAX_BYTES` in `mat_viewer.render.retention`). The newest entry
-stays even when it alone exceeds the byte cap, which keeps a repeat of the
-current style from rebuilding. Older slider ticks and idle tabs are the
-entries that go first.
+and `FIGURE_CACHE_MAX_BYTES` in `mat_viewer.render.retention`). Both are
+hard ceilings. A payload larger than the byte budget is not stored, even
+when it is the only entry. The caller still receives the figure it just
+built, and the next identical request rebuilds it. Older slider ticks and
+idle tabs are dropped first when several entries that do fit exceed the cap.
 
 ### Retention budgets
 
@@ -121,7 +122,7 @@ Those layers now share the policy in `mat_viewer.render.retention`:
 | Label traces | `scene["_label_trace_cache"]` | 8 entries and 4 MiB per scene |
 | Polyhedron painter traces | `_background_dict_cache`, `_foreground_dict_cache` | 4 entries and 24 MiB per map, inside the same 96 MiB pool |
 | Figure body | `ViewerBackend._figure_cache` | 16 entries and 128 MiB |
-| Figure journal | `ViewerBackend._figure_broadcasts` | 32 envelopes and 64 MiB of figure bodies; the newest figure is kept |
+| Figure journal | `ViewerBackend._figure_broadcasts` | 32 envelopes and 64 MiB of figure bodies; a body larger than 64 MiB is not retained |
 | Base scene | `LoadedCrystal.scene_cache` | 8 entries and 64 MiB of geometry |
 | Transformed scene | `LoadedCrystal._transformed_scene_cache` | 6 entries and 96 MiB of geometry |
 | Fragment table | `LoadedCrystal.fragment_table_cache` | 8 entries and 32 MiB |
@@ -132,7 +133,12 @@ Those layers now share the policy in `mat_viewer.render.retention`:
 before its shallow copy, so label and axis toggles reuse one bounded map
 instead of building a cache that dies with the temporary copy. Eviction
 drops whole entries. It does not change the vertices of a style that is
-still cached, and a cache miss rebuilds that same style.
+still cached, and a cache miss rebuilds that same style. Each cache's
+accounted size includes every buffer that cache can keep alive. The
+shared mesh pool and `unique_retained_nbytes` count a numpy buffer once
+when two caches hold it, so that buffer is not two reclaimable copies.
+A live figure that still references the same array keeps it after the
+mesh entry is dropped.
 
 Closing a scene drops figure-cache and journal bodies for that scene id.
 When no open scene still displays the structure, the bundle's mesh maps,

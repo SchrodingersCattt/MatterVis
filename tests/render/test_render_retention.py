@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 
-from mat_viewer.app import ViewerBackend
+from mat_viewer.app import ViewerBackend, backend_journal
 from mat_viewer.cache_keys import transformed_scene_cache_key
 from mat_viewer.loader import build_bundle_scene
 from mat_viewer.loader.bundle_builder import build_loaded_crystal_from_atoms
 from mat_viewer.render import cache as mesh_cache
+from mat_viewer.render import retention
 from mat_viewer.render.retention import (
     FIGURE_CACHE_MAX_BYTES,
     FIGURE_CACHE_MAX_ENTRIES,
+    FIGURE_JOURNAL_MAX_BYTES,
     MESH_CACHE_MAX_BYTES,
     MESH_CACHE_MAX_ENTRIES,
     MESH_POOL_MAX_BYTES,
@@ -19,7 +23,9 @@ from mat_viewer.render.retention import (
     TRANSFORMED_SCENE_CACHE_MAX_ENTRIES,
     BudgetedCache,
     mesh_pool_nbytes,
+    payload_nbytes,
     remember_plain_lru,
+    unique_retained_nbytes,
 )
 from mat_viewer.structure.cif_parse import load_cif
 
@@ -251,5 +257,175 @@ def test_figure_cache_still_hits_after_a_version_bump(tmp_path):
         second, _topology = backend.figure_for_state(backend.get_state())
         assert len(backend._figure_cache) == before
         assert first.to_dict()["data"] == second.to_dict()["data"]
+    finally:
+        backend.close()
+
+
+def test_one_mesh_payload_above_the_byte_budget_is_not_retained():
+    cache = BudgetedCache("mesh")
+    # Three float32 axes. This is past the 32 MiB mesh ceiling and still
+    # under the 96 MiB pool, so only the per-cache admission can reject it.
+    payload = _fat_mesh(3_000_000)
+    assert payload_nbytes(payload) > MESH_CACHE_MAX_BYTES
+    before = mesh_pool_nbytes()
+    try:
+        assert cache.remember("only", payload) is False
+        assert "only" not in cache
+        assert cache.accounted_bytes() == 0
+        assert mesh_pool_nbytes() == before
+    finally:
+        cache.clear()
+
+
+def test_one_figure_payload_above_the_byte_budget_is_not_retained():
+    cache = BudgetedCache("figure")
+    payload = _fat_mesh(12_000_000)
+    assert payload_nbytes(payload) > FIGURE_CACHE_MAX_BYTES
+    assert cache.remember("only", payload) is False
+    assert "only" not in cache
+    assert cache.accounted_bytes() == 0
+
+
+def test_plain_lru_drops_a_single_entry_that_exceeds_its_budget():
+    sizes: dict = {}
+    cache = remember_plain_lru(
+        None,
+        "scene",
+        {"draw_atoms": [{"i": 0}]},
+        sizes,
+        max_entries=4,
+        max_bytes=128,
+        measure=lambda _value: 10_000,
+    )
+    assert "scene" not in cache
+    assert sizes == {}
+
+
+def test_shared_array_is_one_retained_copy_and_survives_one_cache():
+    shared = np.zeros(4_000, dtype=np.float32)
+    mesh = BudgetedCache("label")
+    figure = BudgetedCache("figure")
+    try:
+        mesh.remember("mesh", {"x": shared})
+        figure.remember("figure", {"x": shared})
+        separate = mesh.accounted_bytes() + figure.accounted_bytes()
+        distinct = unique_retained_nbytes([mesh, figure])
+        assert distinct < separate
+        assert distinct >= shared.nbytes
+        mesh.clear()
+        assert figure["figure"]["x"] is shared
+        assert unique_retained_nbytes([mesh, figure]) >= shared.nbytes
+    finally:
+        mesh.clear()
+        figure.clear()
+
+
+def test_pool_drops_a_protected_entry_that_alone_exceeds_the_pool(monkeypatch):
+    monkeypatch.setattr(retention, "MESH_POOL_MAX_BYTES", 64)
+    cache = BudgetedCache("mesh")
+    try:
+        assert cache.remember("hot", _fat_mesh(64)) is False
+        assert "hot" not in cache
+        assert mesh_pool_nbytes() == 0
+    finally:
+        cache.clear()
+
+
+def test_concurrent_remember_and_pop_stay_inside_the_budget():
+    cache = BudgetedCache("figure")
+    errors: list[BaseException] = []
+
+    def remember(index: int) -> None:
+        try:
+            cache.remember(index, {"n": np.zeros(32, dtype=np.float32)})
+        except Exception as exc:  # noqa: BLE001 - record any cache failure
+            errors.append(exc)
+
+    def drop(index: int) -> None:
+        try:
+            cache.pop(index, None)
+            cache.accounted_bytes()
+        except Exception as exc:  # noqa: BLE001 - record any cache failure
+            errors.append(exc)
+
+    workers = []
+    for index in range(FIGURE_CACHE_MAX_ENTRIES + 24):
+        workers.append(threading.Thread(target=remember, args=(index,)))
+        workers.append(threading.Thread(target=drop, args=(index,)))
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert errors == []
+    assert len(cache) <= FIGURE_CACHE_MAX_ENTRIES
+    assert cache.accounted_bytes() <= FIGURE_CACHE_MAX_BYTES
+    cache.clear()
+
+
+class _Journal(backend_journal._JournalBackendMixin):
+    def __init__(self) -> None:
+        self._figure_broadcast_lock = threading.Lock()
+        self._figure_broadcasts: list[dict] = []
+        self._figure_broadcast_bytes: dict = {}
+        self._journal_drop_scene_ids: set[str] = set()
+
+    def _note(self, payload: dict) -> None:
+        with self._figure_broadcast_lock:
+            backend_journal._JournalBackendMixin._note_journal_locked(self, payload)
+
+
+def test_journal_keeps_the_newest_figure_that_fits(monkeypatch):
+    first_body = {"n": 1}
+    second_body = {"n": 2}
+    monkeypatch.setattr(
+        backend_journal,
+        "FIGURE_JOURNAL_MAX_BYTES",
+        max(payload_nbytes(first_body), payload_nbytes(second_body)),
+    )
+    journal = _Journal()
+    first = {"type": "figure", "scene_id": "s", "figure": first_body, "figure_seq": 1}
+    second = {"type": "figure", "scene_id": "s", "figure": second_body, "figure_seq": 2}
+    journal._note(first)
+    journal._note(second)
+    assert journal._figure_broadcasts == [second]
+    latest = backend_journal._JournalBackendMixin.latest_figure_broadcast(journal)
+    assert latest is not None
+    assert latest["figure"] == second_body
+
+
+def test_journal_does_not_retain_one_figure_above_the_real_budget():
+    body = {"x": np.zeros(18_000_000, dtype=np.float32)}
+    assert payload_nbytes(body) > FIGURE_JOURNAL_MAX_BYTES
+    payload = {
+        "type": "figure",
+        "scene_id": "s",
+        "figure": body,
+        "figure_seq": 1,
+    }
+    journal = _Journal()
+    journal._note(payload)
+    assert journal._figure_broadcasts == []
+    assert payload["figure"] is body
+    assert (
+        backend_journal._JournalBackendMixin.latest_figure_broadcast(journal) is None
+    )
+
+
+def test_closing_a_scene_drops_its_accounted_figure_bytes(tmp_path):
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        state = backend.get_state()
+        backend.figure_for_state(state)
+        assert backend._figure_cache.accounted_bytes() > 0
+        scene = backend.scene_for_state(state)
+        mesh = scene.get("_mesh_trace_cache")
+        assert mesh is not None and mesh.accounted_bytes() > 0
+        for scene_id in list(backend.scene_store.scenes):
+            backend.delete_scene(scene_id)
+        assert backend._figure_cache.accounted_bytes() == 0
+        assert mesh.accounted_bytes() == 0
+        assert mesh_pool_nbytes() == 0
     finally:
         backend.close()

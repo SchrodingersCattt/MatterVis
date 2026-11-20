@@ -19,9 +19,12 @@ must not change scene B, and a stale revision must not replace a newer one.
 - `broadcast_figure` ignores a body whose scene cache key or render revision
   is no longer current. `latest_figure_broadcast` does not return that body.
 - The journal keeps at most 32 envelopes and at most 64 MiB of figure
-  bodies. When a supercell frame is larger than that budget, older figure
-  bodies are dropped and the newest figure is kept, so a reconnect still
-  resolves to a current frame. Closing a scene drops its journaled figures.
+  bodies. A body larger than that budget is not retained. The broadcast
+  that just built it still returns the body to that caller. A later
+  subscriber does not receive the omitted body from the journal;
+  `ensure_scene_figure` rebuilds it. When several bodies that do fit
+  exceed 64 MiB, the older figure bodies are dropped first. Closing a
+  scene drops its journaled figures.
 - `layout.scene.uirevision` is
   `{scene_id}__{structure name}__{camera_revision}__{viewport signature}`.
   Plotly keeps a WebGL camera only while that token matches.

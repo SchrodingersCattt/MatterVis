@@ -352,8 +352,9 @@ post-transform scene is cached on a separate
 Toggling a transform's `enabled` flag is a hash-lookup, not a
 recompute. Both maps are LRUs (`mat_viewer.render.retention`): the base scene
 cache keeps at most 8 entries and 64 MiB of geometry, and the transformed
-cache keeps at most 6 entries and 96 MiB. A new repeat evicts the oldest
-unused variant. The pictures for a cached variant do not change.
+cache keeps at most 6 entries and 96 MiB. An entry larger than its byte
+budget is not stored. A new repeat evicts the oldest unused variant that
+does fit. The pictures for a cached variant do not change.
 
 ```mermaid
 flowchart LR

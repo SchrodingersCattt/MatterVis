@@ -248,9 +248,12 @@ class _JournalBackendMixin:
 
         while total() > FIGURE_JOURNAL_MAX_BYTES:
             indexes = figure_indexes()
-            # Keep the newest figure so a reconnect still has a body.
-            if len(indexes) <= 1:
+            if not indexes:
                 break
+            # Drop the oldest figure body first. A body that is still over
+            # the budget after every older body is gone is dropped too.
+            # The caller that just built it still holds that object; a
+            # later subscriber rebuilds through ``ensure_scene_figure``.
             old = broadcasts.pop(indexes[0])
             sizes.pop(id(old), None)
 
