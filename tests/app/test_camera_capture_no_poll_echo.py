@@ -160,7 +160,7 @@ def test_camera_capture_drops_late_relayout_from_previous_scene() -> None:
     from persisting the old scene's camera on the newly painted scene.
     """
     callback_source = (
-        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "camera_clientside.py"
     ).read_text(encoding="utf-8")
     assert "__mvLastGestureSceneId" in callback_source
     assert "lastGestureId !== canvasId" in callback_source
@@ -176,7 +176,7 @@ def test_camera_capture_wheel_after_scene_switch_refreshes_scene_fence() -> None
     if node is None:
         pytest.skip("Node.js is needed to execute the frontend regression")
     callbacks = (
-        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "camera_clientside.py"
     ).read_text(encoding="utf-8")
     start = callbacks.index('            """\n            function(relayout) {')
     start = callbacks.index("function(relayout)", start)
@@ -231,7 +231,7 @@ def test_camera_capture_wheel_fence_does_not_survive_scene_switch() -> None:
     if node is None:
         pytest.skip("Node.js is needed to execute the frontend regression")
     callbacks = (
-        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "camera_clientside.py"
     ).read_text(encoding="utf-8")
     start = callbacks.index('            """\n            function(relayout) {')
     start = callbacks.index("function(relayout)", start)
@@ -276,7 +276,7 @@ def test_camera_revision_stamp_is_scoped_to_the_live_scene() -> None:
     if node is None:
         pytest.skip("Node.js is needed to execute the frontend regression")
     callbacks = (
-        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "camera_clientside.py"
     ).read_text(encoding="utf-8")
     start = callbacks.index('            """\n            function(relayout) {')
     start = callbacks.index("function(relayout)", start)
@@ -355,7 +355,7 @@ def test_expired_wheel_relayout_is_not_retargeted_at_the_next_scene() -> None:
     if node is None:
         pytest.skip("Node.js is needed to execute the frontend regression")
     callbacks = (
-        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "camera_clientside.py"
     ).read_text(encoding="utf-8")
     start = callbacks.index('            """\n            function(relayout) {')
     start = callbacks.index("function(relayout)", start)
