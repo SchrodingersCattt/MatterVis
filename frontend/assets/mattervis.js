@@ -676,22 +676,33 @@
       if (painted && camerasClose(painted, ack.camera)) return Promise.resolve();
       const patch = cameraOnlyPatch(ack.camera);
       if (!patch) return Promise.resolve();
+      const still = renderMetadataFromLayout(gd.layout);
+      if (!still || String(still.scene_id || "") !== String(sceneId)) return Promise.resolve();
+      if (ack.scene_generation !== undefined && ack.scene_generation !== null &&
+          still.scene_generation !== undefined && still.scene_generation !== null &&
+          String(ack.scene_generation) !== String(still.scene_generation)) return Promise.resolve();
+      if (Number.isFinite(ackRevision) && ackRevision < Number(still.camera_revision || 0)) return Promise.resolve();
+      if (still.server_started_at && ack.server_started_at &&
+          String(still.server_started_at) !== String(ack.server_started_at)) return Promise.resolve();
       gd.__mvApplyingServerCamera = true;
-      window.__mvAllowCameraRelayout = true;
-      let pending = null;
-      try { pending = window.Plotly.relayout(gd, patch); }
-      catch (_) {
-        gd.__mvApplyingServerCamera = false;
-        window.__mvAllowCameraRelayout = false;
-        return Promise.resolve();
-      }
+      gd.__mvOwnedRelayoutDepth = Number(gd.__mvOwnedRelayoutDepth || 0) + 1;
       const clear = function () {
         gd.__mvApplyingServerCamera = false;
-        window.__mvAllowCameraRelayout = false;
+        gd.__mvOwnedRelayoutDepth = Math.max(0, Number(gd.__mvOwnedRelayoutDepth || 1) - 1);
       };
-      if (pending && typeof pending.then === "function") return pending.then(clear, clear);
-      clear();
-      return Promise.resolve();
+      let pending = null;
+      try { pending = window.Plotly.relayout(gd, patch); }
+      catch (err) {
+        clear();
+        return Promise.reject(err);
+      }
+      return Promise.resolve(pending).then(function (value) {
+        clear();
+        return value;
+      }, function (err) {
+        clear();
+        return Promise.reject(err);
+      });
     }
     window.__mvApplyServerCamera = applyServerCamera;
     /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
@@ -2336,7 +2347,7 @@
     if (gd && typeof gd.on === "function" && !gd.__mvForeignCameraBound) {
       gd.__mvForeignCameraBound = true;
       gd.on("plotly_relayout", function () {
-        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera || gd.__mvRestoringDrag) return;
+        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera || gd.__mvRestoringDrag || gd.__mvOwnedRelayoutDepth) return;
         restoreOwnedCamera(gestureGeneration, foreignGuardScene());
       });
       gd.on("plotly_afterplot", function () {
