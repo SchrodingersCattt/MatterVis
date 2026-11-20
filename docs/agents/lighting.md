@@ -83,10 +83,20 @@ pixels.
 
 ## Composition
 
-The rig supplies lights. A primitive `surface_material` record supplies
-ambient, diffuse, specular, and shininess. `studio_soft` evaluates any
-non-matte record under the single historical light. It does not rewrite those
-coefficients and it does not turn a specular material into three lights.
+The rig supplies lights. A primitive `surface_material` record supplies the
+surface-contract coefficients: ambient, diffuse, specular, shininess,
+specular tint, and an optional specular color. Preset names are not resolved
+in this module. `studio_soft` evaluates a non-matte record under the single
+historical light. It does not rewrite those coefficients and it does not turn
+a specular material into three lights.
+
+Fresnel fields (`fresnel_power`, `fresnel_center`, `fresnel_rim`,
+`fresnel_specular`, `fresnel_albedo`) are part of the same surface contract.
+A neutral rim is accepted and ignored. Any other value raises
+`CpuLightingError`. The shader does not zero the rim and continue, and it
+does not fold `light_scale` into diffuse or specular. Plotly and GPU reject
+every rig other than `studio_soft` instead of keeping their own lights under
+a requested name.
 
 A record that is exactly the historical matte pair keeps today's shade:
 analytic spheres stay on `0.68 + 0.32 * abs(n·l)`, bonds keep

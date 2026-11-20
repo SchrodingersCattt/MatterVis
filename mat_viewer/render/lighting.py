@@ -1,9 +1,16 @@
 """Named lighting rigs for the CPU general renderer.
 
 Appearance is representation plus surface material plus lighting. This module
-owns the lights. It does not own Blinn–Phong presets, opacity, or the
-``mesh`` / ``flat`` draw technique (``style["material"]`` and the Dash
-``#material-selector``).
+is the only owner of :class:`LightingRig`. It does not own Blinn–Phong
+presets, opacity, or the ``mesh`` / ``flat`` draw technique
+(``style["material"]`` and the Dash ``#material-selector``).
+
+A primitive ``surface_material`` mapping is a coefficient snapshot of the
+surface-material contract: ambient, diffuse, specular, shininess,
+specular tint, and optional specular color. Preset ids such as ``matte`` and
+``hard_plastic`` are not looked up here. Fresnel fields belong to that same
+contract. This shader does not evaluate them and raises instead of dropping
+them or rewriting the coefficients.
 
 ``get_lighting_rig`` only looks up a record. It does not retune the CPU light
 and it does not change pixels by itself. The CPU rasterizer changes only when
@@ -35,6 +42,29 @@ PUBLICATION_DEFAULT_LIGHTING = "studio_soft"
 # today's Lambert / radial bond shade. Lighting does not replace them.
 _LEGACY_AMBIENT = 0.68
 _LEGACY_DIFFUSE = 0.32
+
+# Response fields shared with the surface-material contract. This tuple is
+# not a preset table.
+SURFACE_RESPONSE_FIELDS = (
+    "ambient",
+    "diffuse",
+    "specular",
+    "shininess",
+    "specular_tint",
+    "specular_color",
+)
+# Neutral Fresnel leaves opacity and specular unchanged. Any other value is
+# a surface-contract capability this shader refuses to ignore.
+_FRESNEL_NEUTRAL = {
+    "fresnel_power": 0.0,
+    "fresnel_center": 1.0,
+    "fresnel_rim": 1.0,
+    "fresnel_specular": 0.0,
+    "fresnel_albedo": 0.0,
+}
+_SURFACE_RECORD_KEYS = frozenset(SURFACE_RESPONSE_FIELDS) | frozenset(
+    _FRESNEL_NEUTRAL
+) | frozenset({"id"})
 
 LightingKind = Literal["camera_directional", "unlit", "multi_light"]
 
@@ -212,7 +242,8 @@ def read_surface_response(metadata: Mapping[str, Any] | None) -> SurfaceResponse
 
     A preset id string is not looked up here. That would hide a missing
     material record behind ``matte``. ``light_scale`` and ``opacity`` are
-    rejected so they cannot ride along on the material record.
+    rejected so they cannot ride along on the material record. Non-neutral
+    Fresnel fields raise :class:`CpuLightingError` instead of being dropped.
     """
 
     if not isinstance(metadata, Mapping) or "surface_material" not in metadata:
@@ -232,6 +263,25 @@ def read_surface_response(metadata: Mapping[str, Any] | None) -> SurfaceResponse
             f"{', '.join(rejected)}; light_scale stays on the lighting rig "
             "and opacity stays on the object"
         )
+    unknown = sorted(set(raw) - _SURFACE_RECORD_KEYS)
+    if unknown:
+        raise ValueError(
+            "surface material does not accept "
+            f"{', '.join(unknown)}; the lighting shader only reads "
+            "surface-response coefficients and will not drop unknown fields"
+        )
+    for name, neutral in _FRESNEL_NEUTRAL.items():
+        if name not in raw or raw[name] is None:
+            continue
+        value = raw[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{name} must be a number")
+        if not np.isfinite(float(value)) or abs(float(value) - neutral) > 1.0e-9:
+            raise CpuLightingError(
+                f"surface material field {name} belongs to the surface "
+                "contract. The CPU lighting shader does not evaluate Fresnel "
+                "and will not drop it or substitute studio_soft."
+            )
     missing = [
         name
         for name in ("ambient", "diffuse", "specular", "shininess")
@@ -476,6 +526,7 @@ __all__ = [
     "LIGHTING_RIGS",
     "PUBLICATION_DEFAULT_LIGHTING",
     "STUDIO_SOFT_DIRECTION",
+    "SURFACE_RESPONSE_FIELDS",
     "VISUAL_PRESET_LIGHTING",
     "CpuLightingError",
     "LightingRig",

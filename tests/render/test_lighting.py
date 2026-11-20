@@ -17,10 +17,13 @@ from mat_viewer.render.geometry import cylinder_primitive, sphere_primitive
 from mat_viewer.render.lighting import (
     PUBLICATION_DEFAULT_LIGHTING,
     STUDIO_SOFT_DIRECTION,
+    SURFACE_RESPONSE_FIELDS,
     VISUAL_PRESET_LIGHTING,
     CpuLightingError,
     get_lighting_rig,
+    note_plan_lighting,
     read_surface_response,
+    shade_with_rig,
 )
 from mat_viewer.render.morphology import _morphology_traces
 from mat_viewer.render.planning import prepare_render
@@ -326,6 +329,65 @@ def test_surface_record_composes_with_the_rig_and_is_not_rewritten() -> None:
     assert _foreground(plastic_unlit).max(axis=0).tolist() == [0x22, 0x66, 0xAA]
     # The white specular of hard_plastic shows up under the one studio light.
     assert int(_foreground(plastic_soft).max()) > int(_foreground(plastic_unlit).max())
+
+
+def test_three_point_with_a_surface_record_is_not_rewritten_to_studio_soft() -> None:
+    """An unsupported rig plus a valid surface record must not draw studio_soft."""
+
+    response_metadata = {"surface_material": _hard_plastic()}
+    response = read_surface_response(response_metadata)
+    assert response is not None
+    assert response.specular == 0.35
+    assert tuple(SURFACE_RESPONSE_FIELDS) == (
+        "ambient",
+        "diffuse",
+        "specular",
+        "shininess",
+        "specular_tint",
+        "specular_color",
+    )
+    with pytest.raises(CpuLightingError, match="will not substitute studio_soft"):
+        shade_with_rig(
+            np.array([0.2, 0.4, 0.8]),
+            np.array([0.0, 0.0, 1.0]),
+            response,
+            get_lighting_rig("studio_three_point"),
+        )
+    plastic = sphere_primitive(
+        "atom",
+        (0.0, 0.0, 0.0),
+        0.4,
+        "#2266AA",
+        metadata={"kind": "atom", "surface_material": _hard_plastic()},
+    )
+    plan = RenderPlan(
+        width=24,
+        height=24,
+        background=(1.0, 1.0, 1.0, 1.0),
+        viewports=(
+            ViewportPlan(semantic_id="main", camera=_camera(), primitives=(plastic,)),
+        ),
+        metadata={"lighting": "studio_three_point"},
+    )
+    with pytest.raises(CpuLightingError, match="will not substitute studio_soft"):
+        render_rgba(plan, scale=1)
+    assert plastic.metadata["surface_material"]["ambient"] == 0.30
+    assert plastic.metadata["surface_material"]["specular"] == 0.35
+
+
+def test_fresnel_and_foreign_backends_are_capability_errors() -> None:
+    neutral = {**_hard_plastic(), "id": "hard_plastic", "fresnel_power": 0.0}
+    assert read_surface_response({"surface_material": neutral}).specular == 0.35
+    rim = {**_hard_plastic(), "fresnel_power": 1.5, "fresnel_center": 0.12}
+    with pytest.raises(CpuLightingError, match="Fresnel"):
+        read_surface_response({"surface_material": rim})
+    for backend in ("plotly", "gpu"):
+        for rig_id in ("unlit", "studio_three_point"):
+            with pytest.raises(ValueError, match="will not silently"):
+                note_plan_lighting({}, backend=backend, lighting=rig_id)
+    kept = {}
+    note_plan_lighting(kept, backend="cpu", lighting="studio_soft")
+    assert "lighting" not in kept
 
 
 def test_studio_three_point_is_rejected_on_cpu_ball_stick() -> None:
