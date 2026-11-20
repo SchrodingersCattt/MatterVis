@@ -361,6 +361,19 @@
         return Number.isFinite(want) && Number.isFinite(have) && Math.abs(have - want) / Math.max(Math.abs(want), 1e-6) > 0.01;
       });
     }
+    /* _fullLayout can already show the fitted ratio while glplot still
+     * draws the previous one. That is the ratio a scene plot writes back. */
+    if (!aspectMismatch && fitted.aspectratio) {
+      var plot = scene._scene && scene._scene.glplot;
+      var painted = plot && typeof plot.getAspectratio === "function" ? plot.getAspectratio() : null;
+      if (painted) {
+        aspectMismatch = ["x", "y", "z"].some(function (axis, index) {
+          var want = Number(fitted.aspectratio[axis]);
+          var have = Number(painted[axis] !== undefined ? painted[axis] : painted[index]);
+          return Number.isFinite(want) && Number.isFinite(have) && Math.abs(have - want) / Math.max(Math.abs(want), 1e-6) > 0.01;
+        });
+      }
+    }
     if (!mismatch && !aspectMismatch) return Promise.resolve();
     var patch = {};
     if (mismatch) {
