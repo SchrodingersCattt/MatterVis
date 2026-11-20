@@ -111,6 +111,23 @@ def test_spread_cell_keeps_its_scored_direction(tmp_path: Path):
     assert np.allclose(up, _SPREAD_UP)
 
 
+def test_rank_one_line_does_not_repeat_a_coordinate_axis():
+    from mat_viewer.viewpoint.core import _pca_axes
+
+    for centered in (
+        np.array([[1.0, 0.0, 0.0]]),
+        np.array([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+    ):
+        axes = _pca_axes(centered)
+        assert len(axes) == 3
+        for index, left in enumerate(axes):
+            for right in axes[index + 1 :]:
+                cosine = abs(float(np.dot(left, right))) / (
+                    float(np.linalg.norm(left)) * float(np.linalg.norm(right))
+                )
+                assert cosine < 1.0 - 1e-6
+
+
 def test_one_atom_keeps_the_fixed_fallback(tmp_path: Path):
     path = tmp_path / "one.cif"
     _write(path, "one", "C1 C 0.25 0.25 0.25 1\n")

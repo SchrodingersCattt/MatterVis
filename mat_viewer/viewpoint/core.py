@@ -446,8 +446,10 @@ def _pca_axes(centered: np.ndarray) -> list[np.ndarray]:
     ``svd(..., full_matrices=False)`` returns one row per available
     component. A single point has one row and a two-point set has two, so
     indexing a third row raises ``IndexError``. Missing rows are filled
-    with the coordinate axes. A failed or non-finite decomposition uses
-    those axes alone.
+    with the coordinate axes. A fallback axis parallel to a vector already
+    kept is skipped, so a rank-deficient line does not contribute the same
+    direction twice. A failed or non-finite decomposition uses the
+    coordinate axes alone.
     """
     fallback = [
         np.array([1.0, 0.0, 0.0]),
@@ -456,6 +458,15 @@ def _pca_axes(centered: np.ndarray) -> list[np.ndarray]:
     ]
     points = np.asarray(centered, dtype=float)
     axes: list[np.ndarray] = []
+
+    def _parallel(left: np.ndarray, right: np.ndarray) -> bool:
+        left_norm = float(np.linalg.norm(left))
+        right_norm = float(np.linalg.norm(right))
+        if left_norm < 1e-8 or right_norm < 1e-8:
+            return True
+        cosine = abs(float(np.dot(left, right))) / (left_norm * right_norm)
+        return cosine >= 1.0 - 1e-6
+
     if (
         points.ndim == 2
         and points.shape[1] == 3
@@ -473,11 +484,14 @@ def _pca_axes(centered: np.ndarray) -> list[np.ndarray]:
                     vector.shape == (3,)
                     and np.all(np.isfinite(vector))
                     and float(np.linalg.norm(vector)) >= 1e-8
+                    and not any(_parallel(vector, existing) for existing in axes)
                 ):
                     axes.append(vector)
     for axis in fallback:
         if len(axes) >= 3:
             break
+        if any(_parallel(axis, existing) for existing in axes):
+            continue
         axes.append(axis.copy())
     return axes[:3]
 

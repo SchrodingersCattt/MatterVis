@@ -83,6 +83,7 @@ camera or `view_direction`, `mat_viewer.viewpoint.auto_view_dir` chooses
 the initial direction. A scored coordinate set with fewer than three
 singular vectors, including one point, keeps the vectors that exist and
 fills the missing axes with the coordinate axes so scoring can finish.
+A coordinate axis parallel to a vector already kept is not added again.
 Fewer than three non-hydrogen major atoms keep the fixed fallback
 direction `(0.174, 0.985, 0)` and up `(0, 0, 1)`. This is a geometric
 limit of the decomposition, not an element rule. Honours `display_mode`:
