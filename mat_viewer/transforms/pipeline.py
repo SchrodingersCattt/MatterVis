@@ -37,13 +37,9 @@ def _atoms_for_repeat(atoms: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     lifter then drops every collided identity, which leaves floating atoms
     and a supercell whose bonds do not grow with the repeat counts.
     """
-    home = [
-        atom
-        for atom in atoms
-        if not atom.get("_is_boundary_replica")
-        and not atom.get("_is_framework_context_replica")
-        and not atom.get("_is_bonded_image_replica")
-    ]
+    from ..scene.drawing_identity import atom_is_visual_copy
+
+    home = [atom for atom in atoms if not atom_is_visual_copy(atom)]
     return list(home) if home else list(atoms)
 
 
@@ -60,6 +56,8 @@ def _wrap_repeat_home(
     new dicts; the loaded source atoms are not modified.
     """
     from molcrys_kit.utils.geometry import frac_to_cart
+
+    from ..scene.drawing_identity import stamp_home_source
 
     matrix = np.asarray(M, dtype=float)
     wrapped_atoms: List[Dict[str, Any]] = []
@@ -80,6 +78,9 @@ def _wrap_repeat_home(
             float(folded[2]),
         )
         copied["_image_shift"] = (0, 0, 0)
+        copied.pop("instance_kind", None)
+        copied.pop("image_shift", None)
+        copied.pop("source_site_id", None)
         # The fragment shortcut bonds co-moving unwrapped copies. Folding
         # each centre into the home cell breaks that rigid copy, so those
         # pairs would span the cell. Canonical image lookup still places
@@ -94,6 +95,7 @@ def _wrap_repeat_home(
             "_strict_unit_cell",
         ):
             copied.pop(flag, None)
+        stamp_home_source(copied)
         wrapped_atoms.append(copied)
     return wrapped_atoms
 

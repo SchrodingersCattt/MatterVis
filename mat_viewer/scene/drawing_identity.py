@@ -10,6 +10,14 @@ Replica producers still write ``_is_boundary_replica``,
 private flags are assembly stamps. :func:`drawing_identity` reads them only
 when ``instance_kind`` is absent, in that order: boundary, then bonded
 image, then framework context, otherwise ``source``.
+
+The flag fallback is not a second provenance standard. A framework-context
+replica also carries the boundary stamp, so the fallback cannot tell those
+two kinds apart. New replica producers must call
+:func:`stamp_drawing_identity`. Remove the fallback once every scene rebuild
+stamps ``instance_kind``; do not add another flag-only path.
+``image_shift`` is the identity component. ``_image_shift`` is read only
+when ``image_shift`` was not stored.
 """
 
 from __future__ import annotations
@@ -71,11 +79,12 @@ def drawing_identity(atom: Any) -> tuple[str, tuple[int, int, int], str]:
     An explicit ``instance_kind`` wins. Otherwise the kind is derived from
     the assembly stamps and the source id from ``_source_index``,
     ``source_index``, or ``site_index`` when one of those is present.
-    ``image_shift`` is the stored field, or ``(0, 0, 0)`` when it is absent.
+    ``image_shift`` is the stored field. ``_image_shift`` is used only when
+    ``image_shift`` is absent, and a missing shift is ``(0, 0, 0)``.
     """
     if not isinstance(atom, dict):
         return ("", _ZERO_SHIFT, INSTANCE_SOURCE)
-    shift = _image_shift_value(atom.get("image_shift", _ZERO_SHIFT), strict=False)
+    shift = _stored_image_shift(atom)
     kind = atom.get("instance_kind")
     if kind:
         source_id = _explicit_source_site_id(atom)
@@ -139,6 +148,45 @@ def _text_site_id(value: Any) -> str | None:
         return str(int(real))
     text = str(value).strip()
     return text or None
+
+
+def stamp_home_source(atom: dict[str, Any], *, fallback: Any = "") -> dict[str, Any]:
+    """Stamp one home-cell drawing as a ``source`` instance.
+
+    Display-mode rebuilds call this for atoms that a replica producer did
+    not already stamp. A copied replica kind is replaced only when the
+    caller has already cleared ``instance_kind``.
+    """
+    shift = atom.get("_image_shift", atom.get("image_shift", _ZERO_SHIFT))
+    return stamp_drawing_identity(
+        atom,
+        source_site_id=indexed_source_site_id(atom, fallback),
+        image_shift=shift,
+        instance_kind=INSTANCE_SOURCE,
+    )
+
+
+def ensure_source_identity(atoms: list[Any]) -> list[Any]:
+    """Stamp source identity on drawings a replica producer left blank.
+
+    A drawing that already carries a replica flag keeps that flag. Stamping
+    it as ``source`` would hide the copy from the source-site count.
+    """
+    for index, atom in enumerate(atoms):
+        if not isinstance(atom, dict) or atom.get("instance_kind"):
+            continue
+        if any(atom.get(flag) for flag, _kind in _FLAG_KINDS):
+            continue
+        stamp_home_source(atom, fallback=index)
+    return atoms
+
+
+def _stored_image_shift(atom: Mapping[str, Any]) -> tuple[int, int, int]:
+    if "image_shift" in atom:
+        return _image_shift_value(atom.get("image_shift"), strict=False)
+    if "_image_shift" in atom:
+        return _image_shift_value(atom.get("_image_shift"), strict=False)
+    return _ZERO_SHIFT
 
 
 def _kind_from_flags(atom: Mapping[str, Any]) -> str:

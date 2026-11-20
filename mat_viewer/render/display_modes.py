@@ -14,6 +14,8 @@ from typing import Any
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
+from ..scene.drawing_identity import ensure_source_identity
+
 # Snap values that ``np.mod`` leaves on the 1-boundary back onto 0 so a
 # crystallographic site is not stored twice, once at each end of the axis.
 _WRAP_ONE_ATOL = 1e-9
@@ -66,6 +68,9 @@ def _independent_wrapped_sites(
             "_is_fragment_boundary_replica",
             "_is_framework_context_replica",
             "_is_bonded_image_replica",
+            "instance_kind",
+            "image_shift",
+            "source_site_id",
         ):
             copied.pop(key, None)
         out.append(copied)
@@ -111,6 +116,9 @@ def _wrapped_unit_cell_atoms(
         copied.setdefault("_source_index", source_index)
         copied.pop("_is_boundary_replica", None)
         copied.pop("_is_fragment_boundary_replica", None)
+        copied.pop("instance_kind", None)
+        copied.pop("image_shift", None)
+        copied.pop("source_site_id", None)
         out.append(copied)
     return out
 
@@ -151,22 +159,25 @@ def selected_atoms_for_mode(
             if not include_boundary_replicas:
                 for site in sites:
                     site["_strict_unit_cell"] = True
-                return sites
-            return expand_boundary_replicas(sites, M)
-        if not include_boundary_replicas:
-            return _wrapped_unit_cell_atoms(atoms, M)
-        base = [dict(atom) for atom in continuous_atoms]
-        return expand_boundary_replicas(base, M)
-    if display_mode == "asymmetric_unit":
-        return _asymmetric_unit_atoms(continuous_atoms)
-    if display_mode == "cluster":
-        return [dict(atom) for atom in atoms]
-    # formula_unit: defer to MolCrysKit
-    if formula_unit_atoms is not None:
-        chosen = [dict(atom) for atom in formula_unit_atoms]
+                chosen = sites
+            else:
+                chosen = expand_boundary_replicas(sites, M)
+        elif not include_boundary_replicas:
+            chosen = _wrapped_unit_cell_atoms(atoms, M)
+        else:
+            base = [dict(atom) for atom in continuous_atoms]
+            chosen = expand_boundary_replicas(base, M)
+    elif display_mode == "asymmetric_unit":
+        chosen = _asymmetric_unit_atoms(continuous_atoms)
+    elif display_mode == "cluster":
+        chosen = [dict(atom) for atom in atoms]
     else:
-        from mat_viewer.structure import molcrys_bridge
-        chosen = molcrys_bridge.select_formula_unit(atoms, M)
-    if lattice_site_display:
-        return _independent_wrapped_sites(chosen, M)
-    return chosen
+        # formula_unit: defer to MolCrysKit
+        if formula_unit_atoms is not None:
+            chosen = [dict(atom) for atom in formula_unit_atoms]
+        else:
+            from mat_viewer.structure import molcrys_bridge
+            chosen = molcrys_bridge.select_formula_unit(atoms, M)
+        if lattice_site_display:
+            chosen = _independent_wrapped_sites(chosen, M)
+    return ensure_source_identity(chosen)

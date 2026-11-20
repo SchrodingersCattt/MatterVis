@@ -19,6 +19,7 @@ from ..scene.drawing_identity import (
     INSTANCE_BOUNDARY,
     indexed_source_site_id,
     stamp_drawing_identity,
+    stamp_home_source,
 )
 
 _PERIODIC_FACE_TOL: float = 3e-2
@@ -213,6 +214,8 @@ def expand_boundary_replicas(
                 copied["_cell_spanning_component"] = True
                 copied.pop("_is_boundary_replica", None)
                 copied.pop("_is_fragment_boundary_replica", None)
+                copied.pop("instance_kind", None)
+                stamp_home_source(copied)
                 out.append(copied)
             # A periodic framework is not a finite molecule. Replicating its
             # members independently from a face tolerance creates orphan atoms
@@ -220,6 +223,9 @@ def expand_boundary_replicas(
             # exact neighbouring context from signed MCK BondRecords instead.
             continue
         _place_fragment_in_home_cell(molecule_atoms, M_arr)
+        for atom in molecule_atoms:
+            if not atom.get("instance_kind"):
+                stamp_home_source(atom)
         out.extend(molecule_atoms)
         for effective in sorted(_molecule_periodic_translations(molecule_atoms)):
             shift_arr = np.array(effective, dtype=float)
@@ -245,6 +251,8 @@ def expand_boundary_replicas(
 
     for atom in ungrouped:
         _place_fragment_in_home_cell([atom], M_arr)
+        if not atom.get("instance_kind"):
+            stamp_home_source(atom)
         out.append(atom)
         for shift in sorted(_periodic_translations_for_atom(atom)):
             if shift == (0, 0, 0):

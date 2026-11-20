@@ -393,13 +393,18 @@ Notes for callers:
   atoms, the loaded structure separately. A drawn subset with no
   disorder does not say the loaded structure is ordered. Site,
   minor-atom, and minor-bond counts use each drawing's
-  `source_site_id` and `instance_kind`. Source-site counts are unique
-  `source_site_id` values on drawings whose `instance_kind` is
-  `source`; drawing counts are instances. Any other `instance_kind` is
-  a repeated visual copy and is not added as a source site. The private
+  `(source_site_id, image_shift, instance_kind)`. Source-site counts
+  are unique `source_site_id` values on drawings whose `instance_kind`
+  is `source`. A blank id is not shared with another blank id. Repeated
+  labels do not merge sites. `image_shift` distinguishes drawings of one
+  site. Drawing counts are instances. Any other `instance_kind` is a
+  repeated visual copy and is not added as a source site. The private
   flags `_is_boundary_replica`, `_is_framework_context_replica`, and
-  `_is_bonded_image_replica` remain assembly stamps and supply
-  `instance_kind` only when that field is absent. The line reads
+  `_is_bonded_image_replica` remain assembly stamps. They supply
+  `instance_kind` only when that field is absent, and that fallback is
+  not a second provenance standard: new replica producers stamp
+  `instance_kind`, and a display-mode rebuild stamps home drawings as
+  `source`. The line reads
   loader disorder flags (`is_disordered`, `_is_minor`,
   `disorder_resolved`). It does not infer disorder from occupancy.
 - `POST /topology`
@@ -630,8 +635,9 @@ The full list (authoritative; the diagram only groups them):
   drawn. See `GET /scene/{name}` for the same `summary` contract,
   including the split between the drawn subset and the loaded
   structure and the exclusion of visual copies from source-site counts.
-  Those counts use `source_site_id` and `instance_kind`. The private
-  replica flags remain assembly stamps.
+  Those counts use `(source_site_id, image_shift, instance_kind)`. The
+  private replica flags remain assembly stamps and are not a second
+  provenance standard.
   A display-scope change updates this card from the scene being drawn.
   It does not wait for the Plotly frame.
 - `atom-list`: short sample of the displayed atoms in the Analysis pane.
@@ -641,10 +647,11 @@ The full list (authoritative; the diagram only groups them):
 - `mv-status-bar`, `mv-status-structure`, `mv-status-scope`,
   `mv-status-counts`, `mv-status-busy`: canvas status bar and the
   working/rendering indicator. Counts follow the scene drawn for the
-  current display mode and transforms. Counts use `source_site_id` and
-  `instance_kind`. When that scene repeats visual copies of source
-  sites, the count separates source sites from those copies. The
-  private replica flags remain assembly stamps.
+  current display mode and transforms. Counts use
+  `(source_site_id, image_shift, instance_kind)`. When that scene
+  repeats visual copies of source sites, the count separates source
+  sites from those copies. The private replica flags remain assembly
+  stamps and are not a second provenance standard.
 - `perf-log-level`: server-log level filter (`debug` shows all,
   `info` hides fast callbacks, `warn` and `error` are stricter)
 - `save-preset-btn`

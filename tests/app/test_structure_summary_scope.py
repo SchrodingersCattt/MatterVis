@@ -585,3 +585,153 @@ def test_scope_switch_keeps_the_summary_on_the_drawn_scene(tmp_path):
         assert "outside this drawn subset" in pending[3]
     finally:
         backend.close()
+
+
+def test_missing_ids_and_repeated_labels_do_not_merge_source_sites():
+    """A blank id is private to that drawing. The same label is not an id."""
+    from mat_viewer.app.panel_status import _source_site_count
+
+    unlabeled = [
+        {"label": "C1", "elem": "C"},
+        {"label": "C1", "elem": "C"},
+    ]
+    labeled = [
+        stamp_drawing_identity(
+            {"label": "C1"},
+            source_site_id="site-a",
+            image_shift=(0, 0, 0),
+            instance_kind="source",
+        ),
+        stamp_drawing_identity(
+            {"label": "C1"},
+            source_site_id="site-b",
+            image_shift=(0, 0, 0),
+            instance_kind="source",
+        ),
+    ]
+    assert _source_site_count(unlabeled) == 2
+    assert _source_site_count(labeled) == 2
+    assert {drawing_identity(atom)[0] for atom in labeled} == {"site-a", "site-b"}
+
+
+def test_several_images_of_one_site_count_as_one_source_site():
+    atoms = [
+        stamp_drawing_identity(
+            {"label": "C1"},
+            source_site_id="7",
+            image_shift=(0, 0, 0),
+            instance_kind="source",
+        ),
+        stamp_drawing_identity(
+            {"label": "C1", "_is_boundary_replica": True},
+            source_site_id="7",
+            image_shift=(1, 0, 0),
+            instance_kind="boundary",
+        ),
+        stamp_drawing_identity(
+            {"label": "C1-image"},
+            source_site_id="7",
+            image_shift=(0, -1, 0),
+            instance_kind="bonded_image",
+        ),
+    ]
+    scene = {"display_mode": "unit_cell", "draw_atoms": atoms, "bonds": []}
+    summary = _structure_summary(scene)
+    assert "no disorder in 1 source site(s)" in summary
+    assert "2 visual copies" in summary
+    _label, _scope, counts = status_bar_parts({"display_mode": "unit_cell"}, scene)
+    assert counts.startswith("1 source site + 2 visual copies")
+    shifts = {drawing_identity(atom)[1] for atom in atoms}
+    assert shifts == {(0, 0, 0), (1, 0, 0), (0, -1, 0)}
+
+
+def test_legacy_flags_read_image_shift_until_identity_is_stamped():
+    """Flag fallback is compatibility, and it still keeps the image axis."""
+    legacy = {
+        "_source_index": 4,
+        "_image_shift": (0, 1, 0),
+        "_is_bonded_image_replica": True,
+        "_is_boundary_replica": True,
+    }
+    assert drawing_identity(legacy) == ("4", (0, 1, 0), "boundary")
+    explicit = dict(legacy)
+    stamp_drawing_identity(
+        explicit,
+        source_site_id="4",
+        image_shift=(0, 1, 0),
+        instance_kind="framework_context",
+    )
+    assert drawing_identity(explicit) == ("4", (0, 1, 0), "framework_context")
+    from mat_viewer.scene.drawing_identity import ensure_source_identity
+
+    kept = ensure_source_identity([dict(legacy)])
+    assert drawing_identity(kept[0]) == ("4", (0, 1, 0), "boundary")
+    assert "instance_kind" not in kept[0]
+
+
+def test_display_mode_switch_stamps_source_identity_and_keeps_copies():
+    import numpy as np
+
+    from mat_viewer.render.display_modes import selected_atoms_for_mode
+
+    matrix = np.eye(3) * 10.0
+    atoms = [
+        {
+            "elem": "C",
+            "label": "C1",
+            "frac": np.array([0.01, 0.5, 0.5]),
+            "cart": np.array([0.1, 5.0, 5.0]),
+            "_source_index": 0,
+        },
+        {
+            "elem": "C",
+            "label": "C1",
+            "frac": np.array([0.5, 0.2, 0.5]),
+            "cart": np.array([5.0, 2.0, 5.0]),
+            "_source_index": 1,
+        },
+    ]
+    unit = selected_atoms_for_mode(
+        None,
+        atoms,
+        matrix,
+        None,
+        display_mode="unit_cell",
+        include_boundary_replicas=True,
+    )
+    identities = [drawing_identity(atom) for atom in unit]
+    sources = [item for item in identities if item[2] == "source"]
+    copies = [item for item in identities if item[2] != "source"]
+    assert {item[0] for item in sources} == {"0", "1"}
+    assert ("0", (0, 0, 0), "source") in identities
+    assert any(item[0] == "0" and item[2] == "boundary" for item in copies)
+    assert all(item[2] == "source" or item[1] != (0, 0, 0) for item in identities)
+
+    cluster = selected_atoms_for_mode(
+        None,
+        [
+            {"elem": "O", "label": "O1"},
+            {"elem": "O", "label": "O1"},
+        ],
+        matrix,
+        None,
+        display_mode="cluster",
+    )
+    assert [drawing_identity(atom)[2] for atom in cluster] == ["source", "source"]
+    assert _structure_summary(
+        {"display_mode": "cluster", "draw_atoms": cluster, "bonds": []}
+    ).startswith("Isolated cluster: drawn subset has no disorder in 2 source site(s).")
+
+    wrapped = selected_atoms_for_mode(
+        None,
+        atoms,
+        matrix,
+        None,
+        display_mode="unit_cell",
+        include_boundary_replicas=False,
+        lattice_site_display=True,
+    )
+    assert {drawing_identity(atom) for atom in wrapped} == {
+        ("0", (0, 0, 0), "source"),
+        ("1", (0, 0, 0), "source"),
+    }
