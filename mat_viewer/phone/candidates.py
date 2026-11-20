@@ -44,10 +44,12 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 METHODS = ("enumerate", "random")
-# Defaults are conservative *starting points*, not measured phone limits; they
-# were not benchmarked on a device. Each is a keyword argument and may be raised
-# per call up to the hard ceiling (the largest size we are willing to buffer in
-# one synchronous call). Exceeding any bound raises; nothing is truncated.
+# Defaults are conservative starting points. They were not measured on a
+# phone. Callers may raise each keyword up to the hard ceiling, which is
+# the largest buffer one synchronous call will hold. The ceilings are not
+# a device budget: tests/test_phone_candidates.py records the synthetic
+# two-assembly envelope (under 30 s and under 64 MiB at the default count).
+# Exceeding any bound raises; nothing is truncated.
 MAX_CANDIDATES = 16
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 MAX_PAYLOAD_BYTES = 8 * 1024 * 1024

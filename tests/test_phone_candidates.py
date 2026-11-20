@@ -548,6 +548,44 @@ def test_bounds_are_explicit_configurable_and_never_truncate(cif, tmp_path: Path
     assert module.MAX_CANDIDATES == 16 and module.MAX_PAYLOAD_BYTES == 8 * 1024 * 1024
 
 
+def test_synthetic_budget_rejects_oversized_input_before_the_solver(cif, tmp_path, monkeypatch):
+    """The raised ceilings are process buffers, not a phone measurement."""
+    import time
+    import tracemalloc
+
+    import mat_viewer.phone.candidates as module
+
+    tracemalloc.start()
+    started = time.perf_counter()
+    result = _gen(cif, count=module.MAX_CANDIDATES)
+    elapsed = time.perf_counter() - started
+    _current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    payload = len(json.dumps(result).encode("utf-8"))
+    assert elapsed < 30.0
+    assert peak < 64 * 1024 * 1024
+    assert payload < module.MAX_PAYLOAD_BYTES
+    assert result["actual_count"] <= module.MAX_CANDIDATES
+
+    oversized = tmp_path / "oversized.cif"
+    oversized.write_bytes(b"data_synthetic\n" + (b"# pad\n" * 20))
+    # Grow with a synthetic comment until the default source cap is exceeded.
+    pad = b"# synthetic pad\n"
+    deficit = module.MAX_SOURCE_BYTES + 1 - oversized.stat().st_size
+    oversized.write_bytes(oversized.read_bytes() + pad * (deficit // len(pad) + 1))
+    assert oversized.stat().st_size > module.MAX_SOURCE_BYTES
+
+    def _solver_must_not_run(*_args, **_kwargs):
+        raise AssertionError("source-cap rejection must happen before the solver")
+
+    monkeypatch.setattr(
+        "molcrys_kit.analysis.disorder.process.generate_ordered_replicas_from_disordered_sites",
+        _solver_must_not_run,
+    )
+    with pytest.raises(CandidateRequestError, match="max_source_bytes"):
+        generate_disorder_candidates(oversized, count=1)
+
+
 def test_payload_limit_is_checked_incrementally(cif, monkeypatch):
     import mat_viewer.phone.candidates as module
 

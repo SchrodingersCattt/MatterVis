@@ -229,6 +229,13 @@ Result (JSON-serializable, `schema_version` 1):
   | `max_source_bytes` | 2 MiB | 64 MiB |
   | `max_payload_bytes` | 8 MiB | 64 MiB |
 
+  The defaults were not raised. The ceilings were added so one call can
+  ask for a larger buffer. They are the most this synchronous call will
+  hold, not a measurement from phone hardware. A synthetic two-assembly
+  CIF at the default count is the recorded envelope: it must finish
+  within 30 seconds and allocate under 64 MiB in the regression. A file
+  one byte over the active source cap is rejected before the solver runs.
+
   The payload bound is checked after each candidate is built (a lower bound
   of the final size), so an oversized request stops early; the exact final
   size is checked again. Errors name the kwarg to raise.
