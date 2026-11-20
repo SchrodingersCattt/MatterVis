@@ -37,12 +37,51 @@ class _OperateBackendMixin:
         session = getattr(self, "_effect_session", None)
         if session is None:
             return
-        from ..effects.persistence import save_session
+        from ..effects.persistence import session_file_lock
 
         try:
-            save_session(session, self._effect_session_path())
+            with session_file_lock(self._effect_session_path()):
+                self._adopt_persisted_session()
+                self._save_effect_session_holding_lock()
         except OSError as exc:  # pragma: no cover - disk-full / read-only mount
             print(f"[mat_viewer] could not persist effect session: {exc}")
+
+    def _adopt_persisted_session(self) -> None:
+        """Keep committed frames that another process already saved.
+
+        Callers hold ``session_file_lock`` before this read. An older
+        memory image does not replace a newer file.
+        """
+
+        path = self._effect_session_path()
+        if not os.path.exists(path):
+            return
+        from ..effects.persistence import adopt_committed, load_session
+
+        adopt_committed(self.effect_session(), load_session(path))
+
+    def _save_effect_session_holding_lock(self) -> None:
+        session = getattr(self, "_effect_session", None)
+        if session is None:
+            return
+        from ..effects.persistence import save_session
+
+        save_session(session, self._effect_session_path())
+
+    def _commit_effect(self, action):
+        """Adopt the shared file, run one commit, then save it.
+
+        The file lock is taken before the session lock. A raised
+        conflict or a failed install does not write the file.
+        """
+
+        from ..effects.persistence import session_file_lock
+
+        with session_file_lock(self._effect_session_path()):
+            self._adopt_persisted_session()
+            payload = action()
+            self._save_effect_session_holding_lock()
+            return payload
 
     def _restore_committed_structures(self) -> None:
         """Reload scientific revisions before scene-store pruning."""
@@ -72,6 +111,48 @@ class _OperateBackendMixin:
                     self.structure_names.append(name)
 
     def operate(
+        self,
+        command: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        scene_id: str | None = None,
+        expected_revision: int | None = None,
+        frame_ref: str | None = None,
+        request_id: str | None = None,
+        preview: bool = False,
+        property_policy: Mapping[str, Any] | None = None,
+        inject_failure: str | None = None,
+        structure_id: str | None = None,
+    ) -> dict[str, Any]:
+        if preview or inject_failure is not None:
+            return self._operate_unlocked(
+                command,
+                params,
+                scene_id=scene_id,
+                expected_revision=expected_revision,
+                frame_ref=frame_ref,
+                request_id=request_id,
+                preview=preview,
+                property_policy=property_policy,
+                inject_failure=inject_failure,
+                structure_id=structure_id,
+            )
+        return self._commit_effect(
+            lambda: self._operate_unlocked(
+                command,
+                params,
+                scene_id=scene_id,
+                expected_revision=expected_revision,
+                frame_ref=frame_ref,
+                request_id=request_id,
+                preview=preview,
+                property_policy=property_policy,
+                inject_failure=inject_failure,
+                structure_id=structure_id,
+            )
+        )
+
+    def _operate_unlocked(
         self,
         command: str,
         params: Mapping[str, Any] | None = None,
@@ -199,6 +280,23 @@ class _OperateBackendMixin:
         request_id: str | None = None,
         scene_id: str | None = None,
     ) -> dict[str, Any]:
+        return self._commit_effect(
+            lambda: self._commit_operation_unlocked(
+                candidate_id,
+                expected_revision=expected_revision,
+                request_id=request_id,
+                scene_id=scene_id,
+            )
+        )
+
+    def _commit_operation_unlocked(
+        self,
+        candidate_id: str,
+        *,
+        expected_revision: int,
+        request_id: str | None = None,
+        scene_id: str | None = None,
+    ) -> dict[str, Any]:
         pinned_scene = scene_id or self.active_scene_id()
         state = self.get_state(pinned_scene)
         session = self.effect_session()
@@ -229,6 +327,11 @@ class _OperateBackendMixin:
         return payload
 
     def undo_structure(self, structure_id: str | None = None, *, scene_id: str | None = None) -> dict[str, Any]:
+        return self._commit_effect(
+            lambda: self._undo_structure_unlocked(structure_id, scene_id=scene_id)
+        )
+
+    def _undo_structure_unlocked(self, structure_id: str | None = None, *, scene_id: str | None = None) -> dict[str, Any]:
         pinned_scene = scene_id or self.active_scene_id()
         state = self.get_state(pinned_scene)
         bundle = self.get_bundle(str(state.get("structure") or ""))
@@ -239,6 +342,11 @@ class _OperateBackendMixin:
         return {"structure": ref.to_dict(), "scene_id": focused, "effect": "undo"}
 
     def redo_structure(self, structure_id: str | None = None, *, scene_id: str | None = None) -> dict[str, Any]:
+        return self._commit_effect(
+            lambda: self._redo_structure_unlocked(structure_id, scene_id=scene_id)
+        )
+
+    def _redo_structure_unlocked(self, structure_id: str | None = None, *, scene_id: str | None = None) -> dict[str, Any]:
         pinned_scene = scene_id or self.active_scene_id()
         state = self.get_state(pinned_scene)
         bundle = self.get_bundle(str(state.get("structure") or ""))

@@ -1322,25 +1322,49 @@
     return false;
   }
 
-  function selectCommittedScene(status) {
-    // The committing page receives the operate status. A catalog with
-    // focus:false must not move every other open page onto the result.
-    var text = status === null || status === undefined ? "" : String(status);
-    var matched = /in scene (scene_[0-9a-f]{12})/.exec(text);
-    if (!matched) {
-      return window.dash_clientside ? window.dash_clientside.no_update : undefined;
-    }
-    var nextId = matched[1];
+  var pendingCommitFocus = null;
+  var catalogSceneIds = Object.create(null);
+  function rememberCatalogSceneIds(message) {
+    var next = Object.create(null);
+    var scenes = message && Array.isArray(message.scenes) ? message.scenes : [];
+    scenes.forEach(function (scene) {
+      if (!scene || scene.id === undefined || scene.id === null || scene.id === "") return;
+      next[String(scene.id)] = true;
+    });
+    catalogSceneIds = next;
+  }
+  function applyPendingCommitFocus() {
+    var pending = pendingCommitFocus;
+    if (!pending || !pending.result_scene_id) return null;
+    if (!catalogSceneIds[pending.result_scene_id]) return null;
+    pendingCommitFocus = null;
+    var nextId = pending.result_scene_id;
     if (typeof window.MatterVisSelectScene === "function") window.MatterVisSelectScene(nextId);
-    if (typeof flushQueuedSceneFigure === "function") {
-      flushQueuedSceneFigure(nextId);
-      [0, 50, 250].forEach(function (delay) {
-        setTimeout(function () { flushQueuedSceneFigure(nextId); }, delay);
-      });
+    if (window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
+      window.dash_clientside.set_props("scene-tabs", {value: nextId});
     }
+    if (typeof flushQueuedSceneFigure === "function") flushQueuedSceneFigure(nextId);
+    window.__mvLastCommitFocus = pending;
     return nextId;
   }
-  window.MatterVisSelectCommittedScene = selectCommittedScene;
+  function noteCommitFocus(payload) {
+    // The committing page receives this typed payload. A catalog with
+    // focus:false must not move every other open page onto the result.
+    // Selection waits until that catalog lists result_scene_id.
+    if (!payload || typeof payload !== "object" || !payload.result_scene_id) {
+      pendingCommitFocus = null;
+      return null;
+    }
+    pendingCommitFocus = {
+      operation: String(payload.operation || ""),
+      source_scene_id: String(payload.source_scene_id || ""),
+      result_scene_id: String(payload.result_scene_id),
+      revision: payload.revision,
+      generation: payload.generation,
+    };
+    return applyPendingCommitFocus();
+  }
+  window.MatterVisNoteCommitFocus = noteCommitFocus;
 
   function claimOwnDuplicatedScene(message) {
     // Catalog publication uses focus:false so other open pages keep their
@@ -1380,6 +1404,7 @@
       // server version and delivers the same sequence again.
       if (sameSeq && !(message.focus && !applied.focus)) return;
       rememberSceneCatalog(message);
+      rememberCatalogSceneIds(message);
       var domDiffers = sceneCatalogDomDiffers(message.scenes);
       var selected = "";
       try { selected = String(currentSceneId() || ""); } catch (_) { selected = ""; }
@@ -1389,6 +1414,7 @@
         focus: !!message.focus || (sameSeq && !!applied.focus),
       };
       claimOwnDuplicatedScene(message);
+      applyPendingCommitFocus();
       var shownId = "";
       try { shownId = String(currentSceneId() || ""); } catch (_) { shownId = ""; }
       if (!shownId && message.active_id) shownId = String(message.active_id);

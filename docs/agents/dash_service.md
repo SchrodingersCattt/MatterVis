@@ -157,10 +157,12 @@ Notes for callers:
   that page selects the catalog `active_id` locally. `focus` stays
   false for create, rename, delete, reorder, duplicate, undo, and a
   structural supercell commit, so other open pages do not move. The
-  page that clicked Commit selects the result scene named in its
-  operate status. That status includes the shared-history operand
-  revision. An older visible revision is refused and names both
-  revisions. `POST /scenes/active` and a
+  page that clicked Commit receives
+  `{operation, source_scene_id, result_scene_id, revision, generation}`
+  on `operate-scene-focus` and selects `result_scene_id` once the scene
+  catalog lists it. The operate-status sentence is the banner; it is not
+  parsed for a scene id. A refused commit sends no focus payload and
+  names both revisions. `POST /scenes/active` and a
   `set_active_scene` intent set `focus: true` and move every open tab.
   Deleting the selected scene moves the page to the scene that remains
   active.

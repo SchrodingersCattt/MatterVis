@@ -34,6 +34,7 @@ def _operation_panel_section(disorder_resolve: dict[str, Any] | None = None):
                     ),
                     html.Div(id="operate-status", className="operation-help-text"),
                     dcc.Store(id="operate-scene-focus"),
+                    dcc.Store(id="operate-commit-applied"),
                 ],
                 className="operation-subsection",
             ),

@@ -53,6 +53,20 @@ async function commit(page) {
   return page.locator("#operate-status").textContent();
 }
 
+async function committedScene(page, previousId) {
+  await page.waitForFunction((previous) => {
+    const focus = window.__mvLastCommitFocus;
+    const id = focus && focus.result_scene_id;
+    if (!id || id === previous) return false;
+    if (focus.operation !== "build_supercell") return false;
+    if (typeof focus.revision !== "number" || typeof focus.generation !== "number") return false;
+    const marked = document.querySelector("#scene-tabs .tab--selected, #scene-tabs [aria-selected='true']");
+    const owned = marked && (marked.closest("[id^='scene-tab-']") || marked);
+    return !!(owned && owned.id === "scene-tab-" + id);
+  }, previousId || "", { timeout: 20000 });
+  return page.evaluate(() => String(window.__mvLastCommitFocus.result_scene_id));
+}
+
 async function main() {
   const browser = await chromium.launch({
     executablePath: chrome,
@@ -90,26 +104,16 @@ async function main() {
     });
     await setCounts(page, {a: 2, b: 1, c: 1});
     const firstStatus = await commit(page);
-    const first = firstStatus.match(/in scene (scene_[0-9a-f]{12})/);
-    if (!first) fail("first commit did not name a result scene: " + firstStatus);
-    await page.waitForFunction((id) => {
-      const marked = document.querySelector("#scene-tabs .tab--selected, #scene-tabs [aria-selected='true']");
-      const owned = marked && (marked.closest("[id^='scene-tab-']") || marked);
-      return owned && owned.id === "scene-tab-" + id;
-    }, first[1], { timeout: 20000 });
-    if ((await sites(page, first[1])) !== 16) fail("2x1x1 did not select a 16-site scene");
+    const firstId = await committedScene(page, copy);
+    if (!firstId) fail("first commit did not focus a result scene: " + firstStatus);
+    if ((await sites(page, firstId)) !== 16) fail("2x1x1 did not select a 16-site scene");
 
     await setCounts(page, {a: 2, b: 2, c: 2});
     const secondStatus = await commit(page);
-    const second = secondStatus.match(/in scene (scene_[0-9a-f]{12})/);
-    if (!second) fail("second commit did not name a result scene: " + secondStatus);
-    if (second[1] === first[1]) fail("2x2x2 stayed on the 16-site scene");
-    await page.waitForFunction((id) => {
-      const marked = document.querySelector("#scene-tabs .tab--selected, #scene-tabs [aria-selected='true']");
-      const owned = marked && (marked.closest("[id^='scene-tab-']") || marked);
-      return owned && owned.id === "scene-tab-" + id;
-    }, second[1], { timeout: 20000 });
-    if ((await sites(page, second[1])) !== 128) fail("2x2x2 did not select a 128-site scene");
+    const secondId = await committedScene(page, firstId);
+    if (!secondId) fail("second commit did not focus a result scene: " + secondStatus);
+    if (secondId === firstId) fail("2x2x2 stayed on the 16-site scene");
+    if ((await sites(page, secondId)) !== 128) fail("2x2x2 did not select a 128-site scene");
     if (!/from revision 2/.test(secondStatus)) fail("second status hid the operand: " + secondStatus);
 
     await page.locator("#scene-tab-" + copy).click();
@@ -127,8 +131,8 @@ async function main() {
     }
     console.log(JSON.stringify({
       copy,
-      first: first[1],
-      second: second[1],
+      first: firstId,
+      second: secondId,
       other: otherBefore,
       refused,
     }));

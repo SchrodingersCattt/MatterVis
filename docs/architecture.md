@@ -38,9 +38,11 @@ flowchart TB
 
 Display, Analysis, and Operate are separate effects. Display changes a
 view. Analysis reads one immutable snapshot. Operate commits a new
-structure revision through `EffectSession`. The legacy `supercell`
-shorthand remains a display repeat. Details and the structural
-commands are in
+structure revision through `EffectSession`. The commit checks
+`expected_revision` and saves `.local/effect-session.json` under one
+file lock, so two processes cannot both publish the same revision. The
+legacy `supercell` shorthand remains a display repeat. Details and the
+structural commands are in
 [display-operate-analysis.md](architecture/display-operate-analysis.md).
 
 ## Ownership

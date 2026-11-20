@@ -6,7 +6,6 @@ the legacy display repeat.
 """
 from __future__ import annotations
 
-import threading
 import time
 from typing import Any
 
@@ -16,11 +15,6 @@ from .. import perf_log
 from ..effects.errors import RevisionConflict
 from .editor_transforms import _seed_text_to_selector, _transforms_table_rows
 from .status_helpers import emit_legacy_status, surface_callback_error
-
-# One structural commit at a time. Two clicks can both read the same
-# current revision before either commit lands; the second must see the
-# advanced pointer instead of multiplying the old view again.
-_VISIBLE_COMMIT_LOCK = threading.Lock()
 
 
 def _parse_symmetry_ops(value: Any) -> list[Any]:
@@ -178,13 +172,14 @@ def commit_visible_supercell(
     count_a: Any,
     count_b: Any,
     count_c: Any,
-) -> str:
+) -> tuple[str, dict[str, Any] | None]:
     """Commit ``build_supercell`` from the scene this page is showing.
 
-    The operand is the shared-history current revision. That revision
-    must be the one loaded in ``scene_id``. A duplicate keeps the same
-    structure id; this does not start a second history. The returned
-    status names the result scene so only the committing page selects it.
+    The operand is that scene's revision. ``EffectSession`` checks it
+    under the shared session-file lock, after adopting any commit another
+    process already saved. A duplicate keeps the same structure id. The
+    focus payload names the result scene; the status sentence is only
+    the banner. A conflict returns no focus payload.
     """
 
     repeats = {
@@ -192,47 +187,48 @@ def commit_visible_supercell(
         "b": _strict_repeat(count_b, "b"),
         "c": _strict_repeat(count_c, "c"),
     }
-    with _VISIBLE_COMMIT_LOCK:
-        state = backend.get_state(scene_id)
-        bundle = backend.get_bundle(str(state.get("structure") or ""))
-        structure_id = str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
-        frame = str(getattr(bundle, "scientific_frame", "0") or "0")
+    state = backend.get_state(scene_id)
+    bundle = backend.get_bundle(str(state.get("structure") or ""))
+    structure_id = str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
+    frame = str(getattr(bundle, "scientific_frame", "0") or "0")
+    visible = getattr(bundle, "scientific_revision", None)
+    expected = int(visible) if visible is not None else 1
+    try:
+        result = backend.operate(
+            "build_supercell",
+            repeats,
+            scene_id=scene_id,
+            structure_id=structure_id,
+            expected_revision=expected,
+        )
+    except RevisionConflict:
         session = backend.effect_session()
-        visible = getattr(bundle, "scientific_revision", None)
-        current = (
+        current_now = (
             int(session.current_ref(structure_id, frame).revision)
             if session.has(structure_id, frame)
-            else None
+            else expected
         )
-        if visible is not None and current is not None and int(visible) != current:
-            return (
-                f"Supercell was not committed: this view is revision {int(visible)}; "
-                f"the shared history operand is revision {current}. "
-                "Select the current scene and commit again."
-            )
-        expected = current if current is not None else 1
-        try:
-            result = backend.operate(
-                "build_supercell",
-                repeats,
-                scene_id=scene_id,
-                structure_id=structure_id,
-                expected_revision=expected,
-            )
-        except RevisionConflict:
-            current_now = int(session.current_ref(structure_id, frame).revision)
-            shown = int(visible) if visible is not None else expected
-            return (
-                f"Supercell was not committed: this view is revision {shown}; "
-                f"the shared history operand is revision {current_now}. "
-                "Select the current scene and commit again."
-            )
+        message = (
+            f"Supercell was not committed: this view is revision {expected}; "
+            f"the shared history operand is revision {current_now}. "
+            "Select the current scene and commit again."
+        )
+        return message, None
     output = result.get("output") or {}
-    return (
+    result_scene_id = str(result.get("scene_id") or "")
+    focus = {
+        "operation": "build_supercell",
+        "source_scene_id": str(scene_id or result.get("source_scene_id") or ""),
+        "result_scene_id": result_scene_id,
+        "revision": int(output.get("revision")),
+        "generation": int(backend.scene_generation(result_scene_id)),
+    }
+    status = (
         f"Committed build_supercell from revision {expected} "
         f"as {output.get('id')} revision {output.get('revision')} "
-        f"in scene {result.get('scene_id')}."
+        f"in scene {result_scene_id}."
     )
+    return status, focus
 
 
 def _strict_repeat(value: Any, axis: str) -> int:
@@ -496,6 +492,7 @@ def register_operations_callbacks(app, backend):
 
     @app.callback(
         Output("operate-status", "children"),
+        Output("operate-scene-focus", "data"),
         Input("operate-supercell-btn", "n_clicks"),
         State("operate-supercell-a", "value"),
         State("operate-supercell-b", "value"),
@@ -505,31 +502,25 @@ def register_operations_callbacks(app, backend):
     )
     def commit_structural_supercell(_clicks, count_a, count_b, count_c, scene_id):
         if not _clicks:
-            return no_update
+            return no_update, no_update
         try:
             return commit_visible_supercell(backend, scene_id, count_a, count_b, count_c)
         except Exception as exc:
             _surface_error("Build supercell", exc)
-            return f"Supercell was not committed: {exc}"
+            return f"Supercell was not committed: {exc}", None
 
     if hasattr(app, "clientside_callback"):
         app.clientside_callback(
             """
-            function(status) {
-              if (typeof window.MatterVisSelectCommittedScene !== "function") {
+            function(payload) {
+              if (typeof window.MatterVisNoteCommitFocus !== "function") {
                 return window.dash_clientside.no_update;
               }
-              var selected = window.MatterVisSelectCommittedScene(status);
-              if (!selected || selected === window.dash_clientside.no_update) {
-                return window.dash_clientside.no_update;
-              }
-              if (window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
-                window.dash_clientside.set_props("scene-tabs", {value: selected});
-              }
-              return selected;
+              window.MatterVisNoteCommitFocus(payload);
+              return window.dash_clientside.no_update;
             }
             """,
-            Output("operate-scene-focus", "data"),
-            Input("operate-status", "children"),
+            Output("operate-commit-applied", "data"),
+            Input("operate-scene-focus", "data"),
             prevent_initial_call=True,
         )
