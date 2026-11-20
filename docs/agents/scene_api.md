@@ -29,6 +29,26 @@ flowchart LR
 - `uniform_viewport` is only needed when you want N panels to render at
   the same length-per-pixel; single-figure callers can skip it.
 
+## Primitive-cell boundary policy
+
+`CellBoundaryPolicy` and `cell_clip_planes` in `mat_viewer.render.cell_clip`
+are a visual clip of one primitive cell. The domain is the fractional
+parallelepiped between faces 0 and 1, including the boundary planes. It is
+not a repeated supercell and it does not change source coordinates or the
+bond graph. `"none"` leaves geometry uncut. `"surface"` clips the
+isosurface only. `"strict"` also clips atom spheres and bond tubes. Cuts
+are uncapped: a plane does not invent a face. Skew and left-handed cells
+use the same inward half-spaces; the outward direction is the reciprocal
+column, and the stored normal points into the cell. Scaling the lattice
+scales the domain. A point one primitive translation outside the cell is
+outside, including after a repeat.
+
+`render_cube_figure` is the only installer of these planes. It attaches
+them to VTK mappers. CPU, Plotly, and the interactive viewer do not apply
+the policy and do not claim the same pixels. See the cube API for the
+figure entry, the camera frame, and the difference between this
+parallelepiped and a camera-facing cell outline.
+
 ## Builders
 
 ### `mat_viewer.agent.load_structure(..., bond_scale=None, bond_thresholds=None)`
