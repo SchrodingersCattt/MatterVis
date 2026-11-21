@@ -252,6 +252,39 @@ def test_plotly_scene_camera_accepts_mappings_sequences_and_partial_payloads() -
         _plotly_scene_camera({"up": {"x": 0.0, "y": float("inf"), "z": 1.0}})
 
 
+def test_flat_ortep_keeps_the_raster_after_orbit_and_projection_change(tmp_path: Path):
+    backend = _backend(tmp_path)
+    try:
+        scene_id = next(iter(backend.scene_store.order))
+        backend.patch_state(
+            {"material": "flat", "style": "ortep"},
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        backend.patch_state(
+            {
+                "camera": {
+                    "eye": {"x": 1.4, "y": 0.2, "z": 0.6},
+                    "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                    "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+                    "projection": {"type": "orthographic"},
+                }
+            },
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        state = backend.get_state(scene_id)
+        figure, _topology = backend.figure_for_state(state)
+        payload = figure.to_plotly_json()
+        scene = payload["layout"]["scene"]
+        assert scene["bgcolor"] == "rgba(0,0,0,0)"
+        assert payload["layout"]["images"]
+        assert scene["camera"]["projection"]["type"] == "orthographic"
+        _assert_plotly_camera(scene["camera"])
+    finally:
+        backend.close()
+
+
 def test_nonfinite_position_camera_is_not_replaced() -> None:
     with pytest.raises(ValueError):
         _plotly_scene_camera(
