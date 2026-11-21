@@ -493,32 +493,67 @@
      * Plotly.react here would relayout again after that task moved on. */
     root.__mvFittedRangeGuard = true;
   }
+  function eyeVector(value) {
+    if (!value) return null;
+    var x = Number(value.x !== undefined && value.x !== null ? value.x : value[0]);
+    var y = Number(value.y !== undefined && value.y !== null ? value.y : value[1]);
+    var z = Number(value.z !== undefined && value.z !== null ? value.z : value[2]);
+    return [x, y, z].every(Number.isFinite) ? [x, y, z] : null;
+  }
+  function eyeMatches(left, right) {
+    var a = eyeVector(left);
+    var b = eyeVector(right);
+    if (!a || !b) return false;
+    return Math.abs(a[0] - b[0]) <= 1e-3 && Math.abs(a[1] - b[1]) <= 1e-3 && Math.abs(a[2] - b[2]) <= 1e-3;
+  }
   function commitControllerPose(controller, camera) {
     /* Plotly's orbit camera stores distance as a log radius and
      * rebuilds .eye only when the view matrix is recalculated.
-     * lookAt recalculates the previous pose first, so the new
-     * distance is visible only after a second recalc. */
+     * lookAt recalculates the previous pose first. A second key at
+     * the same timestamp is invisible when the sampler keeps the
+     * earlier one, and the render tick samples one delay behind
+     * lastT. Stamp the pose at lastT and one millisecond later, then
+     * recalculate that later sample so .eye is this distance. */
     if (!controller || typeof controller.lookAt !== "function" || !camera) return;
-    function vec(value) {
-      if (!value) return null;
-      var x = Number(value.x !== undefined && value.x !== null ? value.x : value[0]);
-      var y = Number(value.y !== undefined && value.y !== null ? value.y : value[1]);
-      var z = Number(value.z !== undefined && value.z !== null ? value.z : value[2]);
-      return [x, y, z].every(Number.isFinite) ? [x, y, z] : null;
-    }
-    var eye = vec(camera.eye);
-    var center = vec(camera.center);
-    var up = vec(camera.up);
+    var eye = eyeVector(camera.eye);
+    var center = eyeVector(camera.center);
+    var up = eyeVector(camera.up);
     if (!eye || !center || !up) return;
-    try { controller.lookAt(eye, center, up); }
-    catch (_) { return; }
     var view = controller.view;
-    if (view && typeof view.recalcMatrix === "function") {
+    var when = 0;
+    if (view && typeof view.lastT === "function") {
+      when = Number(view.lastT());
+      if (!Number.isFinite(when)) when = 0;
+    }
+    var posed = false;
+    if (view && typeof view.lookAt === "function") {
       try {
-        var when = typeof view.lastT === "function" ? view.lastT() : 0;
-        view.recalcMatrix(when);
+        view.lookAt(when, eye, center, up);
+        view.lookAt(when + 1, eye, center, up);
+        posed = true;
       } catch (_) {}
     }
+    if (!posed) {
+      try { controller.lookAt(eye, center, up); }
+      catch (_) { return; }
+    }
+    if (view && typeof view.recalcMatrix === "function") {
+      try { view.recalcMatrix(when + 1); }
+      catch (_) {
+        try { view.recalcMatrix(when); } catch (_) {}
+      }
+    }
+    if (!eyeMatches(controller.eye, eye) && view && typeof view.recalcMatrix === "function") {
+      try { view.recalcMatrix(when); } catch (_) {}
+    }
+  }
+  function noteUnadoptedWheel(graph, pose) {
+    /* The gl eye can stay at the previous radius after the server has
+     * accepted the zoom. Remember the pose until a later frame sees it
+     * on the controller, so that frame does not copy the old radius back. */
+    var meta = graph && graph.layout && graph.layout.meta && graph.layout.meta.mattervis_render;
+    var sceneId = meta && meta.scene_id ? String(meta.scene_id) : "";
+    root.__mvUnadoptedWheel = {sceneId: sceneId, camera: pose};
   }
   function installWheelZoom(gd) {
     /* Plotly's orthographic wheel handler multiplies the scene aspect
@@ -583,7 +618,12 @@
         "scene.camera.up": zoomPose.up,
         "scene.camera.projection.type": projection,
       })).then(function () {
-        commitControllerPose(controller, zoomPose);
+        /* Relayout can replace the controller. Commit the one that is
+         * mounted now, then keep the pose until that eye shows it. */
+        var sceneNow = graph._fullLayout && graph._fullLayout.scene && graph._fullLayout.scene._scene;
+        var current = sceneNow && (sceneNow.camera || (sceneNow.glplot && sceneNow.glplot.camera));
+        commitControllerPose(current || controller, zoomPose);
+        noteUnadoptedWheel(graph, zoomPose);
       }, function () {});
     }, {capture: true, passive: false});
   }

@@ -108,6 +108,9 @@ lags. That clock is scoped to the scene generation and server epoch. A full
 frame already inside Plotly can finish after a newer camera command abandoned
 its queue; replay that command through the bounded camera path after the frame
 releases the FIFO. Live eye preservation requires the same scene generation.
+A wheel zoom is the exception: the orbit radius can stay at the previous
+distance after the server has accepted the new eye, and a same-revision
+frame must keep that layout eye instead of copying the stale gl eye back.
 Recovery frames carry the current camera revision and a fresh `uirevision` so
 the gate cannot reject the repair or replace its camera with the failed live
 eye. Projection-only postcondition mismatches wait for up to three afterplot

@@ -775,6 +775,31 @@
       const rightProjection = right.projection && (right.projection.type || right.projection);
       return !leftProjection || !rightProjection || String(leftProjection) === String(rightProjection);
     }
+    /* A wheel can leave the orbit radius at the previous distance after
+     * the server has the new eye. A same-revision frame would otherwise
+     * copy that stale gl eye over the layout and paint it again. */
+    function layoutOwnsUnadoptedWheel(gd, layoutCamera, liveCamera) {
+      const pending = window.__mvUnadoptedWheel;
+      if (!pending || !pending.camera || !layoutCamera || !liveCamera) return false;
+      if (sameSceneDragInProgress(gd)) return false;
+      const render = renderMetadataFromLayout(gd && gd.layout);
+      const sceneId = render && render.scene_id ? String(render.scene_id) : "";
+      if (!sceneId || String(pending.sceneId || "") !== sceneId) return false;
+      if (camerasClose(liveCamera, pending.camera)) {
+        window.__mvUnadoptedWheel = null;
+        return false;
+      }
+      return camerasClose(layoutCamera, pending.camera);
+    }
+    /* A boolean would drop to false when the first of two overlapping
+     * camera relayouts settles, and the foreign-scene restore would run
+     * against the one that is still in flight. */
+    function holdCameraRelayout() {
+      window.__mvAllowCameraRelayout = Number(window.__mvAllowCameraRelayout || 0) + 1;
+    }
+    function releaseCameraRelayout() {
+      window.__mvAllowCameraRelayout = Math.max(0, Number(window.__mvAllowCameraRelayout || 0) - 1);
+    }
     function cameraOnlyPatch(camera) {
       return dottedCameraUpdate(camera);
     }
@@ -1170,15 +1195,15 @@
               const patch = cameraOnlyPatch(JSON.parse(JSON.stringify(gd.__mvSceneCamera)));
               if (!patch) return Promise.resolve(gd);
               const invoke = function () {
-                window.__mvAllowCameraRelayout = true;
+                holdCameraRelayout();
                 let restored;
                 try { restored = original.call(window.Plotly, gd, patch); }
                 catch (err) {
-                  window.__mvAllowCameraRelayout = false;
+                  releaseCameraRelayout();
                   throw err;
                 }
                 const clearAllow = function () {
-                  window.__mvAllowCameraRelayout = false;
+                  releaseCameraRelayout();
                   if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installContextLoss === "function") {
                     window.MatterVisViewCamera.installContextLoss(gd);
                   }
@@ -1294,12 +1319,15 @@
             let next=layout;
             if (layout.scene&&previous&&previous.scene_id===render.scene_id&&previous.server_started_at===render.server_started_at&&String(previous.scene_generation||"")===String(render.scene_generation||"")&&revision(gd.layout)===revision(layout)) {
               const camera=window.mattervisCurrentCamera&&window.mattervisCurrentCamera(gd);
-              if (camera) {
+              if (camera && !layoutOwnsUnadoptedWheel(gd, layout.scene.camera, camera)) {
                 const liveCamera=JSON.parse(JSON.stringify(camera));
                 /* The live GL camera is often still the previous projection
                  * when an orthographic frame arrives under the same
                  * uirevision. Keep the commanded projection; the eye stays
-                 * live so a drag is not snapped back. */
+                 * live so a drag is not snapped back. A wheel whose radius
+                 * the controller never adopted is the exception: that
+                 * layout eye is the server pose, and copying the live eye
+                 * would paint the previous distance. */
                 const commanded=layout.scene.camera&&layout.scene.camera.projection;
                 const commandedType=commanded&&(commanded.type||commanded);
                 const liveType=liveCamera.projection&&(liveCamera.projection.type||liveCamera.projection);
@@ -1589,16 +1617,16 @@
             return result;
           });
         }
-        if (allowCamera) window.__mvAllowCameraRelayout = true;
+        if (allowCamera) holdCameraRelayout();
         let cameraPending;
         try {
           cameraPending = original.apply(this, args);
         } catch (err) {
-          if (allowCamera) window.__mvAllowCameraRelayout = false;
+          if (allowCamera) releaseCameraRelayout();
           throw err;
         }
         if (!allowCamera) return cameraPending;
-        const clearCameraAllow = function () { window.__mvAllowCameraRelayout = false; };
+        const clearCameraAllow = function () { releaseCameraRelayout(); };
         return Promise.resolve(cameraPending).then(function (result) {
           clearCameraAllow();
           if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installContextLoss === "function") {
@@ -3290,6 +3318,7 @@
   }, true);
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
+    window.__mvUnadoptedWheel = null;
     if (window.__mvRetireDragSample) window.__mvRetireDragSample();
     window.__mvGestureEndedAt = 0;
     window.__mvGesturePointerRelayoutSeen = false;

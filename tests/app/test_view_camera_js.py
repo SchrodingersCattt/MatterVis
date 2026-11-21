@@ -477,6 +477,96 @@ assert.ok(dist > 0.5, 'max zoom still uses the old 0.35 eye floor inside the cub
     assert result.returncode == 0, result.stderr
 
 
+def test_wheel_zoom_adopts_radius_and_remembers_an_unadopted_pose():
+    """A same-timestamp radius key must not leave the controller at the previous distance."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+function laggingController(initial) {
+  let eye = initial.slice();
+  let last = 10;
+  const keys = [{t: 10, eye: initial.slice(), first: true}];
+  const view = {
+    lastT() { return last; },
+    lookAt(t, next) {
+      if (t < last) return;
+      last = t;
+      keys.push({t, eye: next.slice(), first: false});
+    },
+    recalcMatrix(t) {
+      // Duplicate timestamps keep the earlier key. A later timestamp does not.
+      let best = -Infinity;
+      let chosen = keys[0];
+      for (const key of keys) {
+        if (key.t <= t && key.t > best) { best = key.t; chosen = key; }
+      }
+      eye = chosen.eye.slice();
+    },
+  };
+  return {
+    view,
+    center: [0, 0, 0],
+    up: [0, 0, 1],
+    _ortho: false,
+    lookAt(next) { view.lookAt(view.lastT(), next); },
+    get eye() { return eye; },
+  };
+}
+const listeners = [];
+const canvas = {};
+const initial = [1.2, 0.4, 0.3];
+const mounted = laggingController(initial);
+const gd = {
+  isConnected: true,
+  layout: {meta: {mattervis_render: {scene_id: 'ionic'}}},
+  _fullLayout: {
+    scene: {
+      aspectratio: {x: 1, y: 1, z: 1},
+      _scene: {glplot: {canvas}, camera: mounted},
+    },
+  },
+};
+const sandbox = {
+  Promise, Object, Array, JSON, Number, String, Date, Math, setTimeout, clearTimeout,
+  window: {Plotly: {relayout: () => {
+    gd._fullLayout.scene._scene.camera = laggingController(initial);
+    return Promise.resolve();
+  }}},
+  document: {addEventListener: (type, fn) => listeners.push({type, fn})},
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const commit = sandbox.window.MatterVisViewCamera.commitControllerPose;
+const direct = laggingController(initial);
+commit(direct, {eye: {x: 0.6, y: 0.2, z: 0.15}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}});
+assert.ok(Math.abs(direct.eye[0] - 0.6) < 1e-6, 'same-timestamp lookAt left the previous radius');
+sandbox.window.MatterVisViewCamera.installWheelZoom(gd);
+const wheel = listeners.find(item => item.type === 'wheel').fn;
+wheel({
+  target: canvas,
+  deltaY: -240,
+  deltaX: 0,
+  preventDefault() {},
+  stopImmediatePropagation() {},
+});
+(async () => {
+  await Promise.resolve();
+  const camera = gd._fullLayout.scene._scene.camera;
+  const factor = Math.exp(-240 / 900);
+  assert.ok(Math.abs(camera.eye[0] - initial[0] * factor) < 1e-6, 'wheel left the replaced controller at the old eye');
+  const pending = sandbox.window.__mvUnadoptedWheel;
+  assert.equal(pending.sceneId, 'ionic');
+  assert.ok(Math.abs(pending.camera.eye.x - initial[0] * factor) < 1e-6);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr
+
+
 def test_orthographic_postcondition_waits_for_a_late_gl_flip():
     node = shutil.which("node")
     if node is None:

@@ -69,8 +69,13 @@ must not change scene B, and a stale revision must not replace a newer one.
   with the eye and center. The orbit controller stores distance as a log
   radius and rebuilds `camera.eye` on the next matrix recalc, so the
   acknowledged pose is written with `lookAt` and recalculated after the
-  relayout. A wheel zoom does the same after its eye relayout, which is
-  how a zoom survives a tab return without a new camera revision. A store whose
+  relayout. A wheel zoom does the same after its eye relayout, on the
+  controller mounted after that relayout, and records the pose until a
+  later frame sees that eye. A same-revision frame keeps the layout
+  camera when it is that unadopted pose, so the previous radius is not
+  copied back onto the canvas. A pointer press clears the record, and a
+  drag still keeps the live eye. That is how a zoom survives a tab
+  return without a new camera revision. A store whose
   revision is older than the mounted frame is ignored. Reset, align,
   projection, and a refit that advances the revision still win. A
   camera that leaves the scene, including a unit-cell box with a corner
@@ -85,6 +90,9 @@ must not change scene B, and a stale revision must not replace a newer one.
   the graph (`__mvOwnedRelayoutDepth`), not a window-wide permission flag.
   The acknowledged camera is checked again immediately before it is
   written: scene id, scene generation, camera revision, and server session.
+  The wrapper's camera-relayout suppress signal is a depth count. One
+  relayout finishing does not clear it while another camera relayout is
+  still in flight.
   A pose stored for scene A is not applied after scene B is mounted.
 - A fitted axis box is remembered with the scene generation and server
   session that produced it. A later generation, or a restarted session
@@ -102,7 +110,8 @@ must not change scene B, and a stale revision must not replace a newer one.
   relayout in addition to the projection follow-up: one relayout that
   writes new ranges and a new projection together is the clip the split
   exists to avoid. A later frame for the same scene still keeps the live
-  camera when its `uirevision` matches.
+  camera when its `uirevision` matches, unless that frame's camera is a
+  wheel pose the gl camera has not adopted.
 - Private gl3d fields (`controller._ortho`, `glplot`, `glplot.getAspectratio`,
   `scene.traces`) are
   read only when `Plotly.version` is missing or exactly `4.1.1`. Any other
