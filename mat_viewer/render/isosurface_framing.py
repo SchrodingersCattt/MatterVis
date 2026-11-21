@@ -543,12 +543,38 @@ def _style_from_args(args: Any) -> dict[str, Any]:
     }
 
 
+def _density_mask_arguments(args: Any) -> tuple[bool, Any, float | None]:
+    """Density cube and cutoff for the same mask the draw path applies.
+
+    The mask stays off unless the caller sets it. A stored path and cutoff
+    are not read while it is off, so they cannot clip an isosurface by
+    themselves.
+    """
+
+    enabled = bool(getattr(args, "isosurface_density_mask", False))
+    if not enabled:
+        return False, None, None
+    density_path = getattr(args, "isosurface_density_cube", None)
+    cutoff = getattr(args, "isosurface_density_cutoff", None)
+    if not density_path or cutoff is None:
+        raise ValueError(
+            "density mask requires a density cube and ρ_cut > 0 in "
+            "e/Bohr^3; the isosurface was not masked and no cutoff "
+            "was chosen automatically"
+        )
+    from ..cube.io import read_cube
+
+    return True, read_cube(density_path), float(cutoff)
+
+
 def ensure_structure_isosurfaces(structure: Any, args: Any) -> None:
     """Extract meshes with the same settings the general renderer will draw.
 
     A later ``ensure_cube_isosurfaces`` call with those settings reuses the
-    cache. Vertices are the unsmoothed marching-cubes result unless a stored
-    mesh was already smoothed in place.
+    cache. When the density mask is on, this extraction uses that cube and
+    cutoff, so the vertices stored for the camera are the masked mesh.
+    Those vertices are the unsmoothed marching-cubes result unless a caller
+    already replaced them with a smoothed or clipped mesh.
     """
     from ..cube.cpu import ensure_cube_isosurfaces
 
@@ -559,6 +585,7 @@ def ensure_structure_isosurfaces(structure: Any, args: Any) -> None:
         from ..cube.io import read_cube
 
         color_cube = read_cube(color_path)
+    density_mask, density_cube, density_cutoff = _density_mask_arguments(args)
     ensure_cube_isosurfaces(
         structure,
         isovalue=style["isosurface_isovalue"],
@@ -572,6 +599,9 @@ def ensure_structure_isosurfaces(structure: Any, args: Any) -> None:
         color_range=style["isosurface_color_range"],
         color_center=style["isosurface_color_center"],
         colormap=style["isosurface_colormap"],
+        density_mask=density_mask,
+        density_cube=density_cube,
+        density_cutoff=density_cutoff,
     )
 
 

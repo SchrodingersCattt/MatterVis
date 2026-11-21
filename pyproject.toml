@@ -70,6 +70,7 @@ test = [
     "pytest-timeout",
     "pytest-xdist",
     "gemmi",
+    "pyvista",
     "tomli; python_version < '3.11'",
 ]
 dev = ["matter-vis[all,test]", "build", "ruff"]

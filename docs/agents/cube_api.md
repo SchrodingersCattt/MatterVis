@@ -76,9 +76,15 @@ per panel is not that contract.
 
 The automatic camera reads the isosurface vertices stored on the scene.
 Those vertices are the visible mesh after a density mask, a cell clip, and
-any smoothing. An empty stored list means nothing of the surface is drawn;
-the fit does not march the cube again and restore the removed lobes. Zoom,
-framing margin, orthographic scale, and an explicit view direction or
+any smoothing. When the density mask is enabled, the general renderer
+extracts that masked mesh before it fits, with the same density cube and
+cutoff the draw path uses. That extraction stores the masked marching-cubes
+vertices. `cell_clip_planes` is the six inward half-spaces of one primitive
+cell, including a skew or left-handed lattice. A caller that smooths or
+clips writes those vertices back onto the stored mesh before the fit reads
+them. An empty stored list means nothing of the surface is
+drawn; the fit does not march the cube again and restore the removed lobes.
+Zoom, framing margin, orthographic scale, and an explicit view direction or
 lattice axis go through `resolve_content_view`.
 
 `--check` resolves `[cube]` without loading the file or creating output.
