@@ -49,15 +49,19 @@ commands are in
 |---|---|---|
 | MolCrysKit | symmetry-expanded sites, molecule and ASU identity, PBC bonds, ADPs, rings, formula-unit selection | cameras, colors, output formats |
 | Atomaestro selection | which public records and periodic images are displayed | re-perceived bonds or private MolCrysKit `.info` fields |
-| representation | ball-and-stick, space filling, wireframe, ORTEP, aromatic circle/disk | renderer selection |
+| representation | ball-and-stick, ball, space filling, wireframe, ORTEP, vdw, flat illustration, aromatic circle/disk | renderer selection |
 | shading | smooth, flat, ORTEP axes/hatch | chemical topology or output format |
 | camera | one homogeneous orthographic/perspective transform and clipping contract | chemistry or backend fallback |
 | backend | CPU, Plotly, or optional GPU conversion of an existing `RenderPlan` | changing representation or chemistry |
 | encoder/frontend | HTML, Web service, TUI, GIF/MP4, Cube mesh extraction | implicit installation or backend switching |
 
-ORTEP is a representation, `flat` is shading, and `cpu`/`plotly`/`gpu` are
-backends. Those choices remain independent in both the Python contracts and
-the CLI.
+ORTEP, `vdw`, and `flat_illustration` are representations. `shading="flat"`
+is per-face triangle shading. `material="flat"` is the billboard technique
+(and, with ORTEP, the 2D publication path). Neither flag is
+`flat_illustration`. `cpu`/`plotly`/`gpu` are backends. Those choices remain
+independent in both the Python contracts and the CLI. `vdw` radii come from
+MolCrysKit's van der Waals table (Bondi for the usual organic elements).
+`ball` and `space_filling` keep the compact display-radius table.
 
 ## Static rendering
 

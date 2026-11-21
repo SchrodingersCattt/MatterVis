@@ -6,7 +6,9 @@ rules onto a scene's state. Each rule has a *selector*
 ``{"is_minor": True/False}``) and zero or more *overrides*: ``color``,
 ``color_light``, ``visible``, ``opacity`` (a multiplier 0-1),
 ``material`` (``"mesh"``/``"flat"``), and ``style``
-(``"ball"``/``"ball_stick"``/``"stick"``/``"ortep"``/``"wireframe"``).
+(``"ball"``/``"ball_stick"``/``"space_filling"``/``"stick"``/``"ortep"``/
+``"wireframe"``/``"vdw"``/``"flat_illustration"``). ``flat_illustration``
+is a representation. It is not ``material="flat"``.
 
 Rules apply in *list order*; later rows win on overlapping atoms. So
 ``[{all -> grey}, {elements: O -> red}]`` paints everything grey
@@ -172,7 +174,9 @@ def tag_atoms_with_groups(
       while opacity sliders restyle existing traces.
     - ``_render_material``: ``"mesh" | "flat" | None``. Per-atom
       override of ``style['material']``. ``None`` = inherit.
-    - ``_render_style``: ``"ball"|"ball_stick"|"stick"|"ortep"|"wireframe"|None``.
+    - ``_render_style``: representation id or ``None``. Includes ``ball``,
+      ``ball_stick``, ``space_filling``, ``stick``, ``ortep``, ``wireframe``,
+      ``vdw``, and ``flat_illustration``. ``None`` inherits the scene style.
 
     ``scene_material`` / ``scene_style`` are not used to populate the
     override (we keep ``None`` for "inherit"); they're available for

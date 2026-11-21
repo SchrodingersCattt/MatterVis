@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from ..common import *
+from ..representations import REPRESENTATIONS
 from ..picking import pick_trace_metadata
 from ...config import element_color as configured_element_color
 from ...style.disorder import _field
@@ -20,7 +21,7 @@ def validate_style_schema(style: dict) -> dict:
     projection = str(style.get("projection", "perspective"))
     if material not in MATERIAL_DISPATCH:
         raise ValueError(f"unknown material: {material}")
-    if render_style not in STYLE_DISPATCH:
+    if render_style not in REPRESENTATIONS:
         raise ValueError(f"unknown style: {render_style}")
     if disorder not in DISORDER_DISPATCH:
         raise ValueError(f"unknown disorder mode: {disorder}")
@@ -64,7 +65,11 @@ def validate_style_schema(style: dict) -> dict:
         normalized["ortep_octant_shading"] = False
     if ortep_mode_minor is not None:
         normalized["ortep_mode_minor"] = str(ortep_mode_minor)
-    normalized["fast_rendering"] = bool(normalized.get("fast_rendering", False)) or (material == "flat" and render_style != "ortep")
+    # ``material="flat"`` is the billboard technique. ``flat_illustration``
+    # is a representation and must not turn that technique on.
+    normalized["fast_rendering"] = bool(normalized.get("fast_rendering", False)) or (
+        material == "flat" and render_style not in {"ortep", "flat_illustration"}
+    )
     # The disorder mode owns this legacy compatibility flag. In particular,
     # explicit opacity must never retain an old wireframe overlay from a
     # persisted state or caller style dict.

@@ -55,6 +55,7 @@ The same routing as a quick table:
 | Select an external terminal frame renderer without forking Atomaestro | [`tui_renderer_api.md`](tui_renderer_api.md) |
 | Read terminal pictures with element symbols, molecule silhouettes, text depth bands, crossing-bond gaps, layer slicing, and optional rotation parallax | [`tui_api.md`](tui_api.md) |
 | Render CIF, Cube, VASP, XYZ, ASE trajectory, or LAMMPS files from the CLI | [`../cli.md`](../cli.md) |
+| Choose `vdw` (MolCrysKit/Bondi radii) or `flat_illustration` without changing the default ball-and-stick look | [`../cli.md`](../cli.md) and [`scene_api.md`](scene_api.md) |
 | Label trajectory frames with physical simulation time while keeping playback FPS independent | [`../cli.md`](../cli.md#frames-and-animations) |
 | Build or compose a canonical structure scene from Python | [`scene_api.md`](scene_api.md) |
 | Render project-independent 3-D mesh or implicit geometry entities with real depth | [`scene_api.md`](scene_api.md) |

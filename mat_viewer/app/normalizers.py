@@ -380,6 +380,8 @@ _ATOM_GROUP_VALID_STYLES = {
     "stick",
     "ortep",
     "wireframe",
+    "vdw",
+    "flat_illustration",
 }
 _BOND_GROUP_VALID_STYLES = {"ball_stick", "stick", "wireframe"}
 

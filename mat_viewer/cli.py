@@ -756,6 +756,10 @@ def _scene_fit(
     show_cell: bool,
     include_boundary_replicas: bool = True,
     include_cross_boundary_bond_endpoints: bool = True,
+    representation: str = "ball_stick",
+    atom_scale: float = 1.0,
+    bond_radius: float = 0.15,
+    min_atom_radius: float | None = None,
 ):
     import numpy as np
 
@@ -784,31 +788,16 @@ def _scene_fit(
         if display == "unit_cell" or show_cell:
             matrix = np.asarray(getattr(bundle, "M", scene.get("M")), dtype=float)
             if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
-                fractions = np.asarray(
-                    [
-                        [0, 0, 0],
-                        [1, 0, 0],
-                        [0, 1, 0],
-                        [0, 0, 1],
-                        [1, 1, 0],
-                        [1, 0, 1],
-                        [0, 1, 1],
-                        [1, 1, 1],
-                    ],
-                    dtype=float,
-                )
-                cell_vertices = fractions @ matrix
+                cell_vertices = np.array(list(np.ndindex(2, 2, 2)), dtype=float) @ matrix
                 mins = np.minimum(mins, cell_vertices.min(axis=0))
                 maxs = np.maximum(maxs, cell_vertices.max(axis=0))
-        fit_points = np.asarray(
-            [
-                [x, y, z]
-                for x in (mins[0], maxs[0])
-                for y in (mins[1], maxs[1])
-                for z in (mins[2], maxs[2])
-            ],
-            dtype=float,
+        from .render.radius import union_representation_bounds
+
+        mins, maxs = union_representation_bounds(
+            mins, maxs, scene.get("draw_atoms") or [], representation=representation,
+            atom_scale=atom_scale, bond_radius=bond_radius, min_atom_radius=min_atom_radius,
         )
+        fit_points = mins + np.array(list(np.ndindex(2, 2, 2)), dtype=float) * (maxs - mins)
         if display == "unit_cell" and cell_vertices is not None:
             center = np.asarray(cell_vertices, dtype=float).mean(axis=0)
             radius = float(np.linalg.norm(fit_points - center, axis=1).max())
@@ -849,7 +838,13 @@ def _camera_spec(
         include_boundary_replicas = True
     include_cross_boundary_bond_endpoints = getattr(
         args, "style", "ball_stick"
-    ) not in {"ball", "space_filling"}
+    ) not in {"ball", "space_filling", "vdw"}
+    fit_style = {
+        "representation": getattr(args, "style", "ball_stick"),
+        "atom_scale": float(getattr(args, "atom_scale", 1.0)),
+        "bond_radius": float(getattr(args, "bond_radius", 0.15)),
+        "min_atom_radius": getattr(args, "min_atom_radius", None),
+    }
     _, target, radius, fit_points = _scene_fit(
         selected.bundle,
         display=display,
@@ -857,6 +852,7 @@ def _camera_spec(
         show_cell=_effective_show_cell(structure, args),
         include_boundary_replicas=include_boundary_replicas,
         include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
+        **fit_style,
     )
     topology_points = topology_fit_points(topology_data)
     if len(topology_points):
@@ -877,6 +873,7 @@ def _camera_spec(
                 include_cross_boundary_bond_endpoints=(
                     include_cross_boundary_bond_endpoints
                 ),
+                **fit_style,
             )
             accumulator.update_points(frame_fit_points)
         fit_points = accumulator.fit_points()
@@ -1132,7 +1129,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 show_hydrogen=args.show_hydrogen,
                 include_boundary_replicas=include_boundary_replicas,
                 include_cross_boundary_bond_endpoints=(
-                    args.style not in {"ball", "space_filling"}
+                    args.style not in {"ball", "space_filling", "vdw"}
                 ),
             )
             camera = _camera_spec(

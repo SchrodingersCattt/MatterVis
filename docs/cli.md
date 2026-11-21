@@ -328,7 +328,7 @@ substitutes one frame backend for another.
 | Flag | Default | Description |
 |------|---------|-------------|
 | --view MODE | auto | Periodic input uses unit_cell; nonperiodic or synthetic-cell input uses cluster |
-| --style STYLE | ball_stick | ball_stick, ball, space_filling, stick, ortep, or wireframe |
+| --style STYLE | ball_stick | ball_stick, ball, space_filling, stick, ortep, wireframe, vdw, or flat_illustration |
 | --shading MODE | smooth | smooth or flat mesh shading |
 | --surface-material PRESET | current matte shade | CPU Blinn–Phong preset: `matte`, `hard_plastic`, `metal_like`, or `glass_like`. Separate from `--shading smooth\|flat`. `metal` and `glass` are rejected. Specular presets and `glass_like` with `--backend plotly` or `gpu` are rejected. `--renderer batch` with those presets errors; `auto` uses the general renderer |
 | --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), plotly, or explicit native GPU PNG; never selected by fallback |
@@ -392,7 +392,9 @@ equal-area ties. Nonperiodic inputs fit the atomic coordinates and do not treat
 an ASE padding box as crystallographic data. Camera direction options are
 mutually exclusive. When `--no-cell` hides a real periodic cell, automatic
 framing likewise fits the visible atoms rather than hidden cell edges or vacuum
-padding.
+padding. Orthographic auto-fit includes each atom's rendered sphere radius, so
+`--style vdw` frames the van der Waals spheres and `--style ball` /
+`--style ball_stick` keep the compact display spheres.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -438,8 +440,22 @@ near a face, edge, or corner. `--no-boundary-replicas` wraps every site into
 the half-open home cell and does not add those near-face copies. Ball-and-stick,
 stick, wireframe, and ORTEP still draw the periodic images required for a
 MolCrysKit bond that crosses a cell face, and every such stick ends on a
-displayed atom. `--style ball` and `--style space_filling` do not add those
-bond-context images. A Python caller can also pass
+displayed atom. `--style ball`, `--style space_filling`, and `--style vdw`
+do not add those bond-context images. `vdw` is its own representation. Its
+sphere radii come from MolCrysKit's van der Waals table, whose usual organic
+values are Bondi radii (A. Bondi, J. Phys. Chem. 1964, 68, 441; carbon is
+1.70 Å). `ball` and `space_filling` keep the compact display table in
+`colors.ATOM_RADIUS` (carbon is 0.18 Å before `--atom-scale`). `vdw` is not
+an alias of either. An element missing from the MolCrysKit table is an error.
+It is not replaced with a covalent radius or a compact display radius.
+`mck_overrides.vdw_radius_overrides` is a bond-perception setting. It is not
+how `--style vdw` chooses radii. Traces, both viewport fitters, and the
+oblique camera fit read that table once per sphere and multiply by
+`--atom-scale` once. `flat_illustration` is a representation: unlit
+filled atoms and stroke bonds, drawn with the default `material=mesh` and
+`--shading smooth`. It does not select `material=flat` (the billboard
+technique) or `--shading flat`. Those flags stay available on `ball_stick`.
+A Python caller can also pass
 `include_cross_boundary_bond_endpoints=False` (the viewer `wrap_into_cell`
 token does this together with `include_boundary_replicas=False`) to keep only
 the wrapped sites and omit the crossing sticks. Display does not change source

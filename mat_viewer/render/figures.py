@@ -105,6 +105,10 @@ def _publication_polyhedron_legend(spec_results: list[dict]) -> list[dict]:
 
 def _should_use_fast(scene: dict, style: dict) -> bool:
     """Resolve the optional fast atom path without hiding geometry entities."""
+    # ``flat_illustration`` is a representation. It never takes the
+    # ``material="flat"`` billboard path, even if that technique flag is set.
+    if str(style.get("style", "")).lower().replace("-", "_") == "flat_illustration":
+        return False
     is_flat_ortep = (
         style.get("material") == "flat" and style.get("style") == "ortep"
     )

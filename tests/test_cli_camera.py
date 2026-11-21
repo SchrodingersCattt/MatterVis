@@ -158,6 +158,125 @@ def test_auto_display_uses_periodic_unit_cell_context() -> None:
     assert _display_mode(nonperiodic, Namespace(view="formula_unit")) == "formula_unit"
 
 
+def _ortho_camera(path: str, style: str, *, show_unit_cell):
+    from mat_viewer.agent import load_structure
+
+    structure = load_structure(path)
+    camera = _camera_spec(
+        structure,
+        _camera_args(
+            show_hydrogen=True,
+            show_unit_cell=show_unit_cell,
+            style=style,
+            atom_scale=1.0,
+            bond_radius=0.15,
+            min_atom_radius=None,
+            include_boundary_replicas=None,
+            ortho_scale=None,
+            field_of_view=None,
+            camera_target=None,
+            camera_clip=None,
+        ),
+        display="formula_unit",
+    )
+    return structure, camera
+
+
+def _screen_overflow(structure, camera, style: str) -> float:
+    from mat_viewer.loader.core import build_bundle_scene
+    from mat_viewer.render.radius import rendered_atom_radius
+
+    bundle = structure.frames[0].bundle
+    scene = build_bundle_scene(
+        bundle,
+        display_mode="formula_unit",
+        show_hydrogen=True,
+        include_boundary_replicas=True,
+        include_cross_boundary_bond_endpoints=style not in {"ball", "space_filling", "vdw"},
+    )
+    position = np.asarray(camera.position, dtype=float)
+    target = np.asarray(camera.target, dtype=float)
+    forward = target - position
+    forward /= np.linalg.norm(forward)
+    up = np.asarray(camera.up, dtype=float)
+    up /= np.linalg.norm(up)
+    right = np.cross(forward, up)
+    right /= np.linalg.norm(right)
+    screen_up = np.cross(right, forward)
+    aspect = 900.0 / 720.0
+    half_height = float(camera.ortho_scale)
+    half_width = half_height * aspect
+    worst = 0.0
+    for atom in scene["draw_atoms"]:
+        cart = np.asarray(atom["cart"], dtype=float)
+        relative = cart - target
+        screen_x = float(relative @ right)
+        screen_y = float(relative @ screen_up)
+        radius = rendered_atom_radius(
+            element=str(atom["elem"]),
+            stored_radius=float(atom["atom_radius"]),
+            representation=style,
+            atom_scale=1.0,
+            bond_radius=0.15,
+            coordination=bool(atom.get("_coordination_site")),
+        )
+        worst = max(
+            worst,
+            abs(screen_x) + radius - half_width,
+            abs(screen_y) + radius - half_height,
+        )
+    return worst
+
+
+def test_vdw_orthographic_fit_contains_the_spheres() -> None:
+    """CLI auto-fit must use the drawn sphere radius, not atom centres alone."""
+    root = Path(__file__).resolve().parents[1]
+    water = root / "benchmarks/structures/molecular_water.cif"
+    urea = root / "docs/qa/urea-default.cif"
+    petn = root / "docs/images/showcase_petn_molecule.xyz"
+    cases = (
+        (water, False, 0.56),
+        (urea, False, 1.92192),
+        (petn, False, 3.90563),
+        (water, None, 4.48),
+    )
+    for path, show_cell, stick_scale in cases:
+        _, stick = _ortho_camera(str(path), "ball_stick", show_unit_cell=show_cell)
+        _, ball = _ortho_camera(str(path), "ball", show_unit_cell=show_cell)
+        structure, vdw = _ortho_camera(str(path), "vdw", show_unit_cell=show_cell)
+        assert stick.ortho_scale == pytest.approx(stick_scale)
+        if show_cell is False:
+            assert vdw.ortho_scale > stick.ortho_scale
+            assert vdw.ortho_scale > ball.ortho_scale
+        assert _screen_overflow(structure, vdw, "vdw") <= 1.0e-6
+
+    from mat_viewer.render.viewport import _auto_camera_fit_ranges
+
+    scene = {
+        "camera": {
+            "position": [0.0, 0.0, 8.0],
+            "focal_point": [0.0, 0.0, 0.0],
+            "up": [0.0, 1.0, 0.0],
+            "projection": "orthographic",
+        },
+        "draw_atoms": [
+            {"elem": "C", "cart": [0.0, 0.0, 0.0], "atom_radius": 0.18},
+        ],
+    }
+    centres = [[-0.18, 0.18], [-0.18, 0.18], [-0.18, 0.18]]
+    style = {
+        "style": "vdw",
+        "projection": "orthographic",
+        "atom_scale": 1.0,
+        "bond_radius": 0.15,
+    }
+    covered = _auto_camera_fit_ranges(scene, style, centres)
+    assert covered[0][0] == pytest.approx(-1.70)
+    assert covered[0][1] == pytest.approx(1.70)
+    unchanged = _auto_camera_fit_ranges(scene, {**style, "style": "ball_stick"}, centres)
+    assert unchanged == centres
+
+
 def test_camera_fit_includes_the_visible_unit_cell() -> None:
     structure = _structure()
     camera = _camera_spec(
