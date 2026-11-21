@@ -92,8 +92,10 @@ def _build_bond_groups(
         elif kind_value == _BOND_GROUP_KIND_MAJOR:
             selector = {"is_minor": False}
         else:
-            elements = [str(e) for e in (elements_lists[index] if index < len(elements_lists) else []) if e]
-            selector = {"between_elements": elements} if elements else {"all": True}
+            raw_elements = elements_lists[index] if index < len(elements_lists) else []
+            elements = [str(element) for element in (raw_elements or []) if element]
+            # An empty endpoint list is the edit state, not "every bond".
+            selector = {"between_elements": elements}
         new_groups.append(
             {
                 "id": group_id,

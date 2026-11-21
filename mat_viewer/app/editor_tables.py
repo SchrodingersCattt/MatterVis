@@ -522,7 +522,8 @@ _BOND_GROUP_KIND_MAJOR = "major"
 def _bond_selector_kind(selector: dict[str, Any]) -> str:
     if selector.get("all"):
         return _BOND_GROUP_KIND_ALL
-    if selector.get("between_elements"):
+    # An empty list is still the between-elements editor, not "all bonds".
+    if "between_elements" in selector:
         return _BOND_GROUP_KIND_BETWEEN
     if "is_minor" in selector:
         return _BOND_GROUP_KIND_MINOR if selector["is_minor"] else _BOND_GROUP_KIND_MAJOR

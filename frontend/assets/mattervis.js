@@ -76,6 +76,65 @@
   const expectedSceneGenerationByScene = Object.create(null);
   const MAX_RENDER_QUEUE = 32;
 
+  function incomingTracesForWitness(args, objectFigure) {
+    if (objectFigure && args[1]) return Array.isArray(args[1].data) ? args[1].data : [];
+    return Array.isArray(args[1]) ? args[1] : [];
+  }
+  function traceCensus(traces) {
+    const list = Array.isArray(traces) ? traces : [];
+    let coordinates = 0;
+    let visibleCoordinates = 0;
+    list.forEach(function (trace) {
+      const x = trace && trace.x;
+      const count = x && typeof x.length === "number" ? x.length : 0;
+      coordinates += count;
+      if (trace && trace.visible !== false && count) visibleCoordinates += count;
+    });
+    return {traces: list.length, coordinates: coordinates, visible_coordinates: visibleCoordinates};
+  }
+  function witnessCamera(layout) {
+    const camera = layout && layout.scene && layout.scene.camera;
+    if (!camera || typeof camera !== "object") return null;
+    const projection = camera.projection;
+    return {
+      eye: camera.eye || null,
+      center: camera.center || null,
+      up: camera.up || null,
+      projection: projection && (projection.type || projection) || null,
+    };
+  }
+  function witnessUirevision(layout) {
+    if (!layout) return null;
+    if (layout.scene && layout.scene.uirevision !== undefined) return layout.scene.uirevision;
+    return layout.uirevision !== undefined ? layout.uirevision : null;
+  }
+  /* The last complete-frame decisions stay on the graph node that Plotly
+   * already mounted. The diagnostic module writes the attribute; this
+   * function only describes the frame. It does not choose a selection or
+   * whether the frame is painted. A disabled witness records nothing. */
+  function noteFrameWitness(gd, layout, traces, decision) {
+    try {
+      const witness = window.MatterVisFrameWitness;
+      if (!gd || !witness || typeof witness.note !== "function") return;
+      if (typeof witness.enabled === "function" && !witness.enabled()) return;
+      const render = renderMetadataFromLayout(layout);
+      witness.note(gd, {
+        at: new Date().toISOString(),
+        decision: decision,
+        scene_id: render && render.scene_id || null,
+        scene_generation: render && render.scene_generation !== undefined ? render.scene_generation : null,
+        render_revision: render && render.render_revision !== undefined ? Number(render.render_revision) : null,
+        camera_revision: render && render.camera_revision !== undefined ? Number(render.camera_revision || 0) : null,
+        server_started_at: render && render.server_started_at || null,
+        uirevision: witnessUirevision(layout),
+        incoming: traceCensus(traces),
+        canvas: traceCensus(gd.data),
+        camera: witnessCamera(layout),
+        delivered: gd.__mvDeliveredFrame || null,
+      });
+    } catch (_) {}
+  }
+
   /* Plotly work is asynchronous.  Keep one bounded FIFO per graph so a
    * burst of camera commands or duplicate Dash/WS frames cannot grow an
    * unbounded promise chain.  Dropped entries are already superseded by a
@@ -796,6 +855,7 @@
           const shown = renderMetadataFromLayout(target.layout);
           const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
           if (shown && shown.scene_id && selected && String(shown.scene_id) !== String(selected)) {
+            noteFrameWitness(target, target.layout, incomingTracesForWitness(args, objectFigure), "untyped-other-scene");
             return Promise.resolve(target);
           }
         }
@@ -828,7 +888,10 @@
             return Promise.resolve(gd || args[0]);
           }
         }
-        if (render&&!figureMetadataIsCurrent(render,target)) return Promise.resolve(args[0]);
+        if (render&&!figureMetadataIsCurrent(render,target)) {
+          if (fullFigure) noteFrameWitness(target, layout, incomingTracesForWitness(args, objectFigure), "stale-before-queue");
+          return Promise.resolve(args[0]);
+        }
         if (name === "relayout" && layout &&
             typeof window.MatterVisInvalidateSemanticHover === "function") {
           const touchesCamera = layout["scene.camera"] ||
@@ -852,7 +915,10 @@
             /* Do not leave the busy pill behind when a stale/duplicate frame
              * is rejected. Mark the request busy only after the frame gate
              * confirms that this Plotly call will actually run. */
-            if (!figureMetadataIsCurrent(render,gd)||alreadyShowing) return gd;
+            if (!figureMetadataIsCurrent(render,gd)||alreadyShowing) {
+              noteFrameWitness(gd, layout, incomingTracesForWitness(args, objectFigure), alreadyShowing ? "already-showing" : "stale-at-delivery");
+              return gd;
+            }
             const statusNode = document.getElementById("mv-render-status");
             if (statusNode) {
               statusNode.hidden = false;
@@ -902,6 +968,7 @@
               }
               gd.__mvDeliveredFrame=key;
               gd.__mvGraphGeneration=Number(gd.__mvGraphGeneration||0)+1;
+              noteFrameWitness(gd, next, incomingTracesForWitness(args, objectFigure), "applied");
               if (next && next.scene && next.scene.camera) {
                 gd.__mvSceneCamera = JSON.parse(JSON.stringify(next.scene.camera));
                 gd.__mvSceneCameraOwner = String(render.scene_id || "");

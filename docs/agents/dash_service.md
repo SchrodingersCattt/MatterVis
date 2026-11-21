@@ -160,7 +160,8 @@ Notes for callers:
   page that clicked Commit receives
   `{operation, source_scene_id, result_scene_id, revision, generation}`
   on `operate-scene-focus` and selects `result_scene_id` once the scene
-  catalog lists it. The operate-status sentence is the banner; it is not
+  catalog lists it. That scene list and the display names come from the
+  same catalog read. The operate-status sentence is the banner; it is not
   parsed for a scene id. A refused commit sends no focus payload and
   names both revisions. `POST /scenes/active` and a
   `set_active_scene` intent set `focus: true` and move every open tab.
@@ -617,10 +618,18 @@ The full list (authoritative; the diagram only groups them):
 - `atom-groups-add-btn`, `atom-groups-rows-container`,
   `atom-groups-preset-mono`, `atom-groups-clear-btn` (Phase 2 atom
   groups editor; per-row inputs are pattern-matched, see
-  `atom_groups_api.md` for the `{type, group_id}` shape)
+  `atom_groups_api.md` for the `{type, group_id}` shape). Choosing
+  "by element" before any symbol is picked stores `{"elements": []}`
+  and keeps the element picker visible. That empty list is the saved
+  match-nothing rule. It is not dropped on save and it is not
+  `{"all": true}`.
 - `bond-groups-add-btn`, `bond-groups-rows-container` (Phase 4 bond
   groups editor; per-row inputs are pattern-matched with
-  `{type, group_id}` shape, see `bond_groups_api.md`)
+  `{type, group_id}` shape, see `bond_groups_api.md`). Choosing
+  "between elements" before any endpoint is picked stores
+  `{"between_elements": []}` and keeps the endpoint picker visible.
+  That empty list is the saved match-nothing rule. It is not dropped
+  on save and it is not `{"all": true}`.
 - `transforms-add-btn`, `transforms-rows-container`,
   `transforms-kind-select` (Phase 4 transforms editor; per-row
   inputs are pattern-matched with `{type, transform_id}` shape, see

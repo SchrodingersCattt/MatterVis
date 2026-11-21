@@ -36,6 +36,17 @@ absent is ignored. The supported keys are:
 - `{"elements": ["O", "S"]}` — match atoms whose element symbol
   appears in the list (string-equal, case-sensitive on whatever the
   loader puts in `draw_atoms[i]["elem"]`).
+- `{"elements": []}` — explicit match-nothing rule. The editor stores
+  it while the by-element picker is still empty, and a saved scene,
+  preset, and reloaded scene keep that same value. It matches no atoms,
+  so the scene colours do not change until a symbol is chosen. The
+  normaliser keeps the row. It does not delete it and it does not
+  rewrite it to `{"all": true}`. A missing selector is not a rule and
+  is not stored. `{"all": true}` is the only match-everything form.
+  Blank tokens are stripped first; if that leaves the list empty and
+  no other recognised key is present, the empty list is what is stored.
+  An empty list sent beside another recognised key is still dropped, so
+  it cannot AND-exclude that key.
 - `{"is_minor": true}` / `{"is_minor": false}` — match by the
   disorder major/minor flag.
 - `{"labels": ["Pb1", "Cl3"]}` — **Phase 4.** Exact atom-label list.
