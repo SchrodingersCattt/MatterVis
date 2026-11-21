@@ -342,32 +342,91 @@ substitutes one frame backend for another.
 | --isosurface-color-range MIN MAX | finite min/max | Colormap range; a constant field with no range uses the midpoint |
 | --isosurface-color-center VALUE | none | Value placed at the middle of the colormap |
 | --isosurface-colormap NAME | bgr | `bgr` or a Matplotlib colormap name |
-| --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
+| --isosurface-density-mask | off | Opt-in high-density ceiling. Requires a density cube and a user cutoff. Does not change orbital or electron-density isosurfaces when omitted |
+| --isosurface-density-cube PATH | ignored | Electron-density cube sampled at isosurface vertices only when the mask is on. Scalar values are e/Bohr³; e/Å³ is not converted |
+| --isosurface-density-cutoff VALUE | none | User ρ_cut > 0 in e/Bohr³. Not chosen automatically and not defaulted to 0.05 |
+| --periodic-isosurface | rejected | `mat-vis render` does not close the scalar grid across cell faces |
+| --no-periodic-isosurface | off | Records that CPU meshes omit cell-face closure |
 
 Static exports omit browser-only picking traces. Interactive HTML retains them.
 For comparable cube panels, pass the same explicit `--isovalue` rather than
 allowing each source to select its own percentile threshold.
 
+`--isosurface-density-mask` is off unless you set it. Omitting it leaves
+orbital and electron-density isosurfaces unchanged, even when a density cube
+and a cutoff are also present. The cutoff is in the density cube's scalar
+values. Crossing triangles are clipped where the sampled field crosses ρ_cut.
+An edge longer than one density voxel follows those samples, including a
+same-side edge whose interior crosses ρ_cut, rather than the chord between
+its marching-cubes endpoints. For electron density those values are atomic
+units, e/Bohr³
+(1 a.u. ≈ 6.748 e/Å³, so 0.05 a.u. ≈ 0.337 e/Å³). The command does not
+convert e/Å³ and does not choose ρ_cut. 0.05 a.u. is a starting point some
+NCI/RDG figures use for weak contacts. It is not a default, not an IRI
+setting, and not a value to copy from a DFT convention onto a promolecular
+field or from one descriptor onto another. Do not take it from a geometric
+bond-midpoint density. State the mask and the cutoff in the figure caption.
+Details and the promolecular cyclic-dimer check are in
+[the cube API](agents/cube_api.md#density-mask).
+
+`--periodic-isosurface` is an error on this command. CPU meshes do not close
+the scalar grid across cell faces. `--no-periodic-isosurface` matches that
+behavior. Style keys `isosurface_atom_mask_radius` and
+`isosurface_min_volume_voxels` are not flags and are not applied here.
+
 ### Camera
 
-Periodic static renders default to an orthographic view normal to the largest
-lattice face: `ab -> c*`, `ac -> b*`, or `bc -> a*`, with `c*` winning
-equal-area ties. Nonperiodic inputs fit the atomic coordinates and do not treat
-an ASE padding box as crystallographic data. Camera direction options are
-mutually exclusive. When `--no-cell` hides a real periodic cell, automatic
-framing likewise fits the visible atoms rather than hidden cell edges or vacuum
-padding.
+Periodic structure renders with no isosurface default to an orthographic view
+normal to the largest lattice face: `ab -> c*`, `ac -> b*`, or `bc -> a*`,
+with `c*` winning equal-area ties. Nonperiodic inputs fit the atomic
+coordinates and do not treat an ASE padding box as crystallographic data.
+Camera direction options are mutually exclusive. When `--no-cell` hides a real
+periodic cell, automatic framing likewise fits the visible atoms rather than
+hidden cell edges or vacuum padding.
+
+Cube and other isosurface renders use a different automatic fit. The frame is
+the displayed atom spheres plus the isosurface vertices stored for drawing,
+in the same origin-subtracted scene coordinates as the atoms, plus
+`--framing-margin`. A density mask, a clip, or a smoother has to replace
+those vertices first. An empty stored list is not filled back in from the
+grid. Voxel-grid corners, the cube box, and cell-box or axis
+lines do not own that frame, even when `--show-cell` draws the cell. A lobed
+or elongated surface is viewed from its thin side with a small tilt, so a
+2pz orbital reads as a dumbbell rather than a disk. A nearly round surface
+uses a fixed diagonal (`[1, 1, 0.8]`), not `+z` and not `c*` merely because
+the cube is cubic. `--camera-axis`, `--view-direction`, and
+`--camera-position` still override that orientation. Explicit
+`--camera-target` stays the look-at point in scene coordinates. Explicit
+`--ortho-scale` stays the orthographic half-height in Å, requires
+`--orthogonal`, and replaces the automatic scale (zoom and framing margin do
+not modify it).
+
+`--zoom` and `--framing-margin` apply on both the general renderer and the
+batch renderer. `--zoom 1` is the historical fit. Values greater than 1 zoom
+into the centre by shrinking the automatic orthographic half-height, and by
+moving a fitted perspective camera closer. They do not change the view
+direction. `--check --json` reports both fields on the camera request. There
+is no `--camera-fit` flag; `camera_fit` is only a style/API field.
+
+CPU and Plotly do not produce identical pixels. Plotly keeps the same target,
+direction, up vector, and projection, but it does not honour CameraSpec
+near/far planes or field of view exactly. Comparable cube panels should share
+one recorded direction, up vector, projection, and viewport
+(`uniform_camera` does this from a reference plan) and one explicit
+`--isovalue`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--camera-axis a|b|c|a*|b*|c*` | auto | Override the largest-face default with a real or reciprocal lattice axis |
+| `--camera-axis a|b|c|a*|b*|c*` | auto | Override automatic orientation with a real or reciprocal lattice axis. Structure auto-view uses the largest face; isosurface auto-view does not |
 | `--view-direction X Y Z` | — | Cartesian direction from scene toward camera |
 | `--camera-position X Y Z` | — | Explicit absolute Cartesian camera position in Å |
-| `--camera-up X Y Z` | `+b` / `+Y` | Preferred screen-up direction |
-| `--camera-target X Y Z` | scene centre | Explicit Cartesian look-at target in angstrom |
-| `--camera-distance D` | `1.8` | Positive scene-fit multiplier for axis/direction views |
+| `--camera-up X Y Z` | `+b` / `+Y`, or the long content axis for an isosurface | Preferred screen-up direction |
+| `--camera-target X Y Z` | content or scene centre | Explicit Cartesian look-at target in scene angstroms, not the cube-file origin |
+| `--camera-distance D` | `1.8` | Positive scene-fit multiplier for axis/direction views. Not a distance in Å |
 | `--field-of-view DEG` | `45` | Perspective vertical field of view; requires `--perspective` |
-| `--ortho-scale ANGSTROM` | fitted | Orthographic half-height; requires `--orthogonal` |
+| `--ortho-scale ANGSTROM` | fitted | Orthographic half-height; requires `--orthogonal`. Replaces the automatic scale |
+| `--zoom FACTOR` | `1` | Automatic-fit zoom for general and batch renders. `>1` zooms into the centre |
+| `--framing-margin FACTOR` | `1.12` | Multiplier on the automatic orthographic half-height for general and batch renders |
 | `--camera-clip NEAR FAR` | fitted | Positive near/far clipping distances |
 
 `--camera-up` is orthogonalized against the view direction. CPU is the default

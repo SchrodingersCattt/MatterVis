@@ -291,36 +291,18 @@ def _cube_atom_shift(scene: dict) -> np.ndarray:
 def isosurface_mesh_extents(
     scene: dict, style: dict
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Compute the bounding box of the isosurface mesh in scene coordinates.
+    """Bounds of the drawn isosurface vertices in scene coordinates.
+
+    Both phases are included. The eight corners of the voxel grid are not
+    used; :func:`mat_viewer.render.isosurface_framing.cube_grid_corner_extents`
+    still exposes that domain for callers that need the grid itself.
 
     Returns ``(min_xyz, max_xyz)`` or ``(None, None)`` if no cube data or
     isosurfaces are disabled.
     """
-    cube = scene.get("cube_data")
-    if cube is None:
-        return None, None
-    if not style.get("isosurface_enabled", True):
-        return None, None
+    from .isosurface_framing import isosurface_mesh_extents as _mesh_extents
 
-    shift = _cube_atom_shift(scene)
-    origin = cube.origin + shift
-
-    # The 8 corners of the cube grid volume in the shifted frame
-    shape = np.asarray(cube.shape, dtype=float)
-    axes = cube.axes
-    corners = []
-    for i in (0, 1):
-        for j in (0, 1):
-            for k in (0, 1):
-                pt = (
-                    origin
-                    + i * axes[0] * shape[0]
-                    + j * axes[1] * shape[1]
-                    + k * axes[2] * shape[2]
-                )
-                corners.append(pt)
-    corners_arr = np.array(corners, dtype=float)
-    return corners_arr.min(axis=0), corners_arr.max(axis=0)
+    return _mesh_extents(scene, style)
 
 
 def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:

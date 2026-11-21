@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from .frame_selection import parse_frame_indices
+from .isosurface_framing import DEFAULT_FRAMING_MARGIN, DEFAULT_VIEW_ZOOM
 from .overlay.io import load_overlay_file as _load_vector_overlays
 from .renderer_selection import RendererDecision, select_renderer
 
@@ -48,14 +49,22 @@ def add_batch_render_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--zoom",
         type=float,
-        default=1.0,
-        help="Camera zoom multiplier shared by every selected frame.",
+        default=DEFAULT_VIEW_ZOOM,
+        help=(
+            "Automatic-fit zoom for general and batch renders (>1 zooms into "
+            "the centre). Default: 1. Does not replace an explicit "
+            "--ortho-scale."
+        ),
     )
     parser.add_argument(
         "--framing-margin",
         type=float,
-        default=1.12,
-        help="Shared viewport margin multiplier (default: 1.12).",
+        default=DEFAULT_FRAMING_MARGIN,
+        help=(
+            "Margin multiplier for the automatic camera fit on general and "
+            "batch renders (default: 1.12). Does not replace an explicit "
+            "--ortho-scale."
+        ),
     )
     parser.add_argument(
         "--frame-duration",
@@ -261,6 +270,10 @@ def render_batch_if_selected(
             (
                 "--cell-overlays",
                 getattr(args, "cell_overlays", None) is not None,
+            ),
+            (
+                "--isosurface-density-mask",
+                bool(getattr(args, "isosurface_density_mask", False)),
             ),
         )
         if present
