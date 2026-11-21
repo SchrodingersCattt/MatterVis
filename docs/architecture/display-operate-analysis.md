@@ -218,23 +218,23 @@ Result (JSON-serializable, `schema_version` 1):
 - Invalid `method` (including `"optimal"`; use `operate_commit_major`),
   `count`, `seed`, flags, or any bound below raise `CandidateRequestError`
   (`ValueError`; `CandidatePayloadError` for payload size). Results are never
-  truncated. Bounds are keyword arguments with conservative defaults that
-  were **not measured on a phone**; raise them per call when the device can
-  take it, up to hard ceilings (the largest size buffered in one synchronous
-  call; the Dash upload path is not reused here):
+  truncated. Bounds are keyword arguments. The ceilings are the phone
+  transport budget. They were not measured on a handset, and a caller
+  cannot raise them past these values:
 
   | kwarg | default | ceiling |
   |---|---|---|
-  | `max_candidates` | 16 | 64 |
-  | `max_source_bytes` | 2 MiB | 64 MiB |
-  | `max_payload_bytes` | 8 MiB | 64 MiB |
+  | `max_candidates` | 16 | 16 |
+  | `max_source_bytes` | 2 MiB | 2 MiB |
+  | `max_payload_bytes` | 8 MiB | 8 MiB |
 
-  The defaults were not raised. The ceilings were added so one call can
-  ask for a larger buffer. They are the most this synchronous call will
-  hold, not a measurement from phone hardware. A synthetic two-assembly
-  CIF at the default count is the recorded envelope: it must finish
-  within 30 seconds and allocate under 64 MiB in the regression. A file
-  one byte over the active source cap is rejected before the solver runs.
+  The payload ceiling is what this call will serialize for the phone.
+  The source ceiling is the file read before the solver. A synthetic
+  two-assembly CIF at the default count is the recorded envelope: it
+  must finish within 30 seconds and its JSON payload must stay under
+  8 MiB. The same run's tracemalloc peak is a workstation process
+  measurement and is not the phone budget. A file one byte over the
+  source cap is rejected before the solver runs.
 
   The payload bound is checked after each candidate is built (a lower bound
   of the final size), so an oversized request stops early; the exact final

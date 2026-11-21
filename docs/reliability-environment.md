@@ -59,13 +59,18 @@ signatures.
 
 Every install job uses the git commit in `pyproject.toml`:
 
-`a54a922eb2d11dca3fafac2d63a19c603541ca4d`
+`2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6`
 
-That commit is the reviewed head of open MolCrysKit PR 234. It includes
-lightweight CIF / phone-site `a4080132` and Mercury `read_mryx`
-`0702ed8d`. It is not MolCrysKit main. Do not retarget the pin to a
-later branch tip. Installing it before it is on MolCrysKit main is a
-readiness fact.
+That commit is the reviewed commit of open MolCrysKit PR 234 authorized
+for this pin. It is not a later tip of that branch. It includes
+Mercury `read_mryx` `0702ed8d`, lightweight CIF / phone-site `a4080132`,
+and the MRYX bounds on this commit: a single index validates every
+structure and keeps only that structure; `index=":"` builds the full
+list before returning. Labels are at most 128 characters, a document at
+most 4,096 structures, and a structure at most 100,000 stored sites.
+Synthetic documents exercise those bounds. They do not certify Mercury.
+It is not MolCrysKit main. Do not retarget the pin to a later branch tip.
+Installing it before it is on MolCrysKit main is a readiness fact.
 
 The dependency requests the `desktop` extra. Core MolCrysKit is NumPy,
 NetworkX, and Click. The desktop extra supplies ASE, pymatgen, SciPy,
@@ -74,7 +79,8 @@ spglib, and defusedxml. `read_mryx` imports defusedxml from that extra.
 `requirements/ci-constraints.txt` names the same commit URL without the
 `desktop` marker. Pip 26 rejects extras in a constraint file. A differing
 direct URL makes pip fail with a conflict, so change both together.
-The fast-job window check
+
+The checkout version is derived from git tags by setuptools_scm. The fast-job window check
 still requires the installed version to be at least 0.8.0 and below
 0.9.0. The window is a check on the pin. It is not a PyPI minimum
 install. Job names say pinned molcrys-kit for that reason. PyPI

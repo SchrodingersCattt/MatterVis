@@ -44,18 +44,21 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 METHODS = ("enumerate", "random")
-# Defaults are conservative starting points. They were not measured on a
-# phone. Callers may raise each keyword up to the hard ceiling, which is
-# the largest buffer one synchronous call will hold. The ceilings are not
-# a device budget: tests/test_phone_candidates.py records the synthetic
-# two-assembly envelope (under 30 s and under 64 MiB at the default count).
-# Exceeding any bound raises; nothing is truncated.
+# The phone transport budget is the serialized candidate payload, the
+# source read before the solver, and the candidate count. These are the
+# ceilings. Callers cannot raise them: no larger budget has been measured
+# on a phone, and this module does not invent one. The synthetic
+# two-assembly regression must finish within 30 s, keep its JSON payload
+# inside MAX_PAYLOAD_BYTES, and reject a source one byte over
+# MAX_SOURCE_BYTES before the solver runs. A separate tracemalloc check
+# on that same call is a workstation process measurement, not a phone
+# budget. Exceeding any bound raises; nothing is truncated.
 MAX_CANDIDATES = 16
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
-HARD_MAX_CANDIDATES = 64
-HARD_MAX_SOURCE_BYTES = 64 * 1024 * 1024
-HARD_MAX_PAYLOAD_BYTES = 64 * 1024 * 1024
+HARD_MAX_CANDIDATES = MAX_CANDIDATES
+HARD_MAX_SOURCE_BYTES = MAX_SOURCE_BYTES
+HARD_MAX_PAYLOAD_BYTES = MAX_PAYLOAD_BYTES
 MAX_SEED = 2**32 - 1
 _MCK_LOGGER = "molcrys_kit"
 _NOISE_WARNINGS = (DeprecationWarning, PendingDeprecationWarning, FutureWarning)
@@ -138,12 +141,12 @@ def generate_disorder_candidates(
     unchanged.
 
     Bounds (never truncating; each violation raises
-    :class:`CandidateRequestError`): ``max_candidates`` (default 16, up to
-    64), ``max_source_bytes`` (default 2 MiB, up to 64 MiB) and
-    ``max_payload_bytes`` (default 8 MiB, up to 64 MiB). The defaults are
-    conservative and have not been measured on a phone; raise them per call
-    when the device can take it. The payload bound is checked after each
-    candidate is built, so an oversized request stops early.
+    :class:`CandidateRequestError`): ``max_candidates`` at most 16,
+    ``max_source_bytes`` at most 2 MiB, and ``max_payload_bytes`` at most
+    8 MiB. Those ceilings are the phone transport budget. They are not a
+    handset measurement, and they cannot be raised. The payload bound is
+    checked after each candidate is built, so an oversized request stops
+    early.
 
     The source file is read-only here and every candidate is committed from a
     fresh session registered from the original source, so candidates are

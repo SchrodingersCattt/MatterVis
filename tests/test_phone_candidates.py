@@ -540,16 +540,22 @@ def test_bounds_are_explicit_configurable_and_never_truncate(cif, tmp_path: Path
     for bad in (0, -1, True, 1.5, module.HARD_MAX_SOURCE_BYTES + 1):
         with pytest.raises(CandidateRequestError, match="max_source_bytes"):
             _gen(cif, count=1, max_source_bytes=bad)
-    # Above the old hard caps now allowed up to the documented ceilings.
-    assert _gen(cif, count=17, max_candidates=17, independent_assemblies=True)["actual_count"] == 4
     assert _gen(cif, count=1, max_payload_bytes=module.HARD_MAX_PAYLOAD_BYTES)["actual_count"] == 1
     with pytest.raises(CandidateRequestError, match="max_candidates"):
+        _gen(cif, count=17, max_candidates=17, independent_assemblies=True)
+    with pytest.raises(CandidateRequestError, match="max_candidates"):
         _gen(cif, count=1, max_candidates=module.HARD_MAX_CANDIDATES + 1)
-    assert module.MAX_CANDIDATES == 16 and module.MAX_PAYLOAD_BYTES == 8 * 1024 * 1024
+    with pytest.raises(CandidateRequestError, match="max_payload_bytes"):
+        _gen(cif, count=1, max_payload_bytes=module.HARD_MAX_PAYLOAD_BYTES + 1)
+    with pytest.raises(CandidateRequestError, match="max_source_bytes"):
+        _gen(cif, count=1, max_source_bytes=module.HARD_MAX_SOURCE_BYTES + 1)
+    assert module.HARD_MAX_CANDIDATES == module.MAX_CANDIDATES == 16
+    assert module.HARD_MAX_PAYLOAD_BYTES == module.MAX_PAYLOAD_BYTES == 8 * 1024 * 1024
+    assert module.HARD_MAX_SOURCE_BYTES == module.MAX_SOURCE_BYTES == 2 * 1024 * 1024
 
 
 def test_synthetic_budget_rejects_oversized_input_before_the_solver(cif, tmp_path, monkeypatch):
-    """The raised ceilings are process buffers, not a phone measurement."""
+    """The phone budget is the serialized payload, not the process peak."""
     import time
     import tracemalloc
 
@@ -563,8 +569,9 @@ def test_synthetic_budget_rejects_oversized_input_before_the_solver(cif, tmp_pat
     tracemalloc.stop()
     payload = len(json.dumps(result).encode("utf-8"))
     assert elapsed < 30.0
+    # Workstation process peak. It is not the phone transport budget.
     assert peak < 64 * 1024 * 1024
-    assert payload < module.MAX_PAYLOAD_BYTES
+    assert payload < module.HARD_MAX_PAYLOAD_BYTES
     assert result["actual_count"] <= module.MAX_CANDIDATES
 
     oversized = tmp_path / "oversized.cif"
