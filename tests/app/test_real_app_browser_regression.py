@@ -308,6 +308,17 @@ def test_visible_mesh_and_bfdh_faces_share_native_picking(fresh_mattervis_url):
     _run(fresh_mattervis_url, "surface-pick", structure="DAP-4")
 
 
+@pytest.mark.timeout(240)
+def test_acknowledged_camera_stays_painted_after_a_tab_roundtrip(mattervis_url):
+    """Reset, drag, pan, zoom, and projection survive leaving the scene.
+
+    The drag does not bump camera_revision. The painted Plotly camera and
+    the server camera are both the acknowledged pose. An off-screen camera
+    is still replaced on the way back.
+    """
+    _run(mattervis_url, "camera-roundtrip", timeout=220)
+
+
 @pytest.mark.timeout(180)
 def test_projection_radio_follows_scene_and_rejects_stale_store(mattervis_url):
     _run(mattervis_url, "projection-radio")
@@ -318,3 +329,89 @@ def test_projection_radio_follows_scene_and_rejects_stale_store(mattervis_url):
 def test_mixed_projection_and_opacity_update_reaches_the_canvas(fresh_mattervis_url, transport):
     mode = "mixed-projection-http" if transport == "http" else "mixed-projection"
     _run(fresh_mattervis_url, mode)
+
+
+_SYNTHETIC_CIF = """data_{name}
+_cell_length_a 8.0
+_cell_length_b 8.0
+_cell_length_c 8.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_H-M_alt 'P 1'
+loop_
+_space_group_symop_operation_xyz
+'x, y, z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+{sites}
+"""
+
+
+def _write_synthetic_pair(directory: Path) -> list[str]:
+    """Two independent cells. Coordinates are not taken from a fixture file."""
+    alpha = directory / "alpha_cell.cif"
+    beta = directory / "beta_cell.cif"
+    alpha.write_text(
+        _SYNTHETIC_CIF.format(
+            name="alpha_cell",
+            sites="A1 C 0.20 0.25 0.30 1.0\nA2 N 0.70 0.35 0.40 1.0\n",
+        ),
+        encoding="utf-8",
+    )
+    beta.write_text(
+        _SYNTHETIC_CIF.format(
+            name="beta_cell",
+            sites="B1 C 0.15 0.55 0.80 1.0\nB2 O 0.62 0.66 0.22 1.0\n",
+        ),
+        encoding="utf-8",
+    )
+    return [str(alpha), str(beta)]
+
+
+@pytest.mark.timeout(240)
+def test_acknowledged_camera_stays_on_its_scene_across_a_tab_change(tmp_path):
+    """Scene A's confirmed camera must not paint on B, and A must paint it on return.
+
+    The structures are built in this test. The Node double of the same fence
+    is not this browser case.
+    """
+    node, chrome, playwright = _require_browser()
+    running = start_mattervis(str(tmp_path), _write_synthetic_pair(tmp_path))
+    artifacts = _artifact_dir()
+    env = {
+        **os.environ,
+        "NODE_PATH": str(ROOT / "node_modules"),
+        "MATTERVIS_BROWSER_ARTIFACTS": str(artifacts),
+    }
+    script = Path(__file__).resolve().parent / "camera_ack_isolation_browser.js"
+    try:
+        result = subprocess.run(
+            [node, str(script), playwright, chrome, running.url],
+            capture_output=True,
+            text=True,
+            timeout=220,
+            check=False,
+            cwd=str(ROOT),
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        err = exc.stderr or ""
+        out = exc.stdout or ""
+        if isinstance(err, bytes):
+            err = err.decode("utf-8", "replace")
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        _fail_browser(artifacts, out, err, "camera isolation browser timed out")
+    finally:
+        running.stop()
+    if result.stdout:
+        print(result.stdout)
+    if result.returncode != 0:
+        _fail_browser(artifacts, result.stdout, result.stderr, "camera isolation browser failed")
+    _write_streams(artifacts, result.stdout, result.stderr)

@@ -224,9 +224,7 @@ def _create_app(
                     html.Div(id="scene-controls-scene", children=_scene_controls_stamp(first_state), hidden=True),
                     dcc.Store(
                         id="camera-state-store",
-                        data=_camera_store_payload(
-                            first_state.get("scene_id"), first_state.get("camera")
-                        ),
+                        data=_camera_store_for_state(first_state),
                     ),
                     dcc.Store(id="camera-capture-store", data=None),
                     dcc.Store(id="view-update-store", data=None),
@@ -313,9 +311,7 @@ def _create_app(
                 ), hidden=True),
                 dcc.Store(
                     id="camera-state-store",
-                    data=_camera_store_payload(
-                        first_state.get("scene_id"), first_state.get("camera")
-                    ),
+                    data=_camera_store_for_state(first_state),
                 ),
                 dcc.Store(id="camera-capture-store", data=None),
                 dcc.Store(id="view-update-store", data=None),
@@ -327,9 +323,7 @@ def _create_app(
                     children=_fast_view_metadata(
                         backend,
                         first_state,
-                        _camera_store_payload(
-                            first_state.get("scene_id"), first_state.get("camera")
-                        ),
+                        _camera_store_for_state(first_state),
                     ),
                     style={"display": "none"},
                 ),

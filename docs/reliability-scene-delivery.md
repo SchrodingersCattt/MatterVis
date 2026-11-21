@@ -21,6 +21,18 @@ must not change scene B, and a stale revision must not replace a newer one.
 - `layout.scene.uirevision` is
   `{scene_id}__{structure name}__{camera_revision}__{viewport signature}`.
   Plotly keeps a WebGL camera only while that token matches.
+- An ordinary drag, pan, or zoom writes `state["camera"]` and does not
+  advance `camera_revision`. `latest_figure_broadcast` still returns the
+  figure that was published. It does not rewrite that snapshot from the
+  live camera. The browser keeps the camera from `camera-state-store`
+  for that scene, revision, and generation, and puts it on the canvas
+  after a tab return or a stale same-revision frame. A store whose
+  revision is older than the mounted frame is ignored. Reset, align,
+  projection, and a refit that advances the revision still win. A
+  camera that leaves the scene, including a unit-cell box with a corner
+  outside the frustum, is still replaced by `refit_scene_camera` before
+  that pose is what the store paints. Every writer of
+  `camera-state-store` uses `allow_duplicate`.
 - The browser relayout gate drops a camera gesture whose scene is not the
   mounted canvas. It restores the mounted scene's own saved camera only when
   that camera belongs to the mounted scene. A settled gesture does not copy

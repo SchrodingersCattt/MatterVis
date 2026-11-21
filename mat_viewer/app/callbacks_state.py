@@ -144,7 +144,7 @@ def register_state_callbacks(app, backend):
             *values,
             _scene_controls_stamp(state, values),
             state,
-            _camera_store_payload(scene_id, state.get("camera")),
+            _camera_store_for_state(state),
         )
 
     @app.callback(
@@ -490,7 +490,8 @@ def register_state_callbacks(app, backend):
         Output("property-colorbar-toggle", "value"),
         Output("scene-controls-scene", "children", allow_duplicate=True),
         Output("agent-state-store", "data"),
-        Output("camera-state-store", "data"),
+        # Duplicate like the other writers; a mixed primary drops Dash 2.18 events.
+        Output("camera-state-store", "data", allow_duplicate=True),
         Output("scene-switch-seq", "data"),
         Input("agent-state-poll", "n_intervals"),
         Input("native-upload-sync", "data"),
