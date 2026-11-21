@@ -160,7 +160,8 @@ Notes for callers:
   page that clicked Commit receives
   `{operation, source_scene_id, result_scene_id, revision, generation}`
   on `operate-scene-focus` and selects `result_scene_id` once the scene
-  catalog lists it. The operate-status sentence is the banner; it is not
+  catalog lists it. That scene list and the display names come from the
+  same catalog read. The operate-status sentence is the banner; it is not
   parsed for a scene id. A refused commit sends no focus payload and
   names both revisions. `POST /scenes/active` and a
   `set_active_scene` intent set `focus: true` and move every open tab.
