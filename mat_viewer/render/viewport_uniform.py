@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 import numpy as np
 
 from .contracts import CameraSpec
-from .radius import atom_visual_radius
+from .radius import display_atom_radii
 
 
 def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
@@ -28,20 +28,8 @@ def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
 
 
 def _display_atom_radii(atoms: list[dict], style: Mapping[str, object]) -> np.ndarray:
-    atom_scale = float(style.get("atom_scale", 1.0))
-    return np.asarray(
-        [
-            atom_visual_radius(
-                max(float(atom.get("atom_radius", 0.18)), 0.05),
-                element=str(atom.get("elem") or atom.get("symbol") or "C"),
-                representation="ball",
-                atom_scale=atom_scale,
-                style=style,
-            )
-            for atom in atoms
-        ],
-        dtype=float,
-    )
+    """Same fit radii as :func:`mat_viewer.render.viewport._display_atom_radii`."""
+    return display_atom_radii(atoms, style)
 
 
 def uniform_viewport(

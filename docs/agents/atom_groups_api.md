@@ -25,7 +25,7 @@ Every group is a flat dict with these fields:
 | `visible` | bool | `false` hides every matched atom AND any bond touching one. |
 | `opacity` | float \| null | Per-group opacity multiplier in `[0, 1]`. Replaces (does not stack-multiply) earlier matching groups. `null` = no override. |
 | `material` | string \| null | `"mesh"` or `"flat"`; per-group atom-rendering material override. `null` = inherit scene-level material. |
-| `style` | string \| null | `"ball"`, `"ball_stick"`, `"space_filling"`, `"stick"`, `"ortep"`, or `"wireframe"`; per-group atom-rendering style override. `null` = inherit scene-level style. |
+| `style` | string \| null | `"ball"`, `"ball_stick"`, `"space_filling"`, `"stick"`, `"ortep"`, `"wireframe"`, `"vdw"`, or `"flat_illustration"`; per-group atom-rendering style override. `null` = inherit scene-level style. `vdw` uses MolCrysKit van der Waals radii. `ball` and `space_filling` keep the compact display table. `flat_illustration` does not set `material` to `"flat"`. |
 
 ### Selector grammar
 
@@ -146,7 +146,7 @@ atoms ball-stick except O atoms as ORTEP ellipsoids" with one rule:
 
 In the backend-neutral render path, per-atom style also controls bond
 participation. A bond is drawn by default only when both visible endpoints use
-a bond-capable style (`ball_stick`, `stick`, `ortep`, or `wireframe`). An
+a bond-capable style (`ball_stick`, `stick`, `ortep`, `wireframe`, or `flat_illustration`). An
 explicit bond-group style can override that default. Bond endpoint colours
 still follow per-atom `_render_color`.
 

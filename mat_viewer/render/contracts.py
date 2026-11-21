@@ -23,6 +23,7 @@ from .isosurface_material import (
     DEFAULT_SPECULAR,
     preset_material,
 )
+from .representations import REPRESENTATIONS
 
 Projection = Literal["orthographic", "perspective"]
 Backend = Literal["cpu", "matplotlib", "plotly", "gpu"]
@@ -246,14 +247,7 @@ class RenderSpec:
             for value in (self.width, self.height, self.scale)
         ):
             raise ValueError("width, height, and scale must be positive integers")
-        if self.representation not in {
-            "ball_stick",
-            "ball",
-            "space_filling",
-            "stick",
-            "wireframe",
-            "ortep",
-        }:
+        if self.representation not in REPRESENTATIONS:
             raise ValueError("unknown representation")
         if self.shading not in {"smooth", "flat"}:
             raise ValueError("unknown shading")

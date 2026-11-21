@@ -191,8 +191,11 @@ create a color snapshot nor schedule an extra state update.
 palette/style controls and explicit group/spec fields retain their established
 contracts. Unsupported fields are rejected on mutation and removed from
 malformed persisted overrides. In particular generic Plotly meshes and bonds
-do not expose a per-object `material` switch; atoms support `mesh`/`flat` and
-the existing `ball`, `ball_stick`, `stick`, `ortep`, `wireframe` representations.
+do not expose a per-object `material` switch; atoms support `mesh`/`flat`
+(the mesh versus billboard technique) and the representations `ball`,
+`ball_stick`, `space_filling`, `stick`, `ortep`, `wireframe`, `vdw`, and
+`flat_illustration`. `material="flat"` is not `flat_illustration`. The Dash
+`#style-selector` and `#material-selector` controls are unchanged.
 
 Caller mesh entities can also be persisted as `geometry_entities` through
 `POST /api/v2/state`, using the same mesh payload as the Python geometry API.

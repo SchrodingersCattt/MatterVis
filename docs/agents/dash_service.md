@@ -275,8 +275,11 @@ Notes for callers:
   `atom_property_color` (nullable public property-color spec; see
   `atom_property_coloring.md`), `fast_rendering`, `camera`, `cutoff`.
   `material` is `mesh` or
-  `flat`; `style` is `ball`, `ball_stick`, `stick`, `ortep`, or
-  `wireframe`; `disorder` is `opacity`, `dashed_bonds`,
+  `flat` (billboard technique, not `flat_illustration`); `style` is `ball`,
+  `ball_stick`, `space_filling`, `stick`, `ortep`, `wireframe`, `vdw`, or
+  `flat_illustration`. The Dash `#style-selector` and `#material-selector`
+  dropdowns still list the original mesh/billboard choice and the original
+  `ball`, `ball_stick`, `stick`, `ortep`, and `wireframe` styles. `disorder` is `opacity`, `dashed_bonds`,
   `outline_rings`, `color_shift`, or `none`. Fresh scenes default to
   occupancy-based disorder opacity (`disorder="opacity"`, `minor_opacity=0.35`),
   hydrogens + unit-cell box visible, labels hidden, and

@@ -83,6 +83,14 @@ Python callers may use tuple keys such as `{("Zn", "N"): 2.5}`. Explicit
 pair thresholds are scaled by the selected `bond_scale` and are forwarded to
 all canonical loaders, not only cube loading.
 
+`mat_viewer.config.vdw_radius(symbol)` reads MolCrysKit's van der Waals table
+for the `vdw` representation. Usual organic values in that table are Bondi
+radii. The compact display radii behind `ball` and `space_filling` stay in
+`colors.atom_radius` (`atom_radius(symbol)`). `mck_overrides.vdw_radius_overrides`
+is a bond-perception slot. It does not replace `vdw_radius()` and it does not
+implement `--style vdw`. A symbol the van der Waals table does not contain
+raises `ValueError`.
+
 `mat_viewer.config.element_color(symbol)` is the canonical semantic resolver.
 All renderers use its default `theme="canonical"` palette. The historical
 bright cube/CPK values remain available only through the explicit

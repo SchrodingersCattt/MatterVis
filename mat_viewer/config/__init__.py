@@ -123,6 +123,33 @@ def covalent_radius(symbol: str) -> float:
     return float(radii.get(symbol, 0.80))
 
 
+def vdw_radius(symbol: str) -> float:
+    """Return MolCrysKit's tabulated van der Waals radius in angstroms.
+
+    MolCrysKit's table uses Bondi radii for the usual organic elements
+    (A. Bondi, J. Phys. Chem. 1964, 68, 441), including carbon at 1.70 Å,
+    and the heavier-element fallback documented on that table. The lookup
+    reads ``molcrys_kit.constants`` directly. It does not consult
+    ``mck_overrides.vdw_radius_overrides`` (a bond-perception override) and
+    it does not substitute covalent radii or the compact display table.
+    An element the table does not list raises ``ValueError``.
+    """
+    symbol = _normalize_element_symbol(symbol)
+    from molcrys_kit.constants import get_vdw_radius, has_vdw_radius
+
+    if not symbol or not has_vdw_radius(symbol):
+        raise ValueError(
+            "MolCrysKit van der Waals table has no radius for element "
+            f"{symbol!r}"
+        )
+    radius = float(get_vdw_radius(symbol))
+    if not (radius > 0.0):
+        raise ValueError(
+            f"MolCrysKit van der Waals radius for {symbol!r} must be positive"
+        )
+    return radius
+
+
 __all__ = [
     "COLOR_CONFIG",
     "CONFIG",
@@ -132,6 +159,7 @@ __all__ = [
     "MCK_OVERRIDES",
     "atom_radius",
     "covalent_radius",
+    "vdw_radius",
     "current_config",
     "delete_user_config",
     "element_color",

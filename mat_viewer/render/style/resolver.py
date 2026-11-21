@@ -118,7 +118,16 @@ _OPACITY_FIELDS = frozenset({"opacity", "edge_opacity"})
 _NON_NEGATIVE_FIELDS = frozenset({"radius", "thickness", "edge_width"})
 _MATERIAL_VALUES = frozenset({"mesh", "flat"})
 _REPRESENTATION_VALUES = frozenset(
-    {"ball", "ball_stick", "stick", "ortep", "wireframe"}
+    {
+        "ball",
+        "ball_stick",
+        "stick",
+        "ortep",
+        "wireframe",
+        "space_filling",
+        "vdw",
+        "flat_illustration",
+    }
 )
 _BASIC_RENDER_COLORS = frozenset(
     {

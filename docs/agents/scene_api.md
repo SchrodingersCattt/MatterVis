@@ -107,15 +107,24 @@ Parses a CIF and returns a scene dict consumable by
   context images (the shell at fractional `-0.5`) are not drawn.
   With boundary replicas off, the same lattices stay on the wrapped sites
   and do not grow a bonded-image shell outside the cell.
-  Stick-capable styles (`ball_stick`, `stick`, `wireframe`, `ortep`) draw
+  Stick-capable styles (`ball_stick`, `stick`, `wireframe`, `ortep`,
+  `flat_illustration`) draw
   every MolCrysKit neighbor-list edge whose manifested length matches
   `BondRecord.distance`. `role` is `"covalent"` or `"coordination"` and is
   copied onto `scene["bonds"]`; Atomaestro does not reclassify elements to
   decide which contacts are sticks. A half-cell contact keeps the displayed
   centres instead of an ambiguous minimum-image end outside the cell.
   `scene["connectivity_regime"]` is `"molecular"` or `"extended"`, and
-  `scene["connectivity_rank"]` is the report's `max_rank`. Ball and
-  space-filling styles do not stroke the bond list. Coordination endpoints
+  `scene["connectivity_rank"]` is the report's `max_rank`. Ball,
+  space-filling, and `vdw` styles do not stroke the bond list. `ball` and
+  `space_filling` size those spheres from the compact display table
+  (`colors.ATOM_RADIUS`, carbon 0.18 Å before atom scale). `vdw` sizes them
+  from MolCrysKit's van der Waals table (Bondi for the usual organic
+  elements, carbon 1.70 Å) and is not an alias of either compact style.
+  Trace radii and camera bounds share `display_sphere_radius`: one table
+  read and one `atom_scale`, with no second 0.46 factor.
+  `flat_illustration` draws filled atoms and stroke bonds. It does not
+  select `material="flat"` or `shading="flat"`. Coordination endpoints
   in ball-and-stick use a sphere at least twice the bond-cylinder radius.
   `include_boundary_replicas=True` (the default) places each finite molecule
   so its anchor site lies in the home cell, then adds the near-face fragment
@@ -303,7 +312,10 @@ honours:
 
 - `material` — `mesh` for real Mesh3d atoms/bonds, or `flat` for
   billboard-style traces.
-- `style` — `ball`, `ball_stick`, `stick`, `ortep`, or `wireframe`.
+- `style` — `ball`, `ball_stick`, `space_filling`, `stick`, `ortep`,
+  `wireframe`, `vdw`, or `flat_illustration`. `vdw` uses MolCrysKit van der
+  Waals radii. `ball` and `space_filling` use the compact display table.
+  `flat_illustration` does not set `material` to `flat`.
 - `scatter_atom_scale` — multiplier for fixed-pixel atom markers in the
   explicitly selected fast Scatter3d mode (default `0.45`).
 - `min_atom_radius` — optional Angstrom floor for rendered H/D atoms. When

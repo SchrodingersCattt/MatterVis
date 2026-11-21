@@ -18,7 +18,16 @@ from .cli_controls import (
 from .frame_selection import parse_frame_indices as _parse_frame_indices
 
 _DISPLAY_MODES = ("auto", "formula_unit", "unit_cell", "asymmetric_unit", "cluster")
-_STYLES = ("ball_stick", "ball", "space_filling", "stick", "ortep", "wireframe")
+_STYLES = (
+    "ball_stick",
+    "ball",
+    "space_filling",
+    "stick",
+    "ortep",
+    "wireframe",
+    "vdw",
+    "flat_illustration",
+)
 _SHADINGS = ("smooth", "flat")
 _ORTEP_MODES = ("ortep_solid", "ortep_axes", "ortep_octant", "ortep_hatch")
 _IMAGE_EXTENSIONS = (".png", ".pdf", ".svg")
@@ -754,7 +763,7 @@ def _prepare_frame(bundle, args: argparse.Namespace, overrides: dict[str, Any]):
         show_hydrogen=args.show_hydrogen,
         include_boundary_replicas=include_boundary_replicas,
         include_cross_boundary_bond_endpoints=(
-            args.style not in {"ball", "space_filling"}
+            args.style not in {"ball", "space_filling", "vdw"}
         ),
     )
     _apply_camera_overrides(scene, overrides, args)

@@ -14,6 +14,8 @@ _ATOM_STYLES = {
     "space_filling",
     "stick",
     "wireframe",
+    "vdw",
+    "flat_illustration",
 }
 _BOND_STYLES = {"ball_stick", "stick", "wireframe"}
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$")

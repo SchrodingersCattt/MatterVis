@@ -7,19 +7,20 @@ from .style import *
 from .traces_overlays import _dashed_segments, _ring_segments, _segment_cylinder_trace
 from .viewport import flat_projected_pixel_scale, flat_visual_pixel_scale
 from ..style.disorder import _field, _resolve_bond_fields
-from .radius import atom_visual_radius
+from .radius import display_sphere_radius
 
 _FLAT_ATOM_MIN_PIXEL_SIZE = 3.0
 
 
-def _coordination_ball_stick(atom: dict, style: dict) -> bool:
-    """True when this atom's ball-and-stick sphere must clear the cylinder.
+def _style_atom_radius(atom: dict, style: dict) -> float:
+    """Radius for one viewer trace.
 
-    The flag is stamped from MolCrysKit ``BondRecord.role`` at scene build.
-    Ball and space-filling styles do not use it.
+    The value comes from :func:`display_sphere_radius`. ``vdw`` reads the
+    MolCrysKit table once and scales it once. Every other style keeps the
+    stored display radius on the ball scale, so ball-and-stick does not
+    apply the 0.46 factor a second time.
     """
-    representation = str(style.get("style", "")).lower().replace("-", "_")
-    return representation == "ball_stick" and bool(atom.get("_coordination_site"))
+    return display_sphere_radius(atom, style)
 
 
 def _flat_atom_marker_size(
@@ -394,15 +395,7 @@ def _atom_mesh_traces(scene: dict, style: dict):
                 "opacity_group": opacity_group,
             },
         )
-        radius = atom_visual_radius(
-            float(atom["atom_radius"]),
-            element=str(atom.get("elem", "C")),
-            representation="ball",
-            atom_scale=float(style["atom_scale"]),
-            style=style,
-            bond_radius=style.get("bond_radius"),
-            coordination=_coordination_ball_stick(atom, style),
-        )
+        radius = _style_atom_radius(atom, style)
         groups[key]["centers"].append(atom["cart"])
         groups[key]["radii"].append(radius)
         groups[key]["colors"].append(color)
@@ -644,15 +637,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
             payload["color"].append(color)
         elif not payload["color"]:
             payload["color"] = color
-        marker_radius = atom_visual_radius(
-            float(atom["atom_radius"]),
-            element=str(atom.get("elem", "C")),
-            representation="ball",
-            atom_scale=float(style["atom_scale"]),
-            style=style,
-            bond_radius=style.get("bond_radius"),
-            coordination=_coordination_ball_stick(atom, style),
-        )
+        marker_radius = _style_atom_radius(atom, style)
         base_size = _flat_atom_marker_size(
             marker_radius,
             {**style, "atom_scale": 1.0},
@@ -829,15 +814,7 @@ def _wireframe_atom_traces(scene: dict, style: dict):
             continue
         if not _atom_render_visible(atom):
             continue
-        radius = atom_visual_radius(
-            float(atom["atom_radius"]),
-            element=str(atom.get("elem", "C")),
-            representation="ball",
-            atom_scale=float(style["atom_scale"]),
-            style=style,
-            bond_radius=style.get("bond_radius"),
-            coordination=_coordination_ball_stick(atom, style),
-        )
+        radius = _style_atom_radius(atom, style)
         is_minor = bool(atom.get("is_minor", False))
         key = (_atom_render_color(atom, style, light=is_minor), is_minor)
         bucket = groups.setdefault(key, [])
@@ -913,6 +890,45 @@ def _wireframe_bond_traces(scene: dict, style: dict):
                 )
             )
     return traces
+
+
+# Unlit mesh lighting for ``flat_illustration``. This is not Plotly
+# ``flatshading`` and not the ``material="flat"`` scatter billboard.
+_FLAT_ILLUSTRATION_LIGHTING = {
+    "ambient": 1.0,
+    "diffuse": 0.0,
+    "specular": 0.0,
+    "roughness": 1.0,
+    "fresnel": 0.0,
+}
+
+
+def _flat_illustration_atom_traces(scene: dict, style: dict):
+    """Filled atom meshes with constant colour.
+
+    The traces stay Mesh3d with ``flatshading`` false. ``material="flat"``
+    on the style dict does not switch this representation onto scatter
+    billboards.
+    """
+    traces = _atom_mesh_traces(scene, style)
+    for trace in traces:
+        if not isinstance(trace, dict):
+            continue
+        trace["flatshading"] = False
+        trace["lighting"] = dict(_FLAT_ILLUSTRATION_LIGHTING)
+        meta = dict(trace.get("meta") or {})
+        meta["mv_representation"] = "flat_illustration"
+        trace["meta"] = meta
+    return traces
+
+
+def _flat_illustration_bond_traces(scene: dict, style: dict):
+    """Unlit bond strokes for ``flat_illustration``.
+
+    These are line traces, not shaded cylinders and not the flat-shaded
+    mesh cylinders used when ``material="flat"`` draws ball-and-stick.
+    """
+    return _bond_scatter_traces(scene, style)
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
