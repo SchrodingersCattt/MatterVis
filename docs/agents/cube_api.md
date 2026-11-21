@@ -243,20 +243,27 @@ surface = FigureShade(ambient=0.7, diffuse=0.45, specular=0.08, shininess=15)
 Pass it as `surface=surface`. The fields are ambient, diffuse, specular,
 and shininess. Those names are the shared Blinn–Phong coefficients: three
 independent weights and a highlight exponent. This helper does not define
-`SurfaceMaterial` or `LightingRig`, does not look up presets, and does not
-rename or rescale the four numbers. A mapping with exactly those four keys
-is accepted in place of `FigureShade`. `shininess` is the highlight
+`SurfaceMaterial`, `MaterialSpec`, or `LightingRig`, does not look up
+presets, and does not rename or rescale the four numbers. A mapping or any
+other record that carries those four attributes is accepted in place of
+`FigureShade`. `id` on that record is a label and is ignored. Optional
+`specular_tint`, `specular_color`, and Fresnel fields are read with the
+same meaning as the shared surface record. `shininess` is the highlight
 exponent. This helper lowers it to VTK specular power (the Phong exponent),
 not a 0–1 weight.
 
 `lighting` selects how those coefficients are evaluated. Omit it to keep
 the experimental three-light rig. That rig is not `studio_soft` and not
-`studio_three_point`. `lighting="studio_soft"` installs one camera-space
-light along `(-0.32, 0.42, 1.0)` (`+Z` toward the camera) at `light_scale`
-1. `lighting="unlit"` draws inherited colors and does not apply the
-directional shade; the stored coefficients stay as given.
-`studio_three_point` is rejected because that rig stores no directions and
-this helper will not invent a rig under that name. Fresnel fields
+`studio_three_point`. A string id or a rig-shaped record (`id`, `kind`,
+`direction`, `light_scale`) is accepted without defining `LightingRig`.
+`studio_soft` (`kind="camera_directional"`, direction `(-0.32, 0.42, 1.0)`,
+`light_scale` 1) installs that one camera-space light (`+Z` toward the
+camera). `unlit` draws inherited colors and does not apply the directional
+shade; the stored coefficients stay as given. `studio_three_point`
+(`kind="multi_light"`) is rejected because that rig stores no directions
+and this helper will not invent a rig under that name. A non-unit
+`light_scale`, another camera-directional id, or a different
+`studio_soft` direction is rejected rather than retuned. Fresnel fields
 (`glass_like`), `specular_tint="base"`, a non-white `specular_color`, and
 `opacity` or `light_scale` on the material record are rejected the same
 way. The adapter does not claim CPU or Plotly pixel parity.

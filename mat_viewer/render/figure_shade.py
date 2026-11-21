@@ -2,9 +2,11 @@
 
 ``FigureShade`` stores ambient, diffuse, specular, and shininess. Those
 names are the Blinn–Phong coefficients used by a surface response: three
-independent weights and a highlight exponent. This module does not define
-``SurfaceMaterial``, ``MaterialSpec``, or ``LightingRig``, and it does not
-look up presets or rewrite a coefficient to fit VTK.
+independent weights and a highlight exponent. A mapping or any object with
+those attributes is read the same way. ``id`` is a label and is ignored.
+This module does not define ``SurfaceMaterial``, ``MaterialSpec``, or
+``LightingRig``, and it does not look up presets or rewrite a coefficient
+to fit VTK.
 
 The cube figure's default three-light rig is experimental. It is not
 ``studio_soft`` and it is not ``studio_three_point``. ``evaluate_vtk_shade``
@@ -36,6 +38,13 @@ _NEUTRAL_FRESNEL = {
     "fresnel_albedo": 0.0,
 }
 _MISSING = object()
+_OPTIONAL_FIELDS = (
+    "specular_tint",
+    "specular_color",
+    "opacity",
+    "light_scale",
+    *_NEUTRAL_FRESNEL,
+)
 
 
 def _finite(name: str, value: float) -> float:
@@ -110,27 +119,49 @@ def _field(record: Any, name: str) -> Any:
     return getattr(record, name, _MISSING)
 
 
-def _as_shade(material: FigureShade | Mapping) -> tuple[FigureShade, Mapping[str, Any] | None]:
-    if isinstance(material, FigureShade):
-        return material, None
-    if not isinstance(material, Mapping):
+def _coefficient(material: Any, name: str) -> Any:
+    if isinstance(material, Mapping):
+        if name not in material:
+            raise ValueError(
+                "surface mapping must provide ambient, diffuse, specular, "
+                "and shininess"
+            )
+        return material[name]
+    if not hasattr(material, name):
         raise TypeError(
-            "surface must be a FigureShade or a mapping of ambient, diffuse, "
+            "surface must be a FigureShade or a record with ambient, diffuse, "
             "specular, and shininess"
         )
-    missing = [name for name in _COEFFICIENTS if name not in material]
-    if missing:
-        raise ValueError(
-            "surface mapping must provide ambient, diffuse, specular, "
-            "and shininess"
+    return getattr(material, name)
+
+
+def _optional_record(material: Any) -> dict[str, Any]:
+    if isinstance(material, Mapping):
+        return dict(material)
+    return {
+        name: getattr(material, name)
+        for name in _OPTIONAL_FIELDS
+        if hasattr(material, name)
+    }
+
+
+def _as_shade(material: Any) -> tuple[FigureShade, Mapping[str, Any] | None]:
+    if isinstance(material, FigureShade):
+        return material, None
+    if not isinstance(material, Mapping) and not all(
+        hasattr(material, name) for name in _COEFFICIENTS
+    ):
+        raise TypeError(
+            "surface must be a FigureShade or a record with ambient, diffuse, "
+            "specular, and shininess"
         )
     shade = FigureShade(
-        ambient=material["ambient"],
-        diffuse=material["diffuse"],
-        specular=material["specular"],
-        shininess=material["shininess"],
+        ambient=_coefficient(material, "ambient"),
+        diffuse=_coefficient(material, "diffuse"),
+        specular=_coefficient(material, "specular"),
+        shininess=_coefficient(material, "shininess"),
     )
-    return shade, material
+    return shade, _optional_record(material)
 
 
 def _reject_unsupported_material(record: Mapping[str, Any] | None) -> None:
@@ -144,7 +175,10 @@ def _reject_unsupported_material(record: Mapping[str, Any] | None) -> None:
             "and opacity stays on the object"
         )
     unknown = sorted(
-        set(record) - set(_COEFFICIENTS) - set(_NEUTRAL_FRESNEL) - {"specular_tint", "specular_color"}
+        set(record)
+        - set(_COEFFICIENTS)
+        - set(_NEUTRAL_FRESNEL)
+        - {"specular_tint", "specular_color", "id"}
     )
     if unknown:
         raise VtkShadeUnsupported(
@@ -208,7 +242,11 @@ def _lighting_id(lighting: Any) -> str:
         scale = getattr(lighting, "light_scale", _MISSING)
         kind = getattr(lighting, "kind", _MISSING)
         direction = getattr(lighting, "direction", _MISSING)
-    if scale is not _MISSING and scale is not None and float(scale) != 1.0:
+    if scale is not _MISSING and scale is not None:
+        if isinstance(scale, bool):
+            raise TypeError("light_scale must be a number")
+        scale = float(scale)
+    if scale is not _MISSING and scale is not None and scale != 1.0:
         raise VtkShadeUnsupported(
             "light_scale lives on the lighting rig. The VTK figure does not "
             "apply a non-unit light_scale and will not retune studio_soft."
@@ -247,17 +285,19 @@ def _lighting_id(lighting: Any) -> str:
 
 
 def evaluate_vtk_shade(
-    material: FigureShade | Mapping,
+    material: Any,
     lighting: Any = None,
 ) -> VtkShadeEvaluation:
     """Copy shared coefficients or reject an unsupported capability.
 
     ``ambient``, ``diffuse``, ``specular``, and ``shininess`` are stored
-    unchanged. Fresnel (``glass_like``), ``specular_tint='base'``, a
+    unchanged. A mapping or an attribute record supplies them; ``id`` is
+    ignored. Fresnel (``glass_like``), ``specular_tint='base'``, a
     non-white ``specular_color``, material ``opacity`` / ``light_scale``,
     and ``studio_three_point`` raise. ``unlit`` leaves ``shade`` intact and
     reports a flat property. ``studio_soft`` keeps the coefficients and
-    selects the one historical camera-space light.
+    selects the one historical camera-space light. A rig-shaped object is
+    read through ``id``, ``kind``, ``direction``, and ``light_scale``.
     """
 
     shade, record = _as_shade(material)

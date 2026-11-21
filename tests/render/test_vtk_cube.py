@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -1176,3 +1177,125 @@ def test_skew_cell_frame_clip_and_shade_stay_on_one_policy() -> None:
         evaluate_vtk_shade(FigureShade(0.3, 0.6, 0.35, 48.0), lighting="studio_three_point")
     with pytest.raises(VtkShadeUnsupported, match="base"):
         evaluate_vtk_shade({**record, "specular_tint": "base"})
+
+
+def test_attribute_records_use_the_shared_material_and_rig_contract() -> None:
+    """Duck-typed records keep the shared field meanings and reject the rest.
+
+    No ``MaterialSpec`` or ``LightingRig`` type is imported. ``id`` is a
+    label. Fresnel, tint, opacity, light scale, and rig kind keep the
+    meanings used by the surface and lighting records.
+    """
+
+    plastic = SimpleNamespace(
+        id="hard_plastic",
+        ambient=0.30,
+        diffuse=0.55,
+        specular=0.45,
+        shininess=40.0,
+        specular_tint="white",
+        specular_color=(1.0, 1.0, 1.0),
+        fresnel_power=0.0,
+        fresnel_center=1.0,
+        fresnel_rim=1.0,
+        fresnel_specular=0.0,
+        fresnel_albedo=0.0,
+    )
+    studio = SimpleNamespace(
+        id="studio_soft",
+        kind="camera_directional",
+        direction=STUDIO_SOFT_CAMERA_DIRECTION,
+        light_scale=1.0,
+        cpu_evaluates=True,
+        publication_default=True,
+        color_critical=False,
+    )
+    evaluated = evaluate_vtk_shade(plastic, lighting=studio)
+    assert evaluated.lighting == "studio_soft"
+    assert evaluated.shade.ambient == pytest.approx(0.30)
+    assert evaluated.shade.specular == pytest.approx(0.45)
+    assert evaluated.specular == pytest.approx(0.45)
+    assert evaluated.shininess == pytest.approx(40.0)
+
+    matte = SimpleNamespace(
+        id="matte",
+        ambient=0.55,
+        diffuse=0.70,
+        specular=0.12,
+        shininess=8.0,
+        specular_tint="none",
+        specular_color=None,
+        fresnel_power=0.0,
+        fresnel_center=1.0,
+        fresnel_rim=1.0,
+        fresnel_specular=0.0,
+        fresnel_albedo=0.0,
+    )
+    flat_tint = evaluate_vtk_shade(matte, lighting="experimental")
+    assert flat_tint.shade.specular == pytest.approx(0.12)
+    assert flat_tint.specular == pytest.approx(0.0)
+    labeled = {
+        "id": "matte",
+        "ambient": 0.55,
+        "diffuse": 0.70,
+        "specular": 0.12,
+        "shininess": 8.0,
+        "specular_tint": "none",
+    }
+    assert evaluate_vtk_shade(labeled).specular == pytest.approx(0.0)
+
+    glass = SimpleNamespace(**{**plastic.__dict__, "id": "glass_like", "fresnel_power": 2.0, "fresnel_rim": 0.15})
+    with pytest.raises(VtkShadeUnsupported, match="Fresnel"):
+        evaluate_vtk_shade(glass, lighting=studio)
+    metal = SimpleNamespace(**{**plastic.__dict__, "specular_tint": "base"})
+    with pytest.raises(VtkShadeUnsupported, match="base"):
+        evaluate_vtk_shade(metal, lighting=studio)
+    with pytest.raises(VtkShadeUnsupported, match="opacity"):
+        evaluate_vtk_shade(SimpleNamespace(**{**plastic.__dict__, "opacity": 0.4}), lighting=studio)
+    with pytest.raises(VtkShadeUnsupported, match="light_scale"):
+        evaluate_vtk_shade(
+            SimpleNamespace(**{**plastic.__dict__, "light_scale": 1.0}),
+            lighting=studio,
+        )
+
+    three_point = SimpleNamespace(
+        id="studio_three_point",
+        kind="multi_light",
+        direction=None,
+        light_scale=1.0,
+        cpu_evaluates=False,
+    )
+    with pytest.raises(VtkShadeUnsupported, match="studio_three_point"):
+        evaluate_vtk_shade(plastic, lighting=three_point)
+    with pytest.raises(VtkShadeUnsupported, match="light_scale"):
+        evaluate_vtk_shade(
+            plastic,
+            lighting=SimpleNamespace(**{**studio.__dict__, "light_scale": 2.0}),
+        )
+    with pytest.raises(TypeError, match="light_scale"):
+        evaluate_vtk_shade(
+            plastic,
+            lighting=SimpleNamespace(**{**studio.__dict__, "light_scale": True}),
+        )
+    with pytest.raises(VtkShadeUnsupported, match="direction"):
+        evaluate_vtk_shade(
+            plastic,
+            lighting=SimpleNamespace(**{**studio.__dict__, "direction": (0.0, 1.0, 0.0)}),
+        )
+    with pytest.raises(VtkShadeUnsupported, match="camera-directional"):
+        evaluate_vtk_shade(
+            plastic,
+            lighting=SimpleNamespace(**{**studio.__dict__, "id": "rim_light"}),
+        )
+    unlit = SimpleNamespace(
+        id="unlit",
+        kind="unlit",
+        direction=None,
+        light_scale=1.0,
+        cpu_evaluates=True,
+        color_critical=True,
+    )
+    flattened = evaluate_vtk_shade(plastic, lighting=unlit)
+    assert flattened.lighting == "unlit"
+    assert (flattened.ambient, flattened.diffuse, flattened.specular) == (1.0, 0.0, 0.0)
+    assert flattened.shade.specular == pytest.approx(0.45)
