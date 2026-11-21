@@ -1023,9 +1023,29 @@
     window.__mvNoteInProgressDrag = noteInProgressDrag;
     window.__mvRestoreInProgressDrag = restoreInProgressDrag;
     window.__mvRetireDragSample = retireDragSample;
+    function wheelPoseOverBook(sceneId, ack) {
+      const pending = window.__mvUnadoptedWheel;
+      if (!pending || !pending.camera || String(pending.sceneId || "") !== String(sceneId || "")) return ack;
+      const pendingRevision = Number(pending.camera_revision);
+      const ackRevision = ack ? Number(ack.camera_revision) : NaN;
+      if (Number.isFinite(pendingRevision) && Number.isFinite(ackRevision) && ackRevision > pendingRevision) {
+        window.__mvUnadoptedWheel = null;
+        return ack;
+      }
+      if (ack && ack.camera && camerasClose(ack.camera, pending.camera)) {
+        window.__mvUnadoptedWheel = null;
+        return ack;
+      }
+      return {
+        camera: pending.camera,
+        camera_revision: Number.isFinite(pendingRevision) ? pendingRevision : (ack ? ack.camera_revision : 0),
+        scene_generation: ack ? ack.scene_generation : null,
+        server_started_at: ack ? ack.server_started_at : null,
+      };
+    }
     function applyServerCamera(sceneId) {
       const book = window.__mvServerCameraByScene;
-      const ack = book && book[String(sceneId || "")];
+      let ack = wheelPoseOverBook(sceneId, book && book[String(sceneId || "")]);
       const graph = graphDiv();
       if (!ack || !ack.camera || !graph || !window.Plotly || graph.__mvApplyingServerCamera) return Promise.resolve();
       const mounted = renderMetadataFromLayout(graph.layout);
@@ -1082,7 +1102,12 @@
         if (cameraApi && typeof cameraApi.commitControllerPose === "function") {
           const scene = graph._fullLayout && graph._fullLayout.scene && graph._fullLayout.scene._scene;
           const controller = scene && (scene.camera || (scene.glplot && scene.glplot.camera));
-          cameraApi.commitControllerPose(controller, ack.camera);
+          /* The book may have been the previous distance when this
+           * relayout started. A wheel that landed while it was in
+           * flight is the pose to leave on the controller. */
+          const latest = wheelPoseOverBook(sceneId, (window.__mvServerCameraByScene || {})[String(sceneId || "")]);
+          const pose = latest && latest.camera ? latest.camera : ack.camera;
+          cameraApi.commitControllerPose(controller, pose);
         }
         return value;
       }, function (err) {

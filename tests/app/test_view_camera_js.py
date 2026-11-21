@@ -559,8 +559,10 @@ wheel({
   const factor = Math.exp(-240 / 900);
   assert.ok(Math.abs(camera.eye[0] - initial[0] * factor) < 1e-6, 'wheel left the replaced controller at the old eye');
   const pending = sandbox.window.__mvUnadoptedWheel;
-  assert.equal(pending.sceneId, 'ionic');
+  assert.equal(pending && pending.sceneId, 'ionic');
   assert.ok(Math.abs(pending.camera.eye.x - initial[0] * factor) < 1e-6);
+  const book = sandbox.window.__mvServerCameraByScene.ionic;
+  assert.ok(Math.abs(book.camera.eye.x - initial[0] * factor) < 1e-6, 'wheel left the book at the previous eye');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)

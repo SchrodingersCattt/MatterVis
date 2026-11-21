@@ -548,12 +548,32 @@
     }
   }
   function noteUnadoptedWheel(graph, pose) {
-    /* The gl eye can stay at the previous radius after the server has
-     * accepted the zoom. Remember the pose until a later frame sees it
-     * on the controller, so that frame does not copy the old radius back. */
+    /* The camera book can still hold the previous distance when this
+     * relayout is acknowledged. A same-scene apply would then paint that
+     * stale eye over the zoom. Record the pose, and the book, before the
+     * relayout returns. */
     var meta = graph && graph.layout && graph.layout.meta && graph.layout.meta.mattervis_render;
     var sceneId = meta && meta.scene_id ? String(meta.scene_id) : "";
-    root.__mvUnadoptedWheel = {sceneId: sceneId, camera: pose};
+    var revision = meta && meta.camera_revision !== undefined && meta.camera_revision !== null
+      ? Number(meta.camera_revision) : null;
+    root.__mvUnadoptedWheel = {
+      sceneId: sceneId,
+      camera: pose,
+      camera_revision: Number.isFinite(revision) ? revision : null,
+    };
+    if (!sceneId) return;
+    var book = root.__mvServerCameraByScene || (root.__mvServerCameraByScene = {});
+    var previous = book[sceneId] || {};
+    book[sceneId] = {
+      camera: pose,
+      camera_revision: Number.isFinite(revision) ? revision : previous.camera_revision,
+      scene_generation: previous.scene_generation !== undefined && previous.scene_generation !== null
+        ? previous.scene_generation
+        : (meta ? meta.scene_generation : null),
+      server_started_at: previous.server_started_at !== undefined && previous.server_started_at !== null
+        ? previous.server_started_at
+        : (meta ? meta.server_started_at : null),
+    };
   }
   function installWheelZoom(gd) {
     /* Plotly's orthographic wheel handler multiplies the scene aspect
@@ -612,6 +632,7 @@
         center: {x: axisComponent(center, 0, "x"), y: axisComponent(center, 1, "y"), z: axisComponent(center, 2, "z")},
         up: {x: axisComponent(up, 0, "x"), y: axisComponent(up, 1, "y"), z: axisComponent(up, 2, "z")},
       };
+      noteUnadoptedWheel(graph, zoomPose);
       Promise.resolve(root.Plotly.relayout(graph, {
         "scene.camera.eye": zoomPose.eye,
         "scene.camera.center": zoomPose.center,
@@ -619,11 +640,11 @@
         "scene.camera.projection.type": projection,
       })).then(function () {
         /* Relayout can replace the controller. Commit the one that is
-         * mounted now, then keep the pose until that eye shows it. */
+         * mounted now. The book already holds this pose, so a stale
+         * apply that finishes later must not put the previous eye back. */
         var sceneNow = graph._fullLayout && graph._fullLayout.scene && graph._fullLayout.scene._scene;
         var current = sceneNow && (sceneNow.camera || (sceneNow.glplot && sceneNow.glplot.camera));
         commitControllerPose(current || controller, zoomPose);
-        noteUnadoptedWheel(graph, zoomPose);
       }, function () {});
     }, {capture: true, passive: false});
   }

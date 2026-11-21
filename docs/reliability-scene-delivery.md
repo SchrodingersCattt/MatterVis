@@ -70,11 +70,12 @@ must not change scene B, and a stale revision must not replace a newer one.
   radius and rebuilds `camera.eye` on the next matrix recalc, so the
   acknowledged pose is written with `lookAt` and recalculated after the
   relayout. A wheel zoom does the same after its eye relayout, on the
-  controller mounted after that relayout, and records the pose until a
-  later frame sees that eye. A same-revision frame keeps the layout
-  camera when it is that unadopted pose, so the previous radius is not
-  copied back onto the canvas. A pointer press clears the record, and a
-  drag still keeps the live eye. That is how a zoom survives a tab
+  controller mounted after that relayout. It records the pose and writes
+  the scene book before that relayout returns, so an apply still holding
+  the previous distance cannot paint that eye back. A same-revision frame
+  keeps the layout camera when it is that unadopted pose. A pointer press
+  clears the record, and a drag still keeps the live eye. That is how a
+  zoom survives a tab
   return without a new camera revision. A store whose
   revision is older than the mounted frame is ignored. Reset, align,
   projection, and a refit that advances the revision still win. A
