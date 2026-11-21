@@ -652,3 +652,364 @@ assert.equal(api.postcondition(hiddenImage, ortho, {command:'projection'}), fals
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 0, result.stderr
+
+
+def test_fit_aspect_survives_a_scene_plot_that_writes_the_previous_ratio():
+    """A scene plot that puts the previous ratio back must leave the fit ratio."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+function glplot() {
+  return {
+    aspect: {x: 1, y: 1, z: 1},
+    setAspectratio(aspect) { this.aspect = {x: aspect.x, y: aspect.y, z: aspect.z}; },
+    getAspectratio() { return this.aspect; },
+  };
+}
+const gd = {
+  layout: {
+    scene: {aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: 1}, camera: {projection: {type: 'orthographic'}}},
+    meta: {mattervis_render: {scene_id: 'salt', scene_generation: 1, camera_revision: 1}},
+  },
+  data: [{type: 'scatter3d', x: [0], y: [0], z: [0]}],
+  _fullLayout: {scene: {aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: 1}, _scene: {}}},
+};
+gd._fullLayout.scene._scene.glplot = glplot();
+gd._fullLayout.scene._scene.getCamera = () => ({
+  eye: {x: 1.076, y: 1.076, z: 0.965},
+  center: {x: 0.037, y: 0.037, z: -0.074},
+  up: {x: 0, y: 0, z: 1},
+  projection: {type: 'orthographic'},
+});
+const reacted = [];
+const sandbox = {
+  Promise, Object, Array, JSON, Number, String, Date, Math, setTimeout, clearTimeout,
+  window: {Plotly: {
+    relayout(graph) {
+      const scene = graph._fullLayout.scene;
+      const fresh = glplot();
+      scene._scene.glplot = fresh;
+      scene.aspectratio.x = 1;
+      scene.aspectratio.y = 1;
+      scene.aspectratio.z = 1;
+      fresh.setAspectratio({x: 1, y: 1, z: 1});
+      return Promise.resolve();
+    },
+    react(_gd, _data, layout) { reacted.push(layout); return Promise.resolve(); },
+  }},
+  document: {getElementById: (id) => id === 'crystal-graph' ? {querySelector: () => gd} : null},
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const api = sandbox.window.MatterVisViewCamera;
+const commanded = {x: 1.0857835859060287, y: 1.0857835859060287, z: 1.0857835859060287};
+const fittedRanges = {x: [-0.652, 6.292], y: [-0.652, 6.292], z: [-0.652, 6.292]};
+const camera = {
+  eye: {x: 1.0762449962100558, y: 1.0762449962100558, z: 0.9652014612038681},
+  center: {x: 0.03701451166872919, y: 0.03701451166872919, z: -0.07402902333745838},
+  up: {x: 0, y: 0, z: 1},
+  projection: {type: 'orthographic'},
+};
+(async () => {
+  assert.equal(await api.applyAsync(camera, {
+    scene_id: 'salt', scene_generation: 1, camera_version: 2, command: 'fit',
+    aspectratio: commanded, ranges: fittedRanges,
+  }), true);
+  const layout = gd._fullLayout.scene.aspectratio;
+  const painted = gd._fullLayout.scene._scene.glplot.getAspectratio();
+  for (const axis of ['x', 'y', 'z']) {
+    assert.ok(Math.abs(layout[axis] - commanded[axis]) / commanded[axis] < 0.01, 'layout ' + axis);
+    assert.ok(Math.abs(painted[axis] - commanded[axis]) / commanded[axis] < 0.01, 'gl ' + axis);
+  }
+  gd._fullLayout.scene._scene.glplot.setAspectratio({x: 1, y: 1, z: 1});
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - commanded.x) / commanded.x < 0.01);
+  gd.layout.scene.xaxis = {range: [-2.682, 8.322], autorange: true};
+  await api.recover(gd, camera, {command: 'fit', aspectratio: commanded, ranges: fittedRanges, requireEye: true, restoreViewport: true});
+  const recovered = reacted.at(-1).scene;
+  assert.ok(Math.abs(recovered.aspectratio.x - commanded.x) / commanded.x < 0.01);
+  assert.equal(Number(recovered.xaxis.range[0]), fittedRanges.x[0]);
+  assert.equal(Number(recovered.xaxis.range[1]), fittedRanges.x[1]);
+  assert.equal(recovered.xaxis.autorange, false);
+  assert.equal(await api.applyAsync(camera, {
+    scene_id: 'salt', scene_generation: 1, camera_version: 3, command: 'reset',
+    aspectratio: {x: 1, y: 1, z: 1},
+  }), true);
+  gd._fullLayout.scene._scene.glplot.setAspectratio({x: 1, y: 1, z: 1});
+  assert.equal(gd._fullLayout.scene.aspectratio.x, 1);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_same_range_orthographic_fit_survives_a_late_scene_plot():
+    """Perspective already owns the box. A later plot must not put ratio 1 back."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const EventEmitter = require('node:events');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const ranges = {x: [-1.024, 6.664], y: [-1.024, 6.664], z: [-1.024, 6.664]};
+const orthoAspect = {x: 1.2208519876003265, y: 1.2208519876003265, z: 1.2208519876003265};
+function glplot() {
+  return {
+    aspect: {x: 1, y: 1, z: 1},
+    setAspectratio(aspect) { this.aspect = {x: Number(aspect.x), y: Number(aspect.y), z: Number(aspect.z)}; },
+    getAspectratio() { return this.aspect; },
+  };
+}
+const gd = new EventEmitter();
+Object.assign(gd, {
+  layout: {
+    scene: {aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: 1}, camera: {projection: {type: 'perspective'}}},
+    meta: {mattervis_render: {scene_id: 'salt', scene_generation: 1, camera_revision: 0}},
+  },
+  data: [{type: 'scatter3d', x: [0], y: [0], z: [0]}],
+  _fullLayout: {scene: {aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: 1}, _scene: {}}},
+});
+gd._fullLayout.scene._scene.glplot = glplot();
+gd._fullLayout.scene._scene.getCamera = () => ({
+  eye: {x: 1.076, y: 1.076, z: 0.965},
+  center: {x: 0.037, y: 0.037, z: -0.074},
+  up: {x: 0, y: 0, z: 1},
+  projection: {type: gd.layout.scene.camera.projection.type},
+});
+const status = {hidden: true, textContent: '', setAttribute() {}};
+const sandbox = {
+  Promise, Object, Array, JSON, Number, String, Date, Math, setTimeout, clearTimeout,
+  window: {Plotly: {
+    relayout(graph, patch) {
+      const aspect = graph._fullLayout.scene.aspectratio;
+      const scene = graph._fullLayout.scene;
+      if (patch['scene.aspectratio.x'] !== undefined) {
+        aspect.x = Number(patch['scene.aspectratio.x']);
+        aspect.y = Number(patch['scene.aspectratio.y']);
+        aspect.z = Number(patch['scene.aspectratio.z']);
+        const gl = graph._fullLayout.scene._scene.glplot;
+        if (gl && gl.setAspectratio) gl.setAspectratio(aspect);
+      }
+      ['x', 'y', 'z'].forEach((axis) => {
+        const pair = patch['scene.' + axis + 'axis.range'];
+        if (!pair) return;
+        scene[axis + 'axis'] = scene[axis + 'axis'] || {};
+        scene[axis + 'axis'].range = [Number(pair[0]), Number(pair[1])];
+        scene[axis + 'axis'].autorange = false;
+      });
+      if (patch['scene.camera.projection.type']) {
+        graph.layout.scene.camera.projection = {type: patch['scene.camera.projection.type']};
+      }
+      if (patch['scene.camera.eye']) graph.layout.scene.camera.eye = patch['scene.camera.eye'];
+      return Promise.resolve();
+    },
+    react() { return Promise.resolve(); },
+  }},
+  document: {getElementById: (id) => id === 'mv-render-status' ? status : (id === 'crystal-graph' ? {querySelector: () => gd} : null)},
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const api = sandbox.window.MatterVisViewCamera;
+const eye = {x: 1.0762449962100558, y: 1.0762449962100558, z: 0.9652014612038681};
+const center = {x: 0.03701451166872919, y: 0.03701451166872919, z: -0.07402902333745838};
+const cameraFor = (projection) => ({
+  eye, center, up: {x: 0, y: 0, z: 1}, projection: {type: projection},
+});
+function previousRatioPlot() {
+  const fresh = glplot();
+  gd._fullLayout.scene._scene.glplot = fresh;
+  gd._fullLayout.scene.aspectratio.x = 1;
+  gd._fullLayout.scene.aspectratio.y = 1;
+  gd._fullLayout.scene.aspectratio.z = 1;
+  gd.layout.scene.aspectratio.x = 1;
+  gd.layout.scene.aspectratio.y = 1;
+  gd.layout.scene.aspectratio.z = 1;
+  ['x', 'y', 'z'].forEach((axis) => {
+    gd._fullLayout.scene[axis + 'axis'] = {range: [-40, 48.164], autorange: true};
+  });
+  fresh.setAspectratio({x: 1, y: 1, z: 1});
+  gd.emit('plotly_afterplot');
+}
+(async () => {
+  assert.equal(await api.applyAsync(cameraFor('perspective'), {
+    scene_id: 'salt', scene_generation: 1, camera_version: 1, command: 'fit',
+    aspectratio: {x: 1, y: 1, z: 1}, ranges,
+  }), true);
+  assert.equal(await api.applyAsync(cameraFor('orthographic'), {
+    scene_id: 'salt', scene_generation: 1, camera_version: 2, command: 'fit',
+    aspectratio: orthoAspect, ranges,
+  }), true);
+  for (let plot = 0; plot < 5; plot += 1) {
+    previousRatioPlot();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - orthoAspect.x) / orthoAspect.x < 0.01);
+  assert.ok(Math.abs(gd._fullLayout.scene._scene.glplot.getAspectratio().x - orthoAspect.x) / orthoAspect.x < 0.01);
+  ['x', 'y', 'z'].forEach((axis) => {
+    const live = gd._fullLayout.scene[axis + 'axis'].range;
+    const want = ranges[axis];
+    const liveSpan = Math.abs(live[1] - live[0]);
+    const wantSpan = Math.abs(want[1] - want[0]);
+    assert.ok(Math.abs(liveSpan - wantSpan) <= 1e-3 * Math.max(wantSpan, 1), axis + ' box');
+  });
+  assert.equal(status.textContent, '');
+  await assert.rejects(api.applyAsync(cameraFor('orthographic'), {
+    scene_id: 'salt', scene_generation: '', camera_version: 1, command: 'state-confirmed',
+    aspectratio: {x: 9, y: 9, z: 9}, ranges,
+  }), /stale/);
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - orthoAspect.x) / orthoAspect.x < 0.01);
+  assert.equal(await api.applyAsync(cameraFor('perspective'), {
+    scene_id: 'salt', scene_generation: 1, camera_version: 3, command: 'fit',
+    aspectratio: {x: 1, y: 1, z: 1}, ranges,
+  }), true);
+  previousRatioPlot();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - 1) < 0.01, 'perspective fit kept the orthographic ratio');
+  const beforeOrbit = gd._fullLayout.scene.aspectratio.x;
+  await api.applyAsync({
+    eye: {x: 0.4, y: 1.2, z: 0.5}, center, up: {x: 0, y: 0, z: 1},
+    projection: {type: 'orthographic'},
+  }, {scene_id: 'salt', scene_generation: 1, camera_version: 4});
+  gd.emit('plotly_afterplot');
+  assert.equal(gd.layout.scene.camera.eye.x, 0.4);
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - beforeOrbit) / beforeOrbit < 0.01);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_same_range_fit_keeps_aspect_when_the_replacement_scene_writes_last():
+    """The projection change assigns a new gl scene, then that scene writes the old ratio."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const EventEmitter = require('node:events');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const ranges = {x: [-1.024, 6.664], y: [-1.024, 6.664], z: [-1.024, 6.664]};
+const orthoAspect = {x: 1.2208519876003265, y: 1.2208519876003265, z: 1.2208519876003265};
+function glplot() {
+  return {
+    aspect: {x: 1, y: 1, z: 1},
+    setAspectratio(aspect) { this.aspect = {x: Number(aspect.x), y: Number(aspect.y), z: Number(aspect.z)}; },
+    getAspectratio() { return this.aspect; },
+  };
+}
+const gd = new EventEmitter();
+Object.assign(gd, {
+  layout: {
+    scene: {aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: 1}, camera: {projection: {type: 'perspective'}}},
+    meta: {mattervis_render: {scene_id: 'salt', scene_generation: 1, camera_revision: 0}},
+  },
+  data: [{type: 'scatter3d', x: [0], y: [0], z: [0]}],
+  _fullLayout: {scene: {aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: 1}, _scene: {}}},
+});
+gd._fullLayout.scene._scene.glplot = glplot();
+gd._fullLayout.scene._scene.getCamera = () => ({
+  eye: {x: 1.076, y: 1.076, z: 0.965},
+  center: {x: 0.037, y: 0.037, z: -0.074},
+  up: {x: 0, y: 0, z: 1},
+  projection: {type: gd.layout.scene.camera.projection.type},
+});
+const status = {hidden: true, textContent: '', setAttribute() {}};
+let scheduled = null;
+const sandbox = {
+  Promise, Object, Array, JSON, Number, String, Date, Math, setTimeout, clearTimeout,
+  window: {Plotly: {
+    relayout(graph, patch) {
+      const scene = graph._fullLayout.scene;
+      if (patch['scene.camera.eye']) graph.layout.scene.camera.eye = patch['scene.camera.eye'];
+      if (patch['scene.camera.center']) graph.layout.scene.camera.center = patch['scene.camera.center'];
+      if (patch['scene.camera.projection.type']) {
+        graph.layout.scene.camera.projection = {type: patch['scene.camera.projection.type']};
+        graph._fullLayout.scene._scene.glplot = glplot();
+      }
+      ['x', 'y', 'z'].forEach((axis) => {
+        const range = patch['scene.' + axis + 'axis.range'];
+        if (range) scene[axis + 'axis'] = {range: range.slice(), autorange: false};
+      });
+      scheduled = () => {
+        const fresh = glplot();
+        graph._fullLayout.scene._scene.glplot = fresh;
+        const stale = {x: 1, y: 1, z: 1};
+        scene.aspectratio.x = stale.x;
+        scene.aspectratio.y = stale.y;
+        scene.aspectratio.z = stale.z;
+        graph.layout.scene.aspectratio.x = stale.x;
+        graph.layout.scene.aspectratio.y = stale.y;
+        graph.layout.scene.aspectratio.z = stale.z;
+        fresh.setAspectratio(stale);
+      };
+      return Promise.resolve();
+    },
+    react() { return Promise.resolve(); },
+  }},
+  document: {getElementById: (id) => id === 'mv-render-status' ? status : (id === 'crystal-graph' ? {querySelector: () => gd} : null)},
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const api = sandbox.window.MatterVisViewCamera;
+const eye = {x: 1.0762449962100558, y: 1.0762449962100558, z: 0.9652014612038681};
+const center = {x: 0.03701451166872919, y: 0.03701451166872919, z: -0.07402902333745838};
+const cameraFor = (projection) => ({
+  eye, center, up: {x: 0, y: 0, z: 1}, projection: {type: projection},
+});
+function flushLastWriter() {
+  assert.equal(typeof scheduled, 'function');
+  scheduled();
+}
+(async () => {
+  assert.equal(await api.applyAsync(cameraFor('perspective'), {
+    scene_id: 'salt', scene_generation: 1, camera_version: 1, command: 'fit',
+    aspectratio: {x: 1, y: 1, z: 1}, ranges,
+  }), true);
+  flushLastWriter();
+  assert.equal(await api.applyAsync(cameraFor('orthographic'), {
+    scene_id: 'salt', scene_generation: 1, camera_version: 2, command: 'fit',
+    aspectratio: orthoAspect, ranges,
+  }), true);
+  flushLastWriter();
+  flushLastWriter();
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - orthoAspect.x) / orthoAspect.x < 0.01);
+  assert.ok(Math.abs(gd.layout.scene.aspectratio.x - orthoAspect.x) / orthoAspect.x < 0.01);
+  assert.ok(Math.abs(gd._fullLayout.scene._scene.glplot.getAspectratio().x - orthoAspect.x) / orthoAspect.x < 0.01);
+  assert.equal(status.textContent, '');
+  const beforeOrbit = gd._fullLayout.scene.aspectratio.x;
+  assert.equal(await api.applyAsync({
+    eye: {x: 0.4, y: 1.2, z: 0.5}, center, up: {x: 0, y: 0, z: 1},
+    projection: {type: 'orthographic'},
+  }, {scene_id: 'salt', scene_generation: 1, camera_version: 3}), true);
+  flushLastWriter();
+  assert.equal(gd.layout.scene.camera.eye.x, 0.4);
+  assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - beforeOrbit) / beforeOrbit < 0.01);
+  const figureAspect = {x: 1.069128081202507, y: 1.069128081202507, z: 1.069128081202507};
+  const figureLayout = {scene: {
+    aspectratio: figureAspect,
+    xaxis: {range: ranges.x}, yaxis: {range: ranges.y}, zaxis: {range: ranges.z},
+  }};
+  assert.equal(api.noteFigureFrame({scene_id: 'salt', camera_revision: 3}, figureLayout), false);
+  assert.equal(api.noteFigureFrame({scene_id: 'salt', camera_revision: 4}, figureLayout), true);
+  const newer = glplot();
+  gd._fullLayout.scene._scene.glplot = newer;
+  newer.setAspectratio({x: 1, y: 1, z: 1});
+  assert.ok(Math.abs(newer.getAspectratio().x - figureAspect.x) / figureAspect.x < 0.01);
+  assert.equal(api.noteFigureFrame({scene_id: 'salt', camera_revision: 4}, figureLayout), false);
+  gd.layout.meta.mattervis_render.scene_id = 'other';
+  const untouched = glplot();
+  gd._fullLayout.scene._scene.glplot = untouched;
+  untouched.setAspectratio({x: 0.5, y: 0.25, z: 0.25});
+  assert.equal(untouched.getAspectratio().x, 0.5);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr or result.stdout

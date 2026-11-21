@@ -182,7 +182,7 @@
     if (Array.isArray(value) || view) return value.length > 0;
     /* Plotly columns arrive as {dtype, bdata}. The object itself has no
      * length, so an array check drops coordinates that are on the trace. */
-    return typeof value.bdata === "string" && value.bdata.length > 0;
+    return typeof value.bdata === "string" && value.bdata.length > 0 && !!value.dtype;
   }
   function visibleGeometry(gd) {
     var data = gd && Array.isArray(gd.data) ? gd.data : [];
@@ -202,6 +202,7 @@
     }
     var got = projectionType(camera);
     if (got) return got;
+    if (!plotlyPrivateStateAllowed()) return null;
     var controller = scene.camera || (scene.glplot && scene.glplot.camera);
     if (controller && Object.prototype.hasOwnProperty.call(controller, "_ortho")) {
       return controller._ortho ? "orthographic" : "perspective";
@@ -259,6 +260,158 @@
     else front = 0.5 * (ax * Math.abs(dx) + ay * Math.abs(dy) + az * Math.abs(dz)) / dist;
     return front + PLOTLY_NEAR + PERSPECTIVE_ZOOM_FACE_MARGIN;
   }
+  /* Plotly 4.1.1 reads. A published version that is not this one must not
+   * drive projection from controller._ortho or glplot. Test doubles omit
+   * Plotly.version and still use the fields they installed. */
+  var PLOTLY_GL3D_PRIVATE_VERSION = "4.1.1";
+  function plotlyPrivateStateAllowed() {
+    var version = root.Plotly && root.Plotly.version;
+    if (version == null || version === "") return true;
+    return String(version) === PLOTLY_GL3D_PRIVATE_VERSION;
+  }
+  function rememberFittedFrame(sceneId, ranges, aspectratio, revision, identity) {
+    if (!sceneId || !ranges) return;
+    if (!root.__mvFittedFrames) root.__mvFittedFrames = {};
+    var revisionNumber = Number(revision);
+    var previous = root.__mvFittedFrames[String(sceneId)];
+    var generation = identity && identity.generation != null && identity.generation !== ""
+      ? identity.generation
+      : (previous && previous.generation != null ? previous.generation : null);
+    var epoch = identity && identity.epoch != null && identity.epoch !== ""
+      ? identity.epoch
+      : (previous && previous.epoch != null ? previous.epoch : null);
+    root.__mvFittedFrames[String(sceneId)] = {
+      ranges: clone(ranges),
+      aspectratio: aspectratio ? clone(aspectratio) : null,
+      revision: Number.isFinite(revisionNumber) ? revisionNumber : null,
+      generation: generation,
+      epoch: epoch,
+    };
+  }
+  function fittedIdentityMatches(frame, render) {
+    if (!frame || !render) return false;
+    var generation = render.scene_generation;
+    var epoch = render.server_started_at;
+    var framedGeneration = frame.generation != null && frame.generation !== "";
+    var renderGeneration = generation != null && generation !== "";
+    if (framedGeneration !== renderGeneration) return false;
+    if (framedGeneration && String(frame.generation) !== String(generation)) return false;
+    var framedEpoch = frame.epoch != null && frame.epoch !== "";
+    var renderEpoch = epoch != null && epoch !== "";
+    if (framedEpoch !== renderEpoch) return false;
+    if (framedEpoch && String(frame.epoch) !== String(epoch)) return false;
+    return true;
+  }
+  function noteFigureFrame(render, layout) {
+    /* A figure built for a newer Fit already carries that ratio. Stamping
+     * the previous frame over it is how an orthographic scale was lost
+     * when the camera message had not updated the frame yet. */
+    var sceneId = render && render.scene_id;
+    if (!sceneId || !root.__mvFittedFrames) return false;
+    var frame = root.__mvFittedFrames[String(sceneId)];
+    var incoming = Number(render && render.camera_revision);
+    var frameRevision = frame && Number(frame.revision);
+    var scene = layout && layout.scene;
+    var figureAspect = scene && scene.aspectratio;
+    if (!frame || !Number.isFinite(frameRevision) || !Number.isFinite(incoming) || !(incoming > frameRevision)) return false;
+    if (!figureAspect || !Number.isFinite(Number(figureAspect.x))) return false;
+    var ranges = frame.ranges;
+    if (scene) {
+      var next = {};
+      var complete = ["x", "y", "z"].every(function (axis) {
+        var pair = scene[axis + "axis"] && scene[axis + "axis"].range;
+        if (!pair || pair.length < 2 || !Number.isFinite(Number(pair[0])) || !Number.isFinite(Number(pair[1]))) return false;
+        next[axis] = [Number(pair[0]), Number(pair[1])];
+        return true;
+      });
+      if (complete) ranges = next;
+    }
+    rememberFittedFrame(sceneId, ranges, figureAspect, incoming, {
+      generation: render && render.scene_generation,
+      epoch: render && render.server_started_at,
+    });
+    return true;
+  }
+  function clearFittedFrame(sceneId) {
+    if (sceneId && root.__mvFittedFrames) delete root.__mvFittedFrames[String(sceneId)];
+  }
+  function restoreFittedRanges(gd) {
+    if (!gd || gd.__mvFittedRestoring) return Promise.resolve();
+    var render = gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    var sceneId = render && render.scene_id;
+    var stored = sceneId && root.__mvFittedFrames && root.__mvFittedFrames[String(sceneId)];
+    if (stored && !fittedIdentityMatches(stored, render || {})) return Promise.resolve();
+    var fitted = stored;
+    if (!fitted || !fitted.ranges || !root.Plotly || typeof root.Plotly.relayout !== "function") return Promise.resolve();
+    var scene = gd._fullLayout && gd._fullLayout.scene;
+    if (!scene) return Promise.resolve();
+    var mismatch = ["x", "y", "z"].some(function (axis) {
+      var live = scene[axis + "axis"] && scene[axis + "axis"].range;
+      var want = fitted.ranges[axis];
+      if (!live || !want) return false;
+      var liveSpan = Math.abs(Number(live[1]) - Number(live[0]));
+      var wantSpan = Math.abs(Number(want[1]) - Number(want[0]));
+      return Math.abs(liveSpan - wantSpan) > 1e-3 * Math.max(wantSpan, 1);
+    });
+    var aspectMismatch = false;
+    if (fitted.aspectratio && Number.isFinite(Number(fitted.aspectratio.x)) && scene.aspectratio) {
+      aspectMismatch = ["x", "y", "z"].some(function (axis) {
+        var want = Number(fitted.aspectratio[axis]);
+        var have = Number(scene.aspectratio[axis]);
+        return Number.isFinite(want) && Number.isFinite(have) && Math.abs(have - want) / Math.max(Math.abs(want), 1e-6) > 0.01;
+      });
+    }
+    /* _fullLayout can already show the fitted ratio while glplot still
+     * draws the previous one. That is the ratio a scene plot writes back. */
+    if (!aspectMismatch && fitted.aspectratio) {
+      var plot = scene._scene && scene._scene.glplot;
+      var painted = plot && typeof plot.getAspectratio === "function" ? plot.getAspectratio() : null;
+      if (painted) {
+        aspectMismatch = ["x", "y", "z"].some(function (axis, index) {
+          var want = Number(fitted.aspectratio[axis]);
+          var have = Number(painted[axis] !== undefined ? painted[axis] : painted[index]);
+          return Number.isFinite(want) && Number.isFinite(have) && Math.abs(have - want) / Math.max(Math.abs(want), 1e-6) > 0.01;
+        });
+      }
+    }
+    if (!mismatch && !aspectMismatch) return Promise.resolve();
+    var patch = {};
+    if (mismatch) {
+      ["x", "y", "z"].forEach(function (axis) {
+        var pair = fitted.ranges[axis];
+        if (!pair) return;
+        patch["scene." + axis + "axis.range"] = [Number(pair[0]), Number(pair[1])];
+      });
+    }
+    if (aspectMismatch) {
+      patch["scene.aspectmode"] = "manual";
+      patch["scene.aspectratio"] = clone(fitted.aspectratio);
+    }
+    gd.__mvFittedRestoring = true;
+    gd.__mvOwnedRelayoutDepth = Number(gd.__mvOwnedRelayoutDepth || 0) + 1;
+    var pending;
+    var clear = function () {
+      gd.__mvFittedRestoring = false;
+      gd.__mvOwnedRelayoutDepth = Math.max(0, Number(gd.__mvOwnedRelayoutDepth || 1) - 1);
+    };
+    try { pending = root.Plotly.relayout(gd, patch); }
+    catch (err) {
+      clear();
+      return Promise.reject(err);
+    }
+    return Promise.resolve(pending).then(function (value) {
+      clear();
+      return value;
+    }, function (err) {
+      clear();
+      return Promise.reject(err);
+    });
+  }
+  function installFittedRangeGuard() {
+    /* Fitted ranges are restored inside the frame task. Wrapping
+     * Plotly.react here would relayout again after that task moved on. */
+    root.__mvFittedRangeGuard = true;
+  }
   function installWheelZoom(gd) {
     /* Plotly's orthographic wheel handler multiplies the scene aspect
      * ratio instead of the camera distance. That zoom survives Reset and
@@ -304,7 +457,13 @@
       if (dist > maxEyeDistance) { var far = maxEyeDistance / dist; next = next.map(function (v) { return v * far; }); }
       var center = controller.center || [0, 0, 0];
       var up = controller.up || [0, 0, 1];
-      var projection = controller._ortho ? "orthographic" : "perspective";
+      var projection = "perspective";
+      if (plotlyPrivateStateAllowed() && typeof controller._ortho === "boolean") {
+        projection = controller._ortho ? "orthographic" : "perspective";
+      } else {
+        var named = projectionType(actualCamera(graph));
+        if (named) projection = named;
+      }
       Promise.resolve(root.Plotly.relayout(graph, {
         "scene.camera.eye": {x: next[0], y: next[1], z: next[2]},
         "scene.camera.center": {x: axisComponent(center, 0, "x"), y: axisComponent(center, 1, "y"), z: axisComponent(center, 2, "z")},
@@ -391,38 +550,275 @@
     gd.__mvContextLossCanvas = canvas;
     gd.__mvContextLossInstalled = true;
   }
-  function postcondition(gd, camera, options) {
+  function glAspect(gd) {
+    var scene = gd && gd._fullLayout && gd._fullLayout.scene;
+    var gl = scene && scene._scene && scene._scene.glplot;
+    if (gl && typeof gl.getAspectratio === "function") {
+      try { return gl.getAspectratio(); } catch (_) {}
+    }
+    return null;
+  }
+  function liveAspect(gd) {
+    /* The layout ratio is what the next figure and a relayout read.
+     * A gl-only write can paint the new fit while the layout keeps the
+     * previous one; the contract is the layout the next frame uses. */
+    var scene = gd && gd._fullLayout && gd._fullLayout.scene;
+    if (scene && scene.aspectratio) return scene.aspectratio;
+    return glAspect(gd);
+  }
+  function aspectOffContract(have, want, tolerance) {
+    if (!want) return false;
+    var limit = tolerance === undefined ? 0.08 : tolerance;
+    return ["x", "y", "z"].some(function (axis) {
+      var target = Number(want[axis]);
+      var got = Number(have && have[axis]);
+      return Number.isFinite(target) && Number.isFinite(got) && Math.abs(got - target) / Math.max(Math.abs(target), 1e-6) > limit;
+    });
+  }
+  function fittedFrame(gd) {
+    var render = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    var sceneId = render && render.scene_id;
+    if (!sceneId || !root.__mvFittedFrames) return null;
+    var frame = root.__mvFittedFrames[String(sceneId)] || null;
+    if (!fittedIdentityMatches(frame, render)) return null;
+    return frame;
+  }
+  function writeAspect(holder, aspect) {
+    if (!holder) return;
+    holder.aspectmode = "manual";
+    var current = holder.aspectratio;
+    if (current) {
+      current.x = aspect.x;
+      current.y = aspect.y;
+      current.z = aspect.z;
+    } else {
+      holder.aspectratio = {x: aspect.x, y: aspect.y, z: aspect.z};
+    }
+  }
+  function wrapGlplot(gd, gl) {
+    if (!gl || typeof gl.setAspectratio !== "function" || gl.__mvAspectLock) return;
+    var original = gl.setAspectratio;
+    gl.setAspectratio = function (aspect) {
+      var frame = fittedFrame(gd);
+      var fitted = frame && frame.aspectratio;
+      var use = aspect;
+      if (fitted && Number.isFinite(Number(fitted.x))) {
+        use = {x: Number(fitted.x), y: Number(fitted.y), z: Number(fitted.z)};
+        writeAspect(gd._fullLayout && gd._fullLayout.scene, use);
+        writeAspect(gd.layout && gd.layout.scene, use);
+      }
+      return original.call(this, use);
+    };
+    gl.__mvAspectLock = true;
+  }
+  function installAspectLock(gd) {
+    /* Plotly's scene plot writes the aspect, then calls setAspectratio.
+     * A projection change does that on a gl scene that does not exist
+     * yet: setViewport disposes the old one and initializeGLPlot assigns
+     * a new one before the plot's last aspect write. Wrapping only the
+     * current function misses that assignment. The property hook wraps
+     * the replacement before the last write. */
+    var holder = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    if (!holder) return;
+    if (!holder.__mvGlplotHook) {
+      var current = holder.glplot;
+      try {
+        Object.defineProperty(holder, "glplot", {
+          configurable: true,
+          enumerable: true,
+          get: function () { return current; },
+          set: function (gl) {
+            current = gl;
+            wrapGlplot(gd, gl);
+          },
+        });
+        holder.__mvGlplotHook = true;
+      } catch (_) {}
+      if (current) wrapGlplot(gd, current);
+      return;
+    }
+    wrapGlplot(gd, holder.glplot);
+  }
+  function clearFittedAspectListener(gd) {
+    if (!gd || !gd.__mvFittedAspectListener) return;
+    if (gd.removeListener) gd.removeListener("plotly_afterplot", gd.__mvFittedAspectListener);
+    gd.__mvFittedAspectListener = null;
+  }
+  function watchFittedAspect(gd, token) {
+    /* A figure or confirmed-state plot can finish after Fit's relayout
+     * promise. The perspective Fit already owns this data box, so that
+     * late plot writes the previous ratio and leaves the new eye in
+     * place. plotly_afterplot is the end of that plot. Stay subscribed
+     * until a newer camera revision replaces this Fit. A timer would
+     * miss the plot that arrives after it. */
+    if (!gd || typeof gd.on !== "function") return;
+    clearFittedAspectListener(gd);
+    var attempts = 0;
+    function recommitFittedAspect() {
+      if (gd.__mvFittedAspectRelayout) return;
+      if (Number.isFinite(token) && Number(gd.__mvCameraRevision) !== token) {
+        clearFittedAspectListener(gd);
+        return;
+      }
+      var frame = fittedFrame(gd);
+      if (!frame) return;
+      var aspect = frame.aspectratio;
+      var scene = gd._fullLayout && gd._fullLayout.scene;
+      var live = scene && scene.aspectratio;
+      var painted = glAspect(gd);
+      var drifted = !!(aspect && Number.isFinite(Number(aspect.x)) && (!live || aspectOffContract(live, aspect, 0.01)));
+      if (aspect && painted && aspectOffContract(painted, aspect, 0.01)) drifted = true;
+      /* A late scene plot can keep the fitted ratio and still write the
+       * previous, wider data box. The painted Fit contract is that box,
+       * not only the ratio. */
+      var rangeDrift = false;
+      if (frame.ranges && scene) {
+        rangeDrift = ["x", "y", "z"].some(function (axis) {
+          var liveRange = scene[axis + "axis"] && scene[axis + "axis"].range;
+          var want = frame.ranges[axis];
+          if (!liveRange || !want) return false;
+          var liveSpan = Math.abs(Number(liveRange[1]) - Number(liveRange[0]));
+          var wantSpan = Math.abs(Number(want[1]) - Number(want[0]));
+          return Math.abs(liveSpan - wantSpan) > 1e-3 * Math.max(wantSpan, 1);
+        });
+      }
+      if (!drifted && !rangeDrift) return;
+      /* The fit relayout is still inside this plot. A nested relayout is
+       * rejected and the rejection used to restore the camera and toast.
+       * Retry after that command releases the graph. */
+      if (gd.__mvFittedRestoring) {
+        setTimeout(recommitFittedAspect, 0);
+        return;
+      }
+      /* A direct write is discarded by the next scene plot, which stores
+       * the previous ratio as the user value. A new relayout is a user
+       * edit, so that plot keeps this ratio. */
+      attempts += 1;
+      if (attempts > 8 || !root.Plotly || typeof root.Plotly.relayout !== "function") return;
+      var patch = {};
+      if (drifted && aspect && Number.isFinite(Number(aspect.x))) {
+        patch["scene.aspectmode"] = "manual";
+        patch["scene.aspectratio.x"] = Number(aspect.x);
+        patch["scene.aspectratio.y"] = Number(aspect.y);
+        patch["scene.aspectratio.z"] = Number(aspect.z);
+      }
+      if (rangeDrift) {
+        ["x", "y", "z"].forEach(function (axis) {
+          var pair = frame.ranges[axis];
+          if (!pair) return;
+          patch["scene." + axis + "axis.autorange"] = false;
+          patch["scene." + axis + "axis.range"] = [Number(pair[0]), Number(pair[1])];
+        });
+      }
+      if (!Object.keys(patch).length) return;
+      root.__mv_camera_diag = root.__mv_camera_diag || {};
+      root.__mv_camera_diag.repairs = (root.__mv_camera_diag.repairs || 0) + 1;
+      gd.__mvFittedAspectRelayout = true;
+      Promise.resolve(root.Plotly.relayout(gd, patch)).finally(function () {
+        gd.__mvFittedAspectRelayout = false;
+        recommitFittedAspect();
+      });
+    }
+    gd.__mvFittedAspectListener = recommitFittedAspect;
+    try { gd.on("plotly_afterplot", recommitFittedAspect); } catch (_) { gd.__mvFittedAspectListener = null; }
+  }
+  function commitFittedAspect(gd, aspect) {
+    /* A scene relayout updates the camera and the axis ranges, and can
+     * leave aspectratio at the previous figure. Write the commanded
+     * ratio into the existing layout objects (so a plot that already
+     * holds those objects sees the new numbers) and the gl scene.
+     * The glplot hook is only for a ratio we are about to defend. Arming
+     * it on an ordinary frame replaces the controller under an in-progress
+     * orbit. Fit still installs the hook before its own relayout. */
+    var frame = fittedFrame(gd);
+    var source = aspect && Number.isFinite(Number(aspect.x)) ? aspect : frame && frame.aspectratio;
+    if (!gd || !source || !Number.isFinite(Number(source.x))) return;
+    installAspectLock(gd);
+    var copy = {x: Number(source.x), y: Number(source.y), z: Number(source.z)};
+    writeAspect(gd._fullLayout && gd._fullLayout.scene, copy);
+    writeAspect(gd.layout && gd.layout.scene, copy);
+    var scene = gd._fullLayout && gd._fullLayout.scene;
+    var gl = scene && scene._scene && scene._scene.glplot;
+    if (gl && typeof gl.setAspectratio === "function") {
+      try { gl.setAspectratio(copy); } catch (_) {}
+    }
+  }
+  function fittedAspect(options) {
+    var aspect = options && options.aspectratio;
+    return aspect && Number.isFinite(Number(aspect.x)) ? aspect : null;
+  }
+  function cameraCheck(options) {
+    return {
+      requireEye: restoresViewport(options),
+      restoreViewport: restoresViewport(options),
+      aspectratio: fittedAspect(options),
+      ranges: options && options.ranges,
+      command: options && options.command,
+    };
+  }
+  function liveRanges(gd) {
+    var scene = gd && gd._fullLayout && gd._fullLayout.scene;
+    if (!scene) return null;
+    function pair(axis) {
+      var range = scene[axis] && scene[axis].range;
+      return range ? [Number(range[0]), Number(range[1])] : null;
+    }
+    return {x: pair("xaxis"), y: pair("yaxis"), z: pair("zaxis")};
+  }
+  function postconditionReason(gd, camera, options) {
     var expected = projectionType(camera);
     var internal = internalProjection(gd);
-    /* When Plotly has created the gl3d scene, the internal projection is the
-     * source of truth. A missing or different value is a failed update. */
     if (expected && gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene) {
-      if (internal !== expected) return false;
+      if (internal !== expected) return "projection";
     } else if (expected) {
       var got = projectionType(actualCamera(gd));
-      if (got && got !== expected) return false;
+      if (got && got !== expected) return "projection";
     }
     /* Coordinates have to be on a trace. A layout image is not geometry,
      * and its source is not checked against the current scene. */
-    if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd)) return false;
+    if (gd && Array.isArray(gd.data) && gd.data.length && !visibleGeometry(gd)) return "geometry";
     if (options && options.requireEye) {
       var expectedDistance = vectorLength(camera && camera.eye);
       var gotDistance = vectorLength(liveEye(gd));
-      if (expectedDistance && gotDistance && Math.abs(gotDistance - expectedDistance) / Math.max(expectedDistance, 1e-6) > 0.35) return false;
+      if (expectedDistance && gotDistance && Math.abs(gotDistance - expectedDistance) / Math.max(expectedDistance, 1e-6) > 0.35) return "eye";
     }
+    var commanded = fittedAspect(options);
     var canonical = gd && gd.__mvCanonicalViewport;
-    if (options && options.restoreViewport && canonical && canonical.aspectratio) {
-      var gl = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene && gd._fullLayout.scene._scene.glplot;
-      var aspect = gl && typeof gl.getAspectratio === "function" ? gl.getAspectratio() : null;
-      if (aspect && ["x", "y", "z"].some(function (axis) {
-        var want = Number(canonical.aspectratio[axis]);
-        var have = Number(aspect[axis]);
-        return Number.isFinite(want) && Number.isFinite(have) && Math.abs(have - want) / Math.max(Math.abs(want), 1e-6) > 0.08;
-      })) return false;
+    if (options && options.restoreViewport) {
+      var aspect = liveAspect(gd);
+      var painted = glAspect(gd);
+      if (commanded) {
+        if ((aspect && aspectOffContract(aspect, commanded, 0.01)) ||
+            (painted && aspectOffContract(painted, commanded, 0.01))) return "fitted-aspect";
+      } else if (canonical && canonical.aspectratio && aspect && aspectOffContract(aspect, canonical.aspectratio)) {
+        return "canonical-aspect";
+      }
     }
-    return true;
+    return "";
   }
-  function recover(gd, camera) {
+  function notePostconditionFailure(gd, camera, options, stage) {
+    var live = actualCamera(gd);
+    var detail = {
+      stage: stage,
+      command: options && options.command,
+      reason: postconditionReason(gd, camera, options),
+      expectedEye: camera && camera.eye,
+      liveEye: live && live.eye,
+      expectedCenter: camera && camera.center,
+      liveCenter: live && live.center,
+      ranges: liveRanges(gd),
+      liveAspect: liveAspect(gd),
+      fittedAspect: fittedAspect(options),
+      canonicalAspect: gd && gd.__mvCanonicalViewport && gd.__mvCanonicalViewport.aspectratio,
+    };
+    root.__mv_camera_diag.lastPostcondition = detail;
+    if (root.console && root.console.error) root.console.error("MatterVis camera postcondition " + JSON.stringify(detail));
+    return detail;
+  }
+  function postcondition(gd, camera, options) {
+    return !postconditionReason(gd, camera, options);
+  }
+  function recover(gd, camera, options) {
     if (!root.Plotly || typeof root.Plotly.react !== "function" || !gd || !Array.isArray(gd.data)) return Promise.resolve();
     var layout = clone(gd.layout || {});
     layout.scene = Object.assign({}, layout.scene || {});
@@ -437,11 +833,30 @@
         String(render.server_started_at || "") === gd.__mvCameraRevisionEpoch && Number.isFinite(Number(gd.__mvCameraRevision))) {
       render.camera_revision = Number(gd.__mvCameraRevision);
     }
-    var canonical = gd.__mvCanonicalViewport;
-    if (canonical) {
-      if (canonical.aspectmode) layout.scene.aspectmode = canonical.aspectmode;
-      if (canonical.aspectratio) layout.scene.aspectratio = clone(canonical.aspectratio);
+    var commanded = fittedAspect(options);
+    if (commanded) {
+      layout.scene.aspectmode = "manual";
+      layout.scene.aspectratio = clone(commanded);
+    } else {
+      var canonical = gd.__mvCanonicalViewport;
+      if (canonical) {
+        if (canonical.aspectmode) layout.scene.aspectmode = canonical.aspectmode;
+        if (canonical.aspectratio) layout.scene.aspectratio = clone(canonical.aspectratio);
+      }
     }
+    /* gd.layout keeps the ranges from the last full figure. A relayout
+     * writes the fitted box only onto _fullLayout. Replaying gd.layout
+     * would put that first box back under the fitted eye. */
+    ["x", "y", "z"].forEach(function (axis) {
+      var commandedRange = options && options.ranges && options.ranges[axis];
+      var live = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene[axis + "axis"];
+      var pair = commandedRange && commandedRange.length >= 2 ? commandedRange : (live && live.range);
+      if (!pair) return;
+      layout.scene[axis + "axis"] = Object.assign({}, layout.scene[axis + "axis"] || {}, {
+        range: [Number(pair[0]), Number(pair[1])],
+        autorange: false,
+      });
+    });
     var recovery = Promise.resolve(root.Plotly.react(gd, clone(gd.data), layout));
     var queueToken = gd.__mvRenderQueueState;
     return withTimeout(recovery, timeoutMs(), function () {
@@ -511,7 +926,7 @@
     return attempt(PROJECTION_SETTLE_ATTEMPTS);
   }
   function settledCurrent(gd, snapshot, epoch, current, options) {
-    var check = {requireEye: restoresViewport(options), restoreViewport: restoresViewport(options)};
+    var check = cameraCheck(options);
     if (queueEpoch(gd) !== epoch || !current()) { diag("staleDrops"); throw new Error("stale camera command"); }
     function accept() {
       reportStatus("ok", "");
@@ -519,13 +934,15 @@
     }
     function failOrRecover() {
       diag("postconditionFailures");
+      notePostconditionFailure(gd, snapshot, check, "replay");
       reportStatus("error", "The camera update did not match the view. Restoring it.");
-      return recover(gd, snapshot).then(function () {
+      return recover(gd, snapshot, check).then(function () {
         if (queueEpoch(gd) !== epoch || !current()) throw new Error("stale camera command");
         return whenProjectionSettles(gd, snapshot, check).then(function (ok) {
           if (queueEpoch(gd) !== epoch || !current()) throw new Error("stale camera command");
           if (!ok && !postcondition(gd, snapshot, check)) {
             diag("postconditionFailures");
+            notePostconditionFailure(gd, snapshot, check, "toast");
             reportStatus("error", "The camera update could not be restored.");
             throw new Error("camera postcondition failed");
           }
@@ -591,9 +1008,22 @@
       timer = setTimeout(retry, 250);
     });
   }
+  function carryFittedFrame(gd, options) {
+    /* A relayout echo confirms the eye and omits the ratio. The scene
+     * plot then stores the previous ratio. Keep the fitted ratio on
+     * that delivery until Reset. */
+    if (!options || /^reset$/i.test(String(options.command || ""))) return;
+    var frame = fittedFrame(gd);
+    if (!frame) return;
+    if (!(options.aspectratio && Number.isFinite(Number(options.aspectratio.x))) && frame.aspectratio && Number.isFinite(Number(frame.aspectratio.x))) {
+      options.aspectratio = frame.aspectratio;
+    }
+    if (!options.ranges && frame.ranges) options.ranges = frame.ranges;
+  }
   function applyAsync(camera, options) {
     options = options || {};
     var gd = graph();
+    carryFittedFrame(gd, options);
     if (!camera) {
       diag("missingPayload");
       root.__mv_camera_diag.lastMissingPayload = {camera_version: Number(options.camera_version), scene_id: options.scene_id || null};
@@ -622,6 +1052,11 @@
     delete options.__mvGraphRetries;
     installWheelZoom(gd);
     installContextLoss(gd);
+    installFittedRangeGuard();
+    if (/^reset$/i.test(String(options.command || ""))) {
+      clearFittedFrame(options.scene_id);
+      clearFittedAspectListener(gd);
+    }
     var snapshot = clone(camera);
     var patch = requestedPatch(snapshot);
     var requestedRevision = Number(options.camera_version);
@@ -634,7 +1069,7 @@
       var currentUi = gd.layout && gd.layout.scene && gd.layout.scene.uirevision;
       patch["scene.uirevision"] = String(currentUi || "scene") + "#camera" + String(requestedRevision);
     }
-    if (restoresViewport(options)) {
+    if (restoresViewport(options) && !(options.aspectratio && Number.isFinite(Number(options.aspectratio.x)))) {
       restoreCanonicalViewport(gd);
       var canonical = gd.__mvCanonicalViewport;
       if (canonical) {
@@ -644,16 +1079,52 @@
       var previousUi = gd.layout && gd.layout.scene && gd.layout.scene.uirevision;
       patch["scene.uirevision"] = String(previousUi || "scene") + "#reset" + String(options.camera_version || Date.now());
     }
+    if (options.aspectratio && Number.isFinite(Number(options.aspectratio.x))) {
+      patch["scene.aspectmode"] = "manual";
+      patch["scene.aspectratio.x"] = Number(options.aspectratio.x);
+      patch["scene.aspectratio.y"] = Number(options.aspectratio.y);
+      patch["scene.aspectratio.z"] = Number(options.aspectratio.z);
+    }
+    if (options.ranges) {
+      ["x", "y", "z"].forEach(function (axis) {
+        var pair = options.ranges[axis];
+        if (pair && pair.length >= 2 && [pair[0], pair[1]].every(function (item) { return Number.isFinite(Number(item)); })) {
+          patch["scene." + axis + "axis.autorange"] = false;
+          patch["scene." + axis + "axis.range"] = [Number(pair[0]), Number(pair[1])];
+        }
+      });
+    }
     if (!Object.keys(patch).length) return Promise.reject(new Error("invalid camera payload"));
     var render = gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
     if (options.server_started_at === undefined) options.server_started_at = render && render.server_started_at || "";
     var revisionEpoch = String(options.server_started_at || "");
     var revisionScope = String(options.scene_id || "") + ":" + String(options.scene_generation === undefined ? "" : options.scene_generation);
     if (!contextCurrent(gd, options)) return Promise.reject(new Error("stale camera command"));
-    if (gd.__mvCameraRevisionScope !== revisionScope || gd.__mvCameraRevisionEpoch !== revisionEpoch) {
+    var sceneKey = String(options.scene_id || "");
+    var incomingGeneration = options.scene_generation;
+    var generationPresent = incomingGeneration !== undefined && incomingGeneration !== null && String(incomingGeneration) !== "";
+    var storedScope = String(gd.__mvCameraRevisionScope || "");
+    /* A delivery with no generation must not look like a new clock and
+     * wipe a newer Fit. A real generation or epoch change still restarts. */
+    var bareSceneScope = !generationPresent && !!sceneKey && storedScope.indexOf(sceneKey + ":") === 0 && storedScope !== revisionScope;
+    var sceneChanged = !!(sceneKey && gd.__mvCameraRevisionScene && gd.__mvCameraRevisionScene !== sceneKey);
+    var epochChanged = !!(revisionEpoch && gd.__mvCameraRevisionEpoch && revisionEpoch !== String(gd.__mvCameraRevisionEpoch));
+    var realScopeChange = storedScope !== "" && revisionScope !== storedScope && !bareSceneScope;
+    if (storedScope === "") {
+      if (sceneKey) gd.__mvCameraRevisionScene = sceneKey;
+      gd.__mvCameraRevisionScope = revisionScope;
+      gd.__mvCameraRevisionEpoch = revisionEpoch;
+    } else if (sceneChanged || epochChanged || realScopeChange) {
+      if (sceneKey) gd.__mvCameraRevisionScene = sceneKey;
       gd.__mvCameraRevisionScope = revisionScope;
       gd.__mvCameraRevisionEpoch = revisionEpoch;
       gd.__mvCameraRevision = NaN;
+    } else if (sceneKey) {
+      gd.__mvCameraRevisionScene = sceneKey;
+    }
+    var liveRevision = Number(gd.__mvCameraRevision);
+    if (!realScopeChange && !epochChanged && !sceneChanged && sceneKey && Number.isFinite(liveRevision) && Number.isFinite(requestedRevision) && requestedRevision < liveRevision) {
+      return Promise.reject(new Error("stale camera command"));
     }
     var previousRevision = Number(gd.__mvCameraRevision);
     if (Number.isFinite(requestedRevision) && (!Number.isFinite(previousRevision) || requestedRevision > previousRevision)) {
@@ -671,10 +1142,34 @@
     var current = function () { return contextCurrent(gd, options); };
     if (!current()) return Promise.reject(new Error("stale camera command"));
     gd.__mvLatestCamera = {snapshot: snapshot, patch: patch, replayed: false, command: String(options.command || "")};
+    if (!/^reset$/i.test(String(options.command || "")) && options.ranges) {
+      rememberFittedFrame(options.scene_id, options.ranges, options.aspectratio, requestedRevision, {
+        generation: options.scene_generation,
+        epoch: options.server_started_at,
+      });
+    }
+    if (options.aspectratio && Number.isFinite(Number(options.aspectratio.x))) watchFittedAspect(gd, requestedRevision);
     var appliedEpoch;
     var run = function () {
       if (!current()) { diag("staleDrops"); throw new Error("stale camera command"); }
       appliedEpoch = queueEpoch(gd);
+      gd.__mvFittedRestoring = true;
+      if (!/^reset$/i.test(String(options.command || "")) && options.ranges) {
+        rememberFittedFrame(options.scene_id, options.ranges, options.aspectratio, requestedRevision, {
+        generation: options.scene_generation,
+        epoch: options.server_started_at,
+      });
+      }
+      /* Put the ratio on the layout objects the replot reads, and arm
+       * the lock, without touching the gl scene yet. setAspectratio marks
+       * the scene dirty; a render from that mark can finish after the
+       * range edit and write the previous data box back. */
+      installAspectLock(gd);
+      if (options.aspectratio && Number.isFinite(Number(options.aspectratio.x))) {
+        var primed = {x: Number(options.aspectratio.x), y: Number(options.aspectratio.y), z: Number(options.aspectratio.z)};
+        writeAspect(gd._fullLayout && gd._fullLayout.scene, primed);
+        writeAspect(gd.layout && gd.layout.scene, primed);
+      }
       var queueToken = gd.__mvRenderQueueState;
       /* Bound only the Plotly call. Time spent waiting behind an earlier
        * command must not expire Reset before it starts, and a timeout from a
@@ -684,6 +1179,10 @@
         if (gd.__mvRenderQueueState === queueToken) resetQueue(gd, "camera relayout timeout");
       });
       return attempt.then(function () {
+        if (Number.isFinite(requestedRevision) && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render) {
+          gd.layout.meta.mattervis_render.camera_revision = requestedRevision;
+        }
+        commitFittedAspect(gd, options.aspectratio);
         /* A drag relayout can resolve after Reset already replaced the queue.
          * Re-apply the newest command so the late Plotly write cannot stick. */
         if (Number.isFinite(requestedRevision) && Number(gd.__mvCameraRevision) !== requestedRevision) {
@@ -700,21 +1199,23 @@
     return enqueue(gd, run, {isCurrent: current, group: "camera"}).then(function () {
       return settledCurrent(gd, snapshot, appliedEpoch, current, options);
     }, function (error) {
-      if (error && /timeout/.test(String(error && error.message || error))) throw error;
+      if (error && /timeout|stale camera command/.test(String(error && error.message || error))) throw error;
       if (queueEpoch(gd) !== appliedEpoch || !current()) { diag("staleDrops"); throw new Error("stale camera command"); }
-      var check = {requireEye: restoresViewport(options), restoreViewport: restoresViewport(options)};
+      var check = cameraCheck(options);
       diag("postconditionFailures");
+      notePostconditionFailure(gd, snapshot, check, "relayout");
       reportStatus("error", "Camera relayout failed. Restoring the current view.");
-      return recover(gd, snapshot).then(function () {
+      return recover(gd, snapshot, check).then(function () {
         if (queueEpoch(gd) !== appliedEpoch || !current()) throw new Error("stale camera command");
         if (!postcondition(gd, snapshot, check)) {
+          notePostconditionFailure(gd, snapshot, check, "relayout-toast");
           reportStatus("error", "Camera relayout failed and the view could not be restored.");
           throw error;
         }
         reportStatus("recovered", "Restored the current camera view.");
         gd.__mvCameraResets = 0;
       });
-    }).then(function () { return true; }).catch(function (error) { diag("failures"); throw error; });
+    }).finally(function () { gd.__mvFittedRestoring = false; }).then(function () { return true; }).catch(function (error) { diag("failures"); throw error; });
   }
   function apply(camera, options) {
     options = options || {};
@@ -746,5 +1247,12 @@
     reportStatus: reportStatus,
     postcondition: postcondition,
     recover: recover,
+    commitFittedAspect: commitFittedAspect,
+    reapplyFittedFrame: function (gd) {
+      commitFittedAspect(gd);
+      return restoreFittedRanges(gd);
+    },
+    fittedIdentityMatches: fittedIdentityMatches,
+    noteFigureFrame: noteFigureFrame,
   };
 })(window);

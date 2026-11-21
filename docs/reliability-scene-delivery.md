@@ -69,6 +69,12 @@ must not change scene B, and a stale revision must not replace a newer one.
   outside the frustum, is still replaced by `refit_scene_camera` before
   that pose is what the store paints. Every writer of
   `camera-state-store` uses `allow_duplicate`.
+- A fitted ratio is restored after the frame when `glplot.getAspectratio()`
+  still has the previous ratio, even if `_fullLayout` already shows the
+  fitted ratio. The layout comparison alone leaves the previous ratio on
+  the gl scene. A plot that finishes after Fit can also put the previous,
+  wider axis box back while leaving the ratio in place. The same repair
+  writes the fitted ranges again.
 - A complete frame whose scene id differs from the mounted scene is followed
   by a relayout of that figure's camera, axis ranges, aspect mode, aspect
   ratio, and `uirevision`. `Plotly.react` writes those values onto the
@@ -105,12 +111,17 @@ must not change scene B, and a stale revision must not replace a newer one.
   receive the pre-remount drag eye. A camera command that arrives during that
   replot still wins. A frame or internal replot that finishes while that
   drag is still down puts that gesture's sampled eye back when the
-  generation and session still match. The sample is dropped when the
-  gesture is stamped or released, so a later press cannot restore the
-  previous orbit before it samples its own eye. A size replot does not
-  put back a captured pose once a newer camera revision is already
-  current, even when that command arrived before the replot. After the
-  gesture ends, only a commanded camera is restored.
+  generation and session still match.   A figure react that started before
+  pointer-up captured the pre-drag camera and can finish after the button
+  is up; that completion puts the same sampled eye back once, unless a
+  camera relayout has already landed after pointer-up. A react that
+  starts after pointer-up does not. The sample is dropped when the next
+  gesture is stamped, so a later press cannot restore the previous orbit
+  before it samples its own eye. A size replot does not put back a
+  captured pose once a newer camera revision is already current, even
+  when that command arrived before the replot, and a size replot after
+  pointer-up does not restore the finished drag. After that overlapping
+  frame has been repaired, only a commanded camera is restored.
 - `update_view` classifies a callback against the previous snapshot of the
   same scene. That snapshot is process-wide and is not a substitute for the
   requesting browser's mounted figure. Camera, overlay, and ordinary display

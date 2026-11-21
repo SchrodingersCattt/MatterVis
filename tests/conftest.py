@@ -24,6 +24,10 @@ _TESTS_DIR = Path(__file__).resolve().parent
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
+# Loaded after tests/ is on sys.path. The guard has to be a plugin so its
+# hooks run on the xdist controller, not only inside worker conftest files.
+pytest_plugins = ["_pytest_worker_guard"]
+
 _INTEGRATION_DIRECTORIES = {"app", "scenes", "tui"}
 _INTEGRATION_RENDER_FILES = {
     "test_animation_adapter.py",
