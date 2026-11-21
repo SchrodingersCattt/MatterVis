@@ -333,6 +333,7 @@ def build_loaded_crystal_from_ase(
         bond_scale=bond_scale,
         bond_thresholds=bond_thresholds,
         scene_metadata_extra=metadata,
+        molecule_indices=atoms.arrays.get("molecule_index"),
     )
     bundle.frame_info = {"frame_index": int(frame_index), **dict(atoms.info)}
     bundle.atom_arrays = _atom_arrays(atoms)

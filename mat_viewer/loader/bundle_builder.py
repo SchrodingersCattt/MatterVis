@@ -36,6 +36,7 @@ def build_loaded_crystal_from_atoms(
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | None = None,
     scene_metadata_extra: Optional[Dict[str, Any]] = None,
+    molecule_indices=None,
 ) -> LoadedCrystal:
     """Build the canonical render bundle from parsed atoms and a lattice.
 
@@ -78,6 +79,8 @@ def build_loaded_crystal_from_atoms(
                 analyze_kwargs["bond_scale"] = bond_scale
             if bond_thresholds is not None:
                 analyze_kwargs["bond_thresholds"] = bond_thresholds
+            if molecule_indices is not None:
+                analyze_kwargs["molecule_indices"] = molecule_indices
             molcrys_analysis = molcrys_bridge.analyze(
                 raw_atoms,
                 M,

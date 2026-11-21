@@ -40,6 +40,22 @@ through canonical loading, molecule grouping, PBC unwrapping, and scene
 construction. Omit them to retain the configured defaults. The CLI exposes the
 same controls as `--bond-scale` and repeatable `--bond-threshold Zn,N=2.5`.
 
+ASE-readable frames with an integer `molecule_index` array constrain
+MolCrysKit bond perception to each source group. Disconnected parts of a group
+may become separate components; sites from different groups are not merged.
+IDs may be non-contiguous, and the original per-atom array remains available
+in the bundle. Component membership and bond endpoints, including periodic
+image shifts, stay on that original frame. Frames without this array retain
+whole-frame bond perception. `identify_molecules` does not yet take that
+array. It does take `exclude_indices`, and the loader uses that on the
+full frame so bond endpoints stay MolCrysKit's frame indices. Slicing,
+and a rewrite of partition-local `atom_indices`, `bond_pairs`, and
+bond-record `left` / `right`, is only the fallback for an identifier
+with neither `exclude_indices` nor a partition parameter. Another
+bond-record field that still holds a slice-local index is rejected.
+If the identifier grows an explicit `molecule_indices` or
+`source_partitions` parameter, the loader forwards the array once.
+
 ### Auxiliary cells
 
 `agent.prepare_render` and `agent.render` accept `cell_overlays=[...]`.

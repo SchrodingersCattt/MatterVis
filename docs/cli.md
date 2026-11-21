@@ -198,6 +198,19 @@ Supported inputs:
 | LAMMPS data/configuration | ASE LAMMPS data reader |
 | Other ASE-readable files | ASE auto-detection or --input-format |
 
+When an ASE frame supplies a non-negative integer `molecule_index` for every
+atom, MolCrysKit perceives bonds and periodic images within each source group;
+nearby atoms from different groups are not merged into a larger molecule.
+Disconnected atoms within a group may still become separate components. IDs
+need not be contiguous and the original per-atom array remains available.
+The current MolCrysKit identifier has no partition argument. The loader
+passes atoms outside each group as `exclude_indices` and keeps the
+indices MolCrysKit returns. It slices a group only for an identifier
+that accepts neither `exclude_indices` nor a partition array, and then
+rewrites only the partition-local endpoint indices.
+Without that array, the usual whole-frame bond perception is unchanged. The
+`--bond-scale` and `--bond-threshold` options apply within each group.
+
 LAMMPS numeric types are not elements. Pass --type-map whenever the source does
 not encode element identity unambiguously; the order is type 1, type 2, and so
 on. Atomaestro never guesses it from a model filename.

@@ -41,6 +41,7 @@ from .ring_geometry import (
     RING_MCB_NODE_LIMIT,
     bounded_ring_geometries as _bounded_ring_geometries,
 )
+from .source_partitions import identify_source_partitions
 
 
 class StructureContractError(RuntimeError):
@@ -876,6 +877,7 @@ def analyze(
     bond_scale: float = 1.0,
     bond_thresholds=None,
     include_chemistry: bool = False,
+    molecule_indices=None,
 ):
     """Run MolCrysKit on ``raw_atoms`` (full unit cell) and return a
     :class:`CrystalAnalysis` summarising species + per-FU counts.
@@ -910,7 +912,13 @@ def analyze(
         # Pass it explicitly so loading cannot follow the shell default,
         # which is major. Minor sites stay available to draw.
         identify_kwargs["disorder_policy"] = "as_refined"
-    identified = identify(ase_atoms, **identify_kwargs)
+    identified = (
+        identify(ase_atoms, **identify_kwargs)
+        if molecule_indices is None
+        else identify_source_partitions(
+            ase_atoms, identify, identify_kwargs, molecule_indices
+        )
+    )
 
     crystal = mk["MolecularCrystal"](
         ase_atoms.get_cell(), identified, pbc=tuple(ase_atoms.get_pbc())
