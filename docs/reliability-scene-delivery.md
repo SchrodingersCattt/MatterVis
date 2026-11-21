@@ -72,7 +72,9 @@ must not change scene B, and a stale revision must not replace a newer one.
 - A fitted ratio is restored after the frame when `glplot.getAspectratio()`
   still has the previous ratio, even if `_fullLayout` already shows the
   fitted ratio. The layout comparison alone leaves the previous ratio on
-  the gl scene.
+  the gl scene. A plot that finishes after Fit can also put the previous,
+  wider axis box back while leaving the ratio in place. The same repair
+  writes the fitted ranges again.
 - A complete frame whose scene id differs from the mounted scene is followed
   by a relayout of that figure's camera, axis ranges, aspect mode, aspect
   ratio, and `uirevision`. `Plotly.react` writes those values onto the

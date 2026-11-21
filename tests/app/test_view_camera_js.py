@@ -787,6 +787,7 @@ const sandbox = {
   window: {Plotly: {
     relayout(graph, patch) {
       const aspect = graph._fullLayout.scene.aspectratio;
+      const scene = graph._fullLayout.scene;
       if (patch['scene.aspectratio.x'] !== undefined) {
         aspect.x = Number(patch['scene.aspectratio.x']);
         aspect.y = Number(patch['scene.aspectratio.y']);
@@ -794,6 +795,13 @@ const sandbox = {
         const gl = graph._fullLayout.scene._scene.glplot;
         if (gl && gl.setAspectratio) gl.setAspectratio(aspect);
       }
+      ['x', 'y', 'z'].forEach((axis) => {
+        const pair = patch['scene.' + axis + 'axis.range'];
+        if (!pair) return;
+        scene[axis + 'axis'] = scene[axis + 'axis'] || {};
+        scene[axis + 'axis'].range = [Number(pair[0]), Number(pair[1])];
+        scene[axis + 'axis'].autorange = false;
+      });
       if (patch['scene.camera.projection.type']) {
         graph.layout.scene.camera.projection = {type: patch['scene.camera.projection.type']};
       }
@@ -821,6 +829,9 @@ function previousRatioPlot() {
   gd.layout.scene.aspectratio.x = 1;
   gd.layout.scene.aspectratio.y = 1;
   gd.layout.scene.aspectratio.z = 1;
+  ['x', 'y', 'z'].forEach((axis) => {
+    gd._fullLayout.scene[axis + 'axis'] = {range: [-40, 48.164], autorange: true};
+  });
   fresh.setAspectratio({x: 1, y: 1, z: 1});
   gd.emit('plotly_afterplot');
 }
@@ -840,6 +851,13 @@ function previousRatioPlot() {
   }
   assert.ok(Math.abs(gd._fullLayout.scene.aspectratio.x - orthoAspect.x) / orthoAspect.x < 0.01);
   assert.ok(Math.abs(gd._fullLayout.scene._scene.glplot.getAspectratio().x - orthoAspect.x) / orthoAspect.x < 0.01);
+  ['x', 'y', 'z'].forEach((axis) => {
+    const live = gd._fullLayout.scene[axis + 'axis'].range;
+    const want = ranges[axis];
+    const liveSpan = Math.abs(live[1] - live[0]);
+    const wantSpan = Math.abs(want[1] - want[0]);
+    assert.ok(Math.abs(liveSpan - wantSpan) <= 1e-3 * Math.max(wantSpan, 1), axis + ' box');
+  });
   assert.equal(status.textContent, '');
   await assert.rejects(api.applyAsync(cameraFor('orthographic'), {
     scene_id: 'salt', scene_generation: '', camera_version: 1, command: 'state-confirmed',

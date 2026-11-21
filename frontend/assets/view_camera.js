@@ -661,14 +661,28 @@
         return;
       }
       var frame = fittedFrame(gd);
-      var aspect = frame && frame.aspectratio;
-      if (!aspect || !Number.isFinite(Number(aspect.x))) return;
+      if (!frame) return;
+      var aspect = frame.aspectratio;
       var scene = gd._fullLayout && gd._fullLayout.scene;
       var live = scene && scene.aspectratio;
       var painted = glAspect(gd);
-      var drifted = !live || aspectOffContract(live, aspect, 0.01);
-      if (painted && aspectOffContract(painted, aspect, 0.01)) drifted = true;
-      if (!drifted) return;
+      var drifted = !!(aspect && Number.isFinite(Number(aspect.x)) && (!live || aspectOffContract(live, aspect, 0.01)));
+      if (aspect && painted && aspectOffContract(painted, aspect, 0.01)) drifted = true;
+      /* A late scene plot can keep the fitted ratio and still write the
+       * previous, wider data box. The painted Fit contract is that box,
+       * not only the ratio. */
+      var rangeDrift = false;
+      if (frame.ranges && scene) {
+        rangeDrift = ["x", "y", "z"].some(function (axis) {
+          var liveRange = scene[axis + "axis"] && scene[axis + "axis"].range;
+          var want = frame.ranges[axis];
+          if (!liveRange || !want) return false;
+          var liveSpan = Math.abs(Number(liveRange[1]) - Number(liveRange[0]));
+          var wantSpan = Math.abs(Number(want[1]) - Number(want[0]));
+          return Math.abs(liveSpan - wantSpan) > 1e-3 * Math.max(wantSpan, 1);
+        });
+      }
+      if (!drifted && !rangeDrift) return;
       /* The fit relayout is still inside this plot. A nested relayout is
        * rejected and the rejection used to restore the camera and toast.
        * Retry after that command releases the graph. */
@@ -681,12 +695,22 @@
        * edit, so that plot keeps this ratio. */
       attempts += 1;
       if (attempts > 8 || !root.Plotly || typeof root.Plotly.relayout !== "function") return;
-      var patch = {
-        "scene.aspectmode": "manual",
-        "scene.aspectratio.x": Number(aspect.x),
-        "scene.aspectratio.y": Number(aspect.y),
-        "scene.aspectratio.z": Number(aspect.z),
-      };
+      var patch = {};
+      if (drifted && aspect && Number.isFinite(Number(aspect.x))) {
+        patch["scene.aspectmode"] = "manual";
+        patch["scene.aspectratio.x"] = Number(aspect.x);
+        patch["scene.aspectratio.y"] = Number(aspect.y);
+        patch["scene.aspectratio.z"] = Number(aspect.z);
+      }
+      if (rangeDrift) {
+        ["x", "y", "z"].forEach(function (axis) {
+          var pair = frame.ranges[axis];
+          if (!pair) return;
+          patch["scene." + axis + "axis.autorange"] = false;
+          patch["scene." + axis + "axis.range"] = [Number(pair[0]), Number(pair[1])];
+        });
+      }
+      if (!Object.keys(patch).length) return;
       root.__mv_camera_diag = root.__mv_camera_diag || {};
       root.__mv_camera_diag.repairs = (root.__mv_camera_diag.repairs || 0) + 1;
       gd.__mvFittedAspectRelayout = true;
