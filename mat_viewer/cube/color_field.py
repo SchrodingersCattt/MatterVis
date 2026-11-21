@@ -245,6 +245,8 @@ def isosurface_preparation_token(
     stride: int,
     ambient: float,
     diffuse: float,
+    specular: float = 0.0,
+    shininess: float = 32.0,
     color_cube: CubeData | None,
     color_range: tuple[float, float] | None,
     color_center: float | None,
@@ -268,6 +270,8 @@ def isosurface_preparation_token(
         int(stride),
         float(ambient),
         float(diffuse),
+        float(specular),
+        float(shininess),
         bool(smooth),
         int(smooth_iterations) if smooth else 0,
         None

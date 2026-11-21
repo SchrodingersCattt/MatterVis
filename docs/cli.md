@@ -339,8 +339,6 @@ substitutes one frame backend for another.
 | --isosurface-mode MODE | surface | surface or complete triangulated wireframe |
 | --isosurface-positive-color COLOR | #D55E00 | Positive cube phase colour |
 | --isosurface-negative-color COLOR | #0072B2 | Negative cube phase colour |
-| --isosurface-ambient VALUE | 0.68 | Lambert ambient when no specular preset is selected. With `--isosurface-diffuse`, the sum must not exceed 1. This is not a specular highlight |
-| --isosurface-diffuse VALUE | 0.32 | Lambert diffuse paired with `--isosurface-ambient` |
 | --isosurface-stride N | 2 | Marching-cubes grid stride on the `prepare_render` path. `1` is the fine mesh |
 | --isosurface-smooth / --no-isosurface-smooth | off | Taubin-smooth each phase on the `prepare_render` path (`mat-vis render`, including `--backend plotly` geometry). Off keeps the raw marching-cubes mesh. The isovalue is unchanged. `build_cube_figure` / `build_figure` ignore it and stay raw marching cubes |
 | --isosurface-wireframe-width VALUE | 1.0 | Wireframe line width in pixels |
@@ -349,6 +347,11 @@ substitutes one frame backend for another.
 | --isosurface-color-range MIN MAX | finite min/max | Colormap range; a constant field with no range uses the midpoint |
 | --isosurface-color-center VALUE | none | Value placed at the middle of the colormap |
 | --isosurface-colormap NAME | bgr | `bgr` or a Matplotlib colormap name |
+| --isosurface-material NAME | historical Lambert pair | Surface-material id copied from the surface-material library (`matte`, `hard_plastic`, `metal_like`, `glass_like`). Not a private preset table, and not combined with the coefficient flags |
+| --isosurface-ambient VALUE | 0.68 | Ambient weight. Not required to sum to 1 with diffuse |
+| --isosurface-diffuse VALUE | 0.32 | Diffuse weight |
+| --isosurface-specular VALUE | 0 | White highlight weight |
+| --isosurface-shininess VALUE | 32 | Highlight exponent, at least 1 |
 | --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
 | --lighting RIG | studio_soft | CPU rig: `studio_soft` (default, not retuned), `unlit`, or `studio_three_point` (CPU error, not a silent substitute). See [Lighting](#lighting) |
 

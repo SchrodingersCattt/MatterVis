@@ -19,7 +19,12 @@ The renderer lowers immutable triangle meshes and one-pixel, opaque,
 depth-tested line segments into validated `GpuDrawPacket` objects. Transparent
 primitives, dashed or depth-disabled lines, text, per-vertex mesh colors,
 per-endpoint line colors, and other unsupported features raise
-`GPUUnsupportedError` before a device is used. Missing
+`GPUUnsupportedError` before a device is used. A cube isosurface mesh is
+rejected for the same reason: the shader stores one flat color per packet
+and does not evaluate the shared isosurface material, so it must not draw
+that mesh as an unlit sheet. Use the CPU or Plotly backend for those
+surfaces. Unlit isosurface wireframe lines still follow the line rules
+above. Missing
 dependencies or devices raise `GPUUnavailableError`; no CPU fallback is
 attempted. GIF/MP4, HTML, PDF, and SVG remain on their existing explicit
 backends.

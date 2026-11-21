@@ -131,6 +131,24 @@ mat-vis render orbital.cube -o smooth.png --backend cpu --renderer general \
   --isosurface-stride 1 --isosurface-smooth
 ```
 
+## Isosurface material
+
+`IsosurfaceMaterial` copies coefficients from the surface-material library.
+It does not keep a private preset table. `opacity` is the object alpha and
+is not part of the coefficient record. `light_scale` raises and is not
+folded into diffuse or specular. Omitted coefficients stay the historical
+Lambert pair, ambient 0.68 and diffuse 0.32, specular 0. A number on
+`RenderSpec` is explicit even when it equals that default, so it conflicts
+with `isosurface_material`.
+
+The CPU surface shader evaluates the copied record, including `glass_like`
+Fresnel and `metal_like` base tint. `shade_albedo`, Matplotlib, and Plotly
+reject a non-neutral Fresnel record or a non-white specular tint instead of
+dropping it. Plotly forwards in-range ambient, diffuse, and specular
+unchanged and uses its own Cook-Torrance highlight. The GPU backend rejects
+an isosurface mesh rather than drawing one flat color.
+
+
 ## Isosurface color
 
 `--isosurface-color-cube` samples a second cube onto the isosurface in
@@ -151,6 +169,8 @@ supplied range maps a constant value through that range.
 `--isosurface-color-center` places one value, often zero, at the middle of
 an asymmetric range.
 
+Sampled colors are the albedo for the shared material. Shading multiplies
+them and may add a white specular term; it does not replace the colormap.
 A nonfinite voxel with nonzero trilinear weight makes that sample an error.
 A nonfinite voxel with zero weight does not: an exact grid point or grid
 face ignores the unused corners, so `NaN * 0` is not evaluated. Nonfinite
@@ -159,12 +179,12 @@ keeps the positive and negative phase colors.
 
 | Mode | Backend | Color |
 |---|---|---|
-| `surface` | CPU PNG | Per-vertex color. Smooth shading uses vertex normals; flat shading keeps the same colors with one illumination per face. |
+| `surface` | CPU PNG | Per-vertex color, then the shared material. Smooth shading uses vertex normals; flat shading keeps the same colors with one illumination per face. |
 | `surface` | CPU SVG/PDF | Per-face average of the vertex colors. Vector fills are one color per triangle. |
 | `surface` | Plotly | `Mesh3d` vertex colors. |
 | `wireframe` | CPU PNG | Endpoint colors along the projected edge. Perspective uses camera depth (`-z`), so depths 1 and 9 give the screen midpoint weights 0.9 and 0.1. |
 | `wireframe` | CPU SVG/PDF | The same blend, drawn as solid steps of 4 px. A span is not replaced by its midpoint color. |
-| `wireframe` | Plotly | Error. Use the CPU backend or `surface`. |
+| `wireframe` | Plotly | Error for per-endpoint colors. Use the CPU backend or `surface`. Wireframe lines are unlit and do not apply the shared material. |
 | either | matplotlib or GPU | Error. Those backends do not accept per-vertex or per-endpoint colors. |
 
 ```console
