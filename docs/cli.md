@@ -342,11 +342,37 @@ substitutes one frame backend for another.
 | --isosurface-color-range MIN MAX | finite min/max | Colormap range; a constant field with no range uses the midpoint |
 | --isosurface-color-center VALUE | none | Value placed at the middle of the colormap |
 | --isosurface-colormap NAME | bgr | `bgr` or a Matplotlib colormap name |
-| --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
+| --isosurface-density-mask | off | Opt-in high-density ceiling. Requires a density cube and a user cutoff. Does not change orbital or electron-density isosurfaces when omitted |
+| --isosurface-density-cube PATH | ignored | Electron-density cube sampled at isosurface vertices only when the mask is on. Scalar values are e/Bohr³; e/Å³ is not converted |
+| --isosurface-density-cutoff VALUE | none | User ρ_cut > 0 in e/Bohr³. Not chosen automatically and not defaulted to 0.05 |
+| --periodic-isosurface | rejected | `mat-vis render` does not close the scalar grid across cell faces |
+| --no-periodic-isosurface | off | Records that CPU meshes omit cell-face closure |
 
 Static exports omit browser-only picking traces. Interactive HTML retains them.
 For comparable cube panels, pass the same explicit `--isovalue` rather than
 allowing each source to select its own percentile threshold.
+
+`--isosurface-density-mask` is off unless you set it. Omitting it leaves
+orbital and electron-density isosurfaces unchanged, even when a density cube
+and a cutoff are also present. The cutoff is in the density cube's scalar
+values. Crossing triangles are clipped where the sampled field crosses ρ_cut.
+An edge longer than one density voxel follows those samples, including a
+same-side edge whose interior crosses ρ_cut, rather than the chord between
+its marching-cubes endpoints. For electron density those values are atomic
+units, e/Bohr³
+(1 a.u. ≈ 6.748 e/Å³, so 0.05 a.u. ≈ 0.337 e/Å³). The command does not
+convert e/Å³ and does not choose ρ_cut. 0.05 a.u. is a starting point some
+NCI/RDG figures use for weak contacts. It is not a default, not an IRI
+setting, and not a value to copy from a DFT convention onto a promolecular
+field or from one descriptor onto another. Do not take it from a geometric
+bond-midpoint density. State the mask and the cutoff in the figure caption.
+Details and the promolecular cyclic-dimer check are in
+[the cube API](agents/cube_api.md#density-mask).
+
+`--periodic-isosurface` is an error on this command. CPU meshes do not close
+the scalar grid across cell faces. `--no-periodic-isosurface` matches that
+behavior. Style keys `isosurface_atom_mask_radius` and
+`isosurface_min_volume_voxels` are not flags and are not applied here.
 
 ### Camera
 

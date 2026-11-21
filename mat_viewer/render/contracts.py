@@ -214,6 +214,9 @@ class RenderSpec:
     isosurface_color_range: tuple[float, float] | None = None
     isosurface_color_center: float | None = None
     isosurface_colormap: str = "bgr"
+    isosurface_density_mask: bool = False
+    isosurface_density_cube: str | None = None
+    isosurface_density_cutoff: float | None = None
 
     def __post_init__(self) -> None:
         if self.backend not in ("cpu", "matplotlib", "plotly", "gpu"):
@@ -294,6 +297,28 @@ class RenderSpec:
                 low < self.isosurface_color_center < high
             ):
                 raise ValueError("isosurface_color_center must lie inside the range")
+        if not isinstance(self.isosurface_density_mask, bool):
+            raise TypeError("isosurface_density_mask must be a bool")
+        if self.isosurface_density_mask:
+            cube_path = self.isosurface_density_cube
+            if cube_path is None or not str(cube_path).strip():
+                raise ValueError(
+                    "density mask requires a density cube path; the isosurface "
+                    "was not masked and no cutoff was chosen automatically"
+                )
+            if self.isosurface_density_cutoff is None:
+                raise ValueError(
+                    "density mask requires ρ_cut > 0 in e/Bohr^3; the cutoff "
+                    "is not chosen automatically"
+                )
+            cutoff = float(self.isosurface_density_cutoff)
+            if not np.isfinite(cutoff) or cutoff <= 0.0:
+                raise ValueError(
+                    "isosurface_density_cutoff must be finite and > 0 in "
+                    "e/Bohr^3. Values in e/Å^3 are not accepted or converted."
+                )
+            object.__setattr__(self, "isosurface_density_cutoff", cutoff)
+            object.__setattr__(self, "isosurface_density_cube", str(cube_path))
         lat, lon = self.sphere_detail
         if int(lat) != lat or int(lon) != lon or int(lat) < 2 or int(lon) < 3:
             raise ValueError("sphere_detail must be at least (2, 3)")

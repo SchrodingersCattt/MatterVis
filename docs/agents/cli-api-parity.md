@@ -10,7 +10,7 @@ scalar controls and repeatable selector rules for mixed styles.
 | Unit-cell boundary replicas | `--include-boundary-replicas` / `--no-boundary-replicas` |
 | Camera axis, direction, position, target, up, projection, fit distance, FOV, orthographic scale, zoom, framing margin, and clipping | `--camera-axis`, `--view-direction`, `--camera-position`, `--camera-target`, `--camera-up`, `--orthogonal` / `--perspective`, `--camera-distance`, `--field-of-view`, `--ortho-scale`, `--zoom`, `--framing-margin`, `--camera-clip` |
 | Representation, shading, backend, canvas, background, atom/bond scale, visibility, cell, labels, rings, and ORTEP | Direct `mat-vis render` flags |
-| Cube isosurface mode, phase colors, stride, material, and a second scalar cube sampled in physical coordinates | `--isosurface-mode`, `--isosurface-color-cube`, `--isosurface-color-range`, `--isosurface-color-center`, `--isosurface-colormap`, and the other `--isosurface-*` flags |
+| Cube isosurface mode, phase colors, stride, material, a second scalar cube sampled in physical coordinates, and an opt-in density ceiling | `--isosurface-mode`, `--isosurface-color-cube`, `--isosurface-color-range`, `--isosurface-color-center`, `--isosurface-colormap`, `--isosurface-density-mask`, `--isosurface-density-cube`, `--isosurface-density-cutoff`, and the other `--isosurface-*` flags. `--periodic-isosurface` is rejected: CPU meshes do not close cell faces |
 | Sphere and cylinder mesh quality | `--sphere-detail`, `--cylinder-sides` |
 | Per-atom selector styles and materials | Repeatable `--atom-group` |
 | Per-bond selector styles and paint | Repeatable `--bond-group` |

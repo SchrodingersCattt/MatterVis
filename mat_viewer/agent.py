@@ -203,11 +203,25 @@ def prepare_render(
         from .render.planning import _coerce_render_spec
 
         effective_spec = _coerce_render_spec(render_spec)
+        from .cube.io import read_cube
+
         color_cube = None
         if effective_spec.isosurface_color_cube:
-            from .cube.io import read_cube
-
             color_cube = read_cube(effective_spec.isosurface_color_cube)
+        # A density cube stored on the spec is not read, and cannot clip an
+        # orbital or density isosurface, unless this render turns the mask on.
+        density_cube = None
+        density_cutoff = None
+        if effective_spec.isosurface_density_mask:
+            density_path = effective_spec.isosurface_density_cube
+            if not density_path or effective_spec.isosurface_density_cutoff is None:
+                raise ValueError(
+                    "density mask requires a density cube and ρ_cut > 0 in "
+                    "e/Bohr^3; the isosurface was not masked and no cutoff "
+                    "was chosen automatically"
+                )
+            density_cube = read_cube(density_path)
+            density_cutoff = effective_spec.isosurface_density_cutoff
         source = ensure_cube_isosurfaces(
             source,
             isovalue=effective_spec.isosurface_isovalue,
@@ -221,6 +235,9 @@ def prepare_render(
             color_range=effective_spec.isosurface_color_range,
             color_center=effective_spec.isosurface_color_center,
             colormap=effective_spec.isosurface_colormap,
+            density_mask=effective_spec.isosurface_density_mask,
+            density_cube=density_cube,
+            density_cutoff=density_cutoff,
         )
     resolve_requirements("cpu").require()
     from .render.planning import prepare_render as _prepare_render
