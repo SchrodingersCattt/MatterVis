@@ -119,6 +119,71 @@ const plot=sandbox.window.Plotly;
   await plot.react(gd,[],orthoFrame);
   assert.equal(calls.at(-1).scene.camera.eye.x,9,'drag eye was replaced');
   assert.equal(calls.at(-1).scene.camera.projection.type,'orthographic','commanded projection was dropped');
+
+  // A wheel the orbit controller did not adopt must survive a same-revision
+  // return. The layout eye is that pose; the live eye is the previous radius.
+  sandbox.window.__mvUnadoptedWheel={sceneId:'b',camera:camera(4)};
+  live=camera(9);
+  const zoomed=layout(7,'b__1','b');
+  zoomed.scene.camera=camera(4);
+  zoomed.meta.mattervis_render.camera_revision=1;
+  await plot.react(gd,[],zoomed);
+  assert.equal(calls.at(-1).scene.camera.eye.x,4,'acknowledged zoom replaced by stale live eye');
+
+  // A layout that is not the wheel pose still loses to the live eye.
+  sandbox.window.__mvUnadoptedWheel={sceneId:'b',camera:camera(4)};
+  live=camera(9);
+  const unrelated=layout(8,'b__1','b');
+  unrelated.scene.camera=camera(1);
+  unrelated.meta.mattervis_render.camera_revision=1;
+  await plot.react(gd,[],unrelated);
+  assert.equal(calls.at(-1).scene.camera.eye.x,9,'stale layout replaced the live eye');
+
+  // Once the gl eye shows the wheel pose, a later frame keeps that live eye.
+  sandbox.window.__mvUnadoptedWheel={sceneId:'b',camera:camera(4)};
+  live=camera(4);
+  const afterAdopt=layout(9,'b__1','b');
+  afterAdopt.scene.camera=camera(1);
+  afterAdopt.meta.mattervis_render.camera_revision=1;
+  await plot.react(gd,[],afterAdopt);
+  assert.equal(calls.at(-1).scene.camera.eye.x,4,'adopted wheel eye was replaced');
+  assert.equal(sandbox.window.__mvUnadoptedWheel,null,'adopted wheel stayed pending');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_overlapping_camera_relayouts_keep_the_suppress_count():
+    """The first camera relayout to finish must not clear the signal for the one still running."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const gd={layout:{scene:{camera:{eye:{x:1,y:0,z:0}}}},_fullLayout:{scene:{camera:{},_scene:{getCamera:()=>null}}}};
+let pending=[];
+function relayout() { return new Promise(resolve=>pending.push(resolve)); }
+const sandbox={console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout,clearTimeout,
+  window:{Plotly:{relayout,react:relayout,newPlot:relayout}},
+  document:{getElementById:()=>null,addEventListener:()=>{}}};
+vm.createContext(sandbox);
+const end=source.indexOf('  // ── Right-click menu');
+vm.runInContext(source.slice(0,end)+'})();',sandbox);
+(async()=>{
+  const plot=sandbox.window.Plotly;
+  const first=plot.relayout(gd,{'scene.camera.eye':{x:2,y:0,z:0}});
+  const second=plot.relayout(gd,{'scene.camera.eye':{x:3,y:0,z:0}});
+  assert.equal(sandbox.window.__mvAllowCameraRelayout,2,'overlapping relayouts shared one boolean');
+  pending[0]();
+  await first;
+  assert.equal(sandbox.window.__mvAllowCameraRelayout,1,'the first relayout cleared the second');
+  pending[1]();
+  await second;
+  assert.equal(sandbox.window.__mvAllowCameraRelayout,0,'a finished pair left the signal held');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,

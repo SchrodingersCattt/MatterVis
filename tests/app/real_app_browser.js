@@ -1143,7 +1143,7 @@ async function runSemanticPick(page) {
 // paints well above this; the axes triad is an SVG overlay, not canvas ink.
 const CANVAS_INK_FLOOR = 0.02;
 
-function pngInk(png) {
+function pngStats(png) {
   let offset = 8;
   let width = 0;
   let height = 0;
@@ -1205,7 +1205,11 @@ function pngInk(png) {
     }
     row.copy(prev);
   }
-  return ink / Math.max(total, 1);
+  return {nonwhite: ink, total, ratio: ink / Math.max(total, 1)};
+}
+
+function pngInk(png) {
+  return pngStats(png).ratio;
 }
 
 async function canvasInk(page) {
@@ -1677,6 +1681,386 @@ async function runSurfacePick(page) {
 }
 
 
+const MODEL_PIXEL_FLOOR = 400;
+const BOUNDS_ABS_TOLERANCE = 1e-4;
+
+function rangesMeaningfullyDiffer(left, right) {
+  if (!left || !right) return false;
+  for (let axis = 0; axis < 3; axis += 1) {
+    if (!left[axis] || !right[axis]) return false;
+    const shift = Math.abs(left[axis][0] - right[axis][0]) + Math.abs(left[axis][1] - right[axis][1]);
+    if (shift > 0.5) return true;
+  }
+  return false;
+}
+
+async function readLiveModel(page) {
+  const marked = await page.evaluate(() => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    const glplot = scene && scene.glplot;
+    document.querySelectorAll("[data-mv-live-gl]").forEach((node) => node.removeAttribute("data-mv-live-gl"));
+    const canvas = glplot && glplot.canvas;
+    if (canvas) canvas.setAttribute("data-mv-live-gl", "1");
+    if (!gd || !scene || !glplot || !canvas) return {ok: false, reason: "graph"};
+    const layoutScene = gd.layout && gd.layout.scene;
+    const axes = ["xaxis", "yaxis", "zaxis"];
+    const ranges = axes.map((name) => {
+      const range = layoutScene && layoutScene[name] && layoutScene[name].range;
+      return Array.isArray(range) ? [Number(range[0]), Number(range[1])] : null;
+    });
+    const scale = Array.isArray(scene.dataScale) ? scene.dataScale.map(Number) : null;
+    const bounds = glplot.bounds;
+    let boundsError = Infinity;
+    if (scale && scale.length === 3 && bounds && bounds.length === 2 && ranges.every((range) => range && range.every(Number.isFinite))) {
+      boundsError = 0;
+      for (let axis = 0; axis < 3; axis += 1) {
+        for (let end = 0; end < 2; end += 1) {
+          const expected = ranges[axis][end] * scale[axis];
+          boundsError = Math.max(boundsError, Math.abs(expected - Number(bounds[end][axis])));
+        }
+      }
+    }
+    function boxOf(value) {
+      if (!value || value.length < 2 || !value[0] || !value[1]) return null;
+      const box = [[Number(value[0][0]), Number(value[0][1]), Number(value[0][2])],
+        [Number(value[1][0]), Number(value[1][1]), Number(value[1][2])]];
+      return box.every((row) => row.every(Number.isFinite)) ? box : null;
+    }
+    function overlaps(mesh, clip) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const lo = Math.max(Math.min(mesh[0][axis], mesh[1][axis]), Math.min(clip[0][axis], clip[1][axis]));
+        const hi = Math.min(Math.max(mesh[0][axis], mesh[1][axis]), Math.max(clip[0][axis], clip[1][axis]));
+        if (!(hi > lo)) return false;
+      }
+      return true;
+    }
+    const clip = boxOf(bounds);
+    const meshes = (glplot.objects || []).filter((obj) => obj && obj._trace && boxOf(obj.bounds));
+    const overlap = !!(clip && meshes.some((obj) => overlaps(boxOf(obj.bounds), clip)));
+    function matrix16(value) {
+      if (!value || typeof value.length !== "number" || value.length < 16) return null;
+      const nums = Array.prototype.slice.call(value, 0, 16).map(Number);
+      return nums.every(Number.isFinite) ? nums : null;
+    }
+    const camera = scene.camera || {};
+    const glCamera = glplot.camera || {};
+    let viewMatrix = null;
+    try {
+      viewMatrix = camera.view && (camera.view._matrix || (typeof camera.view.lastT === "function" ? camera.view.lastT() : null));
+    } catch (_) { viewMatrix = null; }
+    const model = matrix16(glplot.cameraParams && glplot.cameraParams.model)
+      || matrix16(camera.cameraParams && camera.cameraParams.model)
+      || matrix16(glCamera.cameraParams && glCamera.cameraParams.model)
+      || matrix16(viewMatrix)
+      || matrix16(glCamera.view && glCamera.view._matrix);
+    const gl = canvas.__mvGL;
+    const meta = gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    const radio = document.querySelector("#view-projection input:checked");
+    const projection = scene.camera && scene.camera._ortho ? "orthographic" : "perspective";
+    return {
+      ok: true,
+      projection,
+      radio: radio ? radio.value : "",
+      sceneId: meta && meta.scene_id ? String(meta.scene_id) : "",
+      traces: Array.isArray(gd.data) ? gd.data.length : 0,
+      ranges,
+      boundsError,
+      overlap,
+      meshCount: meshes.length,
+      modelFinite: !!model,
+      modelKind: glplot.cameraParams && glplot.cameraParams.model
+        ? String((glplot.cameraParams.model.constructor && glplot.cameraParams.model.constructor.name) || typeof glplot.cameraParams.model)
+          + ":" + glplot.cameraParams.model.length
+        : "missing",
+      traceCount: scene.traces && typeof scene.traces === "object" ? Object.keys(scene.traces).length : 0,
+      objectCount: glplot.objects ? glplot.objects.length : 0,
+      contextMatch: !!(canvas && gd.__mvContextLossCanvas === canvas),
+      defaultBounds: !!(bounds && bounds[0] && bounds[1]
+        && bounds[0][0] === -10 && bounds[0][1] === -10 && bounds[0][2] === -10
+        && bounds[1][0] === 10 && bounds[1][1] === 10 && bounds[1][2] === 10),
+      contextLost: !!(gl && gl.isContextLost && gl.isContextLost()),
+      glError: gl && gl.getError ? gl.getError() : null,
+      webgl: (window.__mvCensus || {}).webglContexts || 0,
+      canvases: document.querySelectorAll("#crystal-graph canvas").length,
+      eye: scene.camera && scene.camera.eye ? Array.prototype.slice.call(scene.camera.eye, 0, 3).map(Number) : null,
+    };
+  });
+  if (!marked || !marked.ok) return marked || {ok: false, reason: "graph"};
+  const png = await page.locator("[data-mv-live-gl='1']").screenshot();
+  const pixels = pngStats(png);
+  return Object.assign({}, marked, pixels);
+}
+
+function modelFailure(sample, label) {
+  if (!sample || !sample.ok) return label + " graph was not ready " + JSON.stringify(sample);
+  if (!(sample.nonwhite >= MODEL_PIXEL_FLOOR)) {
+    return label + " model region is blank (" + sample.nonwhite + "/" + sample.total + " nonwhite pixels)";
+  }
+  if (!(sample.boundsError <= BOUNDS_ABS_TOLERANCE)) {
+    return label + " clip bounds do not match axis range times dataScale (" + sample.boundsError + ")";
+  }
+  if (!sample.overlap) return label + " no mesh overlaps the clip box " + JSON.stringify({meshes: sample.meshCount});
+  if (!sample.modelFinite) return label + " model matrix is not finite";
+  if (sample.contextLost) return label + " WebGL context is lost";
+  if (sample.glError) return label + " WebGL error " + sample.glError;
+  if (!(sample.traces > 0)) return label + " has no traces";
+  return "";
+}
+
+async function waitForLiveModel(page, projection) {
+  const deadline = Date.now() + 30000;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await readLiveModel(page).catch((error) => ({ok: false, reason: String(error)}));
+    const failure = modelFailure(last, projection);
+    if (!failure && last.projection === projection && (!last.radio || last.radio === projection)) return last;
+    await page.waitForTimeout(200);
+  }
+  fail((modelFailure(last, projection) || "projection did not settle") + " " + JSON.stringify(last));
+}
+
+async function chooseProjection(page, name, projection) {
+  await clickTab(page, name);
+  await waitForServerState(page, async () => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    const controls = document.getElementById("scene-controls-scene");
+    if (!meta || !meta.scene_id || !controls || !controls.textContent) return false;
+    let acknowledged = {};
+    try { acknowledged = JSON.parse(controls.textContent); } catch (_) { return false; }
+    return acknowledged.scene_id === meta.scene_id;
+  }, null, {timeout: 30000});
+  const radio = page.locator("#view-projection input[value='" + projection + "']");
+  if (!await radio.isChecked()) await radio.click();
+  await waitForServerState(page, async (wanted) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    if (!scene || !scene.camera) return false;
+    const ortho = !!scene.camera._ortho;
+    if ((wanted === "orthographic") !== ortho) return false;
+    const meta = gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    if (!meta || !meta.scene_id) return false;
+    const state = await fetch("/api/v2/state?scene_id=" + encodeURIComponent(meta.scene_id), {cache: "no-store"})
+      .then((response) => response.json());
+    const control = document.querySelector("#view-projection input:checked");
+    return state.projection === wanted && (!control || control.value === wanted);
+  }, projection, {timeout: 30000});
+  return waitForLiveModel(page, projection);
+}
+
+async function runProjectionScaleSwitch(page) {
+  await graphReady(page);
+  const consoleStart = consoleEvents.length;
+  const orthographic = await chooseProjection(page, "DAP-4", "orthographic");
+  const perspective = await chooseProjection(page, "ionic_nacl", "perspective");
+  if (orthographic.sceneId === perspective.sceneId) {
+    fail("projection switch used one scene twice " + orthographic.sceneId);
+  }
+  if (!rangesMeaningfullyDiffer(orthographic.ranges, perspective.ranges)) {
+    fail("fixtures do not differ in axis range " + JSON.stringify({
+      orthographic: orthographic.ranges, perspective: perspective.ranges,
+    }));
+  }
+  log("orthographic to perspective " + JSON.stringify({
+    pixels: perspective.nonwhite, boundsError: perspective.boundsError, webgl: perspective.webgl,
+  }));
+  const back = await clickTab(page, "DAP-4").then(() => waitForLiveModel(page, "orthographic"));
+  log("perspective to orthographic " + JSON.stringify({
+    pixels: back.nonwhite, boundsError: back.boundsError, webgl: back.webgl,
+  }));
+  let maxWebgl = Math.max(perspective.webgl, back.webgl);
+  let maxCanvases = Math.max(perspective.canvases, back.canvases);
+  for (let step = 0; step < 4; step += 1) {
+    const name = step % 2 === 0 ? "ionic_nacl" : "DAP-4";
+    const projection = step % 2 === 0 ? "perspective" : "orthographic";
+    await clickTab(page, name);
+    const sample = await waitForLiveModel(page, projection);
+    maxWebgl = Math.max(maxWebgl, sample.webgl);
+    maxCanvases = Math.max(maxCanvases, sample.canvases);
+  }
+  if (maxWebgl > 2) fail("WebGL contexts grew across projection switches " + maxWebgl);
+  if (maxCanvases > 3) fail("canvases grew across projection switches " + maxCanvases);
+  const canvas = page.locator("[data-mv-live-gl='1']");
+  const box = await canvas.boundingBox();
+  if (!box) fail("live canvas has no box for the drag");
+  const beforeDrag = await readView(page);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2 + 36, {steps: 6});
+  await page.mouse.up();
+  await page.waitForFunction((previous) => {
+    const eye = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera.eye;
+    if (!eye) return false;
+    const next = [0, 1, 2].map((index) => Number(eye[index]));
+    return next.every(Number.isFinite) && Math.hypot(next[0] - previous[0], next[1] - previous[1], next[2] - previous[2]) > 0.02;
+  }, beforeDrag.eye ? [
+    eyeComponent(beforeDrag.eye, 0, "x"),
+    eyeComponent(beforeDrag.eye, 1, "y"),
+    eyeComponent(beforeDrag.eye, 2, "z"),
+  ] : [0, 0, 0], {timeout: 20000});
+  const dragged = await waitForLiveModel(page, "orthographic");
+  await page.locator("#canvas-view-fit").click();
+  const fitted = await waitForLiveModel(page, "orthographic");
+  await page.locator("#canvas-view-reset").click();
+  const reset = await waitForLiveModel(page, "orthographic");
+  if (reset.radio && reset.radio !== "orthographic") fail("reset changed the projection radio to " + reset.radio);
+  log("projection-scale continuity " + JSON.stringify({
+    dragged: dragged.nonwhite, fitted: fitted.nonwhite, reset: reset.nonwhite,
+    maxWebgl, maxCanvases,
+  }));
+  const pageErrors = consoleEvents.slice(consoleStart).filter((event) => event.type === "pageerror");
+  if (pageErrors.length) fail("page error during projection switch " + pageErrors.map((event) => event.text).join("\n"));
+}
+
+function assertPopulatedRenderer(sample, label) {
+  const failure = modelFailure(sample, label);
+  if (failure) fail(failure);
+  if (!(sample.traceCount > 0)) fail(label + " live scene.traces is empty");
+  if (!(sample.objectCount > 0)) fail(label + " live glplot.objects is empty");
+  if (sample.defaultBounds) fail(label + " clip box is the empty default");
+  if (!sample.contextMatch) fail(label + " context-loss listener is not on the live canvas");
+}
+
+async function emptyPreviewDoesNotTouchViewport(page) {
+  const calls = await page.evaluate(async () => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const scene = gd._fullLayout.scene._scene;
+    let calls = 0;
+    const original = scene.setViewport;
+    scene.setViewport = function () {
+      calls += 1;
+      return original.apply(this, arguments);
+    };
+    let frames = 0;
+    const raf = window.requestAnimationFrame;
+    window.requestAnimationFrame = function () { frames += 1; return 0; };
+    try {
+      window.MatterVisDisorderPreview.prepare({replicas: []});
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    } finally {
+      scene.setViewport = original;
+      window.requestAnimationFrame = raf;
+    }
+    return {calls, frames};
+  });
+  if (calls.calls !== 0 || calls.frames !== 0) {
+    fail("empty disorder preview touched the viewport " + JSON.stringify(calls));
+  }
+}
+
+async function runRendererLifecycle(page) {
+  await graphReady(page);
+  await chooseProjection(page, "DAP-4", "perspective");
+  await chooseProjection(page, "ionic_nacl", "orthographic");
+  const toOrthographic = await waitForLiveModel(page, "orthographic");
+  assertPopulatedRenderer(toOrthographic, "perspective to orthographic");
+  await emptyPreviewDoesNotTouchViewport(page);
+  await page.reload({waitUntil: "domcontentloaded"});
+  await graphReady(page);
+  await chooseProjection(page, "DAP-4", "perspective");
+  await page.evaluate(() => {
+    window.__mvPreviewDuringSwitch = 0;
+    const preview = window.MatterVisDisorderPreview;
+    const original = preview.prepare;
+    preview.prepare = function (store) {
+      window.__mvPreviewDuringSwitch += 1;
+      return original.call(this, store || {replicas: []});
+    };
+  });
+  await clickTab(page, "ionic_nacl");
+  await page.evaluate(() => window.MatterVisDisorderPreview.prepare({replicas: []}));
+  const orthographic = await waitForLiveModel(page, "orthographic");
+  assertPopulatedRenderer(orthographic, "reloaded perspective to orthographic");
+  await clickTab(page, "DAP-4");
+  await page.evaluate(() => window.MatterVisDisorderPreview.prepare({replicas: []}));
+  const perspective = await waitForLiveModel(page, "perspective");
+  assertPopulatedRenderer(perspective, "orthographic to perspective");
+  const restored = await page.evaluate(async () => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const scene = gd._fullLayout.scene._scene;
+    const ortho = !!scene.camera._ortho;
+    const opposite = ortho ? "perspective" : "orthographic";
+    const home = ortho ? "orthographic" : "perspective";
+    let calls = 0;
+    const original = scene.setViewport;
+    scene.setViewport = function () {
+      calls += 1;
+      return original.apply(this, arguments);
+    };
+    const camera = {
+      eye: {x: 1.55, y: 1.45, z: 1.2},
+      center: {x: 0, y: 0, z: 0},
+      up: {x: 0, y: 0, z: 1},
+    };
+    await window.Plotly.relayout(gd, { "scene.camera": Object.assign({projection: {type: opposite}}, camera) });
+    await window.Plotly.relayout(gd, { "scene.camera": Object.assign({projection: {type: home}}, camera) });
+    scene.setViewport = original;
+    const live = gd._fullLayout.scene._scene;
+    return {
+      calls,
+      home,
+      ortho: !!live.camera._ortho,
+      traces: live.traces ? Object.keys(live.traces).length : 0,
+      objects: live.glplot && live.glplot.objects ? live.glplot.objects.length : 0,
+      contextMatch: gd.__mvContextLossCanvas === live.glplot.canvas,
+    };
+  });
+  if (restored.traces === 0 || restored.objects === 0 || !restored.contextMatch) {
+    fail("whole-camera relayout left an empty renderer " + JSON.stringify(restored));
+  }
+  const afterCamera = await waitForLiveModel(page, restored.home);
+  assertPopulatedRenderer(afterCamera, "whole-camera relayout");
+  const partial = await page.evaluate(async () => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const scene = gd._fullLayout.scene._scene;
+    function vec(value) {
+      return {
+        x: Number(value.x !== undefined ? value.x : value[0]),
+        y: Number(value.y !== undefined ? value.y : value[1]),
+        z: Number(value.z !== undefined ? value.z : value[2]),
+      };
+    }
+    const before = vec(scene.getCamera().eye);
+    const eye = {x: before.x + 0.4, y: before.y, z: before.z};
+    await window.Plotly.relayout(gd, {"scene.camera": {eye: eye}});
+    const moved = Math.abs(vec(scene.getCamera().eye).x - before.x) > 0.15;
+    const home = scene.camera._ortho ? "orthographic" : "perspective";
+    const opposite = home === "orthographic" ? "perspective" : "orthographic";
+    await window.Plotly.relayout(gd, "scene.camera", {projection: {type: opposite}});
+    const flipped = (scene.camera._ortho ? "orthographic" : "perspective") === opposite;
+    await window.Plotly.relayout(gd, {"scene.camera": {projection: {type: home}, eye: before}});
+    const layout = JSON.parse(JSON.stringify(gd.layout));
+    layout.datarevision = String(layout.datarevision || "scene") + "#recover" + Date.now();
+    await window.Plotly.react(gd, gd.data.slice(), layout);
+    const live = gd._fullLayout.scene._scene;
+    return {
+      moved,
+      flipped,
+      traces: live.traces ? Object.keys(live.traces).length : 0,
+      objects: live.glplot && live.glplot.objects ? live.glplot.objects.length : 0,
+    };
+  });
+  if (!partial.moved) fail("eye-only whole-camera relayout left the eye unchanged");
+  if (!partial.flipped) fail("string projection relayout did not change projection");
+  if (!(partial.traces > 0 && partial.objects > 0)) {
+    fail("datarevision replay left the renderer empty " + JSON.stringify(partial));
+  }
+  const afterPartial = await waitForLiveModel(page, await page.evaluate(() => {
+    const scene = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene;
+    return scene.camera._ortho ? "orthographic" : "perspective";
+  }));
+  assertPopulatedRenderer(afterPartial, "partial camera relayout");
+  log("renderer lifecycle " + JSON.stringify({
+    orthographic: orthographic.nonwhite,
+    perspective: perspective.nonwhite,
+    afterCamera: afterCamera.nonwhite,
+    setViewportDuringWholeCamera: restored.calls,
+  }));
+}
+
 let activeBrowser;
 let activeContext;
 let tracingStarted = false;
@@ -1754,10 +2138,13 @@ const networkEvents = [];
   else if (mode === "semantic-pick") await runSemanticPick(page);
   else if (mode === "drag-replot") await runDragReplot(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
+  else if (mode === "projection-scale") await runProjectionScaleSwitch(page);
+  else if (mode === "renderer-lifecycle") await runRendererLifecycle(page);
   else if (mode === "mixed-projection" || mode === "mixed-projection-http") await require("./projection_mixed_browser")(page, clickTab, waitForServerState);
   else if (mode === "projection-radio") await require("./projection_radio_browser")(page, clickTab, waitForServerState);
   else if (mode === "narrow-layout") await require("./narrow_layout_browser")(page, clickTab);
   else if (mode === "formula-unit-transforms") await require("./transform_formula_unit_browser")(page, clickTab, waitForServerState);
+  else if (mode === "camera-roundtrip") await require("./camera_roundtrip_browser")(page, clickTab, waitForServerState);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));
   if (tracing) await context.tracing.stop();

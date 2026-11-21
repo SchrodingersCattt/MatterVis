@@ -180,3 +180,171 @@ If marching cubes reports that the level does not cross the data, choose an
 explicit isovalue inside the scalar range. If isolated noise components remain,
 use the component-size and atom-mask controls deliberately; absence of their
 optional implementation is an error rather than a visual fallback.
+
+## VTK offscreen figures
+
+`mat_viewer.render.vtk_cube.render_cube_figure` is an experimental
+offscreen helper. It writes one PNG through PyVista. It is not a
+`mat-vis render --backend` choice, it does not consume a `RenderPlan`,
+and it is not a second scene authority. Pixel output may differ from
+the CPU and Plotly backends. This helper does not promise cross-backend
+pixel parity.
+
+Depth peeling (`depth_peels`), Taubin smoothing (`taubin_iterations`,
+`taubin_pass_band`), and the native VTK window class are options on this
+helper. The isosurface shade is a shared record, described below.
+
+Install the Python extra with:
+
+```console
+python -m pip install "matter-vis[vtk]"
+```
+
+PyVista is imported only when the function is called. Windows selects
+`vtkWin32OpenGLRenderWindow` and macOS selects `vtkCocoaOpenGLRenderWindow`.
+Neither platform needs `DISPLAY`, OSMesa, or EGL. Headless Linux needs a
+system OSMesa or EGL library (Debian/Ubuntu: `libosmesa6`). Atomaestro does
+not install system libraries. On Linux, if no display and neither library is
+loadable, the call raises `RuntimeError` before opening a window. A missing
+library used to abort the interpreter inside VTK. Set
+`VTK_DEFAULT_OPENGL_WINDOW` to keep a window class the local VTK build
+provides.
+
+The isosurface grid and the color grid share one `origin`, one `axes` matrix,
+and one shape. Voxel vectors are rows. A vertex index `(i, j, k)` is the
+physical point `origin + (i, j, k) @ axes`, the same frame as `CubeData`.
+Resample a color cube that uses a different grid before calling this
+function. Omit `color_min` and `color_max` to use the finite minimum and
+maximum of the color grid. A constant grid with no range uses the colormap
+midpoint. `color_center` places one value, often zero, at the middle of an
+asymmetric range; omitting it keeps a linear map. `colormap_stops` is a
+sequence of at least two RGB triples in `0..255`. The default stops run blue,
+cyan, green, yellow, red.
+
+`isovalue=None` uses `default_isovalue`. One level is drawn. `periodic=True`
+appends the wrapped endpoint plane (index `N` copies index 0), the same
+closure as the CPU cube path, so the surface can reach the cell faces.
+`repeat` translates the finished mesh, the atoms, and the supplied bonds by
+`axes * shape`. It is not `periodic_image_policy`. Pass
+`bond_finder(xyz, atomic_numbers)` when contacts that cross a cell boundary
+have to be chosen after the repeat. This function does not choose elements
+or distance cutoffs. Colors and radii are caller-supplied maps keyed by
+atomic number.
+
+The isosurface shade is a `FigureShade` from
+`mat_viewer.render.figure_shade`:
+
+```python
+from mat_viewer.render.figure_shade import FigureShade
+
+surface = FigureShade(ambient=0.7, diffuse=0.45, specular=0.08, shininess=15)
+```
+
+Pass it as `surface=surface`. The fields are ambient, diffuse, specular,
+and shininess. Those names are the shared Blinn–Phong coefficients: three
+independent weights and a highlight exponent. This helper does not define
+`SurfaceMaterial`, `MaterialSpec`, or `LightingRig`, does not look up
+presets, and does not rename or rescale the four numbers. A mapping or any
+other record that carries those four attributes is accepted in place of
+`FigureShade`. `id` on that record is a label and is ignored. Optional
+`specular_tint`, `specular_color`, and Fresnel fields are read with the
+same meaning as the shared surface record. `shininess` is the highlight
+exponent. This helper lowers it to VTK specular power (the Phong exponent),
+not a 0–1 weight.
+
+`lighting` selects how those coefficients are evaluated. Omit it to keep
+the experimental three-light rig. That rig is not `studio_soft` and not
+`studio_three_point`. A string id or a rig-shaped record (`id`, `kind`,
+`direction`, `light_scale`) is accepted without defining `LightingRig`.
+`studio_soft` (`kind="camera_directional"`, direction `(-0.32, 0.42, 1.0)`,
+`light_scale` 1) installs that one camera-space light (`+Z` toward the
+camera). `unlit` draws inherited colors and does not apply the directional
+shade; the stored coefficients stay as given. `studio_three_point`
+(`kind="multi_light"`) is rejected because that rig stores no directions
+and this helper will not invent a rig under that name. A non-unit
+`light_scale`, another camera-directional id, or a different
+`studio_soft` direction is rejected rather than retuned. Fresnel fields
+(`glass_like`), `specular_tint="base"`, a non-white `specular_color`, and
+`opacity` or `light_scale` on the material record are rejected the same
+way. The adapter does not claim CPU or Plotly pixel parity.
+
+Omit `surface` to keep `surface_ambient`, `surface_diffuse`,
+`surface_specular`, and `surface_specular_power`. Those arguments are the
+explicit shade only when `surface` is omitted. Their defaults stay 0.7,
+0.45, 0.08, and 15, so existing figures keep their pixels. Passing
+`surface` together with any of those arguments raises `ValueError`. The
+legacy arguments keep the weights in `[0, 1]` and require a positive
+specular power. `FigureShade` uses the shared coefficient rule: the three
+weights are finite and `>= 0`, and `shininess` is finite and `>= 1`.
+
+Atom and bond coefficients are the matching `atom_*` and `bond_*`
+arguments. The renderer lights both sides of the sheet, so an open
+isosurface stays visible when a normal points away from the camera.
+Pass `cell_origin` and `cell_vectors` (three lattice rows) together to draw
+the twelve cell edges; omit both to
+leave the box off. `cell_edge_mode="face"` draws the cell face whose
+outward normal points toward the camera, so opposite `look` directions
+select opposite faces and depth edges stay off; `"box"` keeps all twelve.
+Lattice vectors are rows. The outward normal of fractional face `f=1` is
+the matching column of the inverse; `f=0` uses the opposite column. A row
+of the inverse is not that normal, including on a skew cell with a
+non-axial `look`.
+`bond_color=None`
+paints each half of a stick with the endpoint atom color, starting at the
+atom sphere surface so the midpoint join stays visible; a single RGB triple
+keeps a uniform stick.
+
+`look` and `up` are directions. With the experimental rig, the camera
+distance and the three lights scale with the scene radius. `studio_soft`
+replaces those three lights with the one historical light and does not
+reuse their intensities. The focal point is the center of the mesh and
+atom bounds, so a volume with no atoms still frames. `parallel_scale` is
+the orthographic half-height in the length unit of `axes`. `depth_peels`
+above 1 turns on depth peeling for this window. Taubin smoothing runs before
+colors are sampled onto the moved vertices. A pass that collapses the mesh
+bounds is discarded. Smoothing can pull a periodic boundary off the cell face.
+
+Two calls with the same arrays write the same PNG on one machine. A different
+VTK build can move a few edge pixels.
+
+### Cell boundary policy
+
+`CellBoundaryPolicy` and `cell_clip_planes` in `mat_viewer.render.cell_clip`
+are the shared clipping contract. The domain is the primitive cell, not a
+repeated supercell. The six planes are inward Cartesian half-spaces of the
+fractional faces 0 and 1. Skew and left-handed cells take the outward
+direction from the reciprocal-lattice column and store the inward normal.
+Boundaries are uncapped. `"surface"` clips the isosurface only. `"strict"`
+also clips atoms and bonds. `"none"` does not clip. Source coordinates are
+not modified.
+
+Only the experimental PyVista helper `render_cube_figure` implements this
+policy today. CPU, Plotly, and other backends do not apply these planes and
+do not claim the same clipping or the same pixels. `boundary_policy` on that
+helper is the current implementation of this contract, not a separate VTK
+scene rule.
+
+`render_cube_figure(..., boundary_policy=...)` separates drawing a cell edge
+from clipping geometry. The default `"none"` keeps all explicit atoms, bonds,
+and isosurfaces, including content outside the drawn box. `"surface"` clips
+only the isosurface and respects all explicit atoms and supplied bonds.
+`"strict"` clips the isosurface, atom spheres, and bond tubes at all six cell
+planes. Both clipping modes require `cell_origin` and `cell_vectors`.
+They use the full three-dimensional parallelepiped, including skew and
+left-handed cells, not the screen rectangle of `cell_edge_mode="face"`.
+A projected face outline does not enclose every projection of a skew 3D cell.
+
+Clipping happens in the renderer after smoothing and repetition. It preserves
+color interpolation and does not wrap, remove, or alter the input atoms or
+bond graph. Cuts are uncapped; these modes do not invent a scalar surface or
+solid material on a cut plane. `repeat` does not enlarge the clipping box:
+pass supercell vectors explicitly to clip to a repeated domain, or keep the
+primitive vectors to clip to one cell. With `surface` or `strict`, the camera
+focal point and light distance follow that clipping cell plus geometry the
+policy still draws. `strict` frames the cell, because atoms and bonds outside
+it are removed. `surface` also includes explicit atoms and bonds, which stay
+whole. A repeated isosurface cropped to the primitive cell therefore remains
+in view when `parallel_scale` covers that cell. Image-selection policies such as
+`nearest_atom` choose periodic surface images; they are distinct from these
+clipping policies. The backend-neutral CLI and interactive viewer do not
+take `boundary_policy`.

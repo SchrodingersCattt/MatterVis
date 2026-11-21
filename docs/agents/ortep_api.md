@@ -8,7 +8,29 @@ Atomaestro supports two ORTEP-style paths:
   Dash viewer this path includes a hidden Plotly 3D camera anchor; orbit events
   are converted back to the flat renderer's `view_direction`/`up` basis and
   refresh the embedded image. Static Matplotlib export remains unchanged.
-  derived from the camera projection.
+  The anchor's `layout.scene.camera` is a Plotly camera (`eye`, `center`,
+  `up`, and optional `projection`). A stored legacy `position` /
+  `focal_point` camera is converted before that layout is built. A
+  zero-length look vector uses the existing finite eye fallback. Non-finite
+  components are left for Plotly to reject. The stored scene camera is not
+  rewritten by the figure build.
+  The publication raster is a paper image under that orbit scene. The scene
+  background is transparent so the raster stays visible. An opaque scene
+  background covers the drawing and leaves only the caption. The orbit
+  anchor stores coordinates. An array-valued anchor already counts as
+  geometry. A local viewer of this code also showed those columns as
+  Plotly typed-array objects (`dtype` and non-empty `bdata`), which an
+  array-length check does not see. The camera geometry check counts that
+  payload. Marker opacity is not part of the check. A layout image does
+  not stand in for missing coordinates, and its source is not compared
+  with the scene, generation, or revision. A screenshot that matches the
+  layout image currently on screen shows that this image is the visible
+  picture. It does not show that the image belongs to the current scene,
+  generation, or revision, so a visible but stale image is not evidence
+  of the latest intent. The earlier parent-session
+  camera toast was not captured with its live graph. A later parent
+  session that did not report the toast does not assign that toast to
+  this clause and does not clear it.
 
 The CIF parser reads `_atom_site_aniso_U_*` into `atom["U"]`; missing
 anisotropic data falls back to `_atom_site_U_iso_or_equiv`.

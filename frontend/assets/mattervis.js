@@ -80,6 +80,18 @@
    * burst of camera commands or duplicate Dash/WS frames cannot grow an
    * unbounded promise chain.  Dropped entries are already superseded by a
    * newer frame; resolving them lets their callers recover and continue. */
+  function frameSupersedes(next, queued) {
+    if (!next || !queued || !next.scene || next.scene !== queued.scene) return false;
+    if (queued.pending && !next.pending) return true;
+    if (next.pending && !queued.pending) return false;
+    if (next.generation !== queued.generation) return next.generation > queued.generation;
+    if (next.revision !== queued.revision) return next.revision > queued.revision;
+    if (next.camera !== queued.camera) return next.camera > queued.camera;
+    return true;
+  }
+  function loadingPlaceholder(layout) {
+    return !!(layout && layout.meta && layout.meta.mattervis_pending);
+  }
   function enqueueRender(gd, task, options) {
     if (!gd || typeof task !== "function") return Promise.resolve(gd);
     let queue = gd.__mvRenderQueueState;
@@ -94,8 +106,27 @@
         else item.resolve(gd);
       });
     }
+    // A newer committed frame replaces one for the same scene that has not
+    // started. Newer is a higher scene generation, or the same generation
+    // and a higher render or camera revision. Empty data is not that
+    // comparison. A loading placeholder does not replace a committed frame.
+    if (options && options.supersede) {
+      const next = options.supersede;
+      queue.items = queue.items.filter(function (item) {
+        if (!frameSupersedes(next, item.supersede)) return true;
+        item.resolve(gd);
+        return false;
+      });
+    }
     const result = new Promise(function (resolve, reject) {
-      queue.items.push({task: task, resolve: resolve, reject: reject, isCurrent: options && options.isCurrent});
+      queue.items.push({
+        task: task,
+        resolve: resolve,
+        reject: reject,
+        isCurrent: options && options.isCurrent,
+        frameKey: options && options.frameKey,
+        supersede: options && options.supersede,
+      });
     });
     queue.last = result.catch(function () { return gd; });
     gd.__mvRenderQueue = queue.last;
@@ -118,6 +149,30 @@
     }
     pump();
     return result;
+  }
+  /* Set only around a relayout issued by the queue task that is already
+   * running. External relayouts see a running queue and wait behind it. */
+  function runAsQueueOwner(gd, fn) {
+    const state = gd && gd.__mvRenderQueueState;
+    if (!state || !state.running) return fn();
+    const previous = state.reentrantToken;
+    const token = {};
+    state.reentrantToken = token;
+    let value;
+    try {
+      value = fn();
+    } catch (err) {
+      if (state.reentrantToken === token) state.reentrantToken = previous;
+      throw err;
+    }
+    const finish = function () {
+      if (state.reentrantToken === token) state.reentrantToken = previous;
+    };
+    if (value && typeof value.then === "function") {
+      return value.then(function (result) { finish(); return result; }, function (err) { finish(); throw err; });
+    }
+    finish();
+    return value;
   }
   window.MatterVisRenderQueue = window.MatterVisRenderQueue || {
     enqueue: enqueueRender,
@@ -520,6 +575,172 @@
     if (frameCameraIsStale(render, gd)) return false;
     return true;
   }
+  function finiteCameraVector(value) {
+    if (!value || typeof value !== "object") return null;
+    function num(index, name) {
+      if (value[name] !== undefined && value[name] !== null) return Number(value[name]);
+      return Number(value[index]);
+    }
+    const point = {x: num(0, "x"), y: num(1, "y"), z: num(2, "z")};
+    return [point.x, point.y, point.z].every(Number.isFinite) ? point : null;
+  }
+  /* Expand only the camera fields that were actually supplied. A partial
+   * pose must not be dropped, and an omitted projection must not replace
+   * the live one. A payload with no usable field is left unchanged. */
+  function partialCameraPatch(camera) {
+    if (!camera || typeof camera !== "object" || Array.isArray(camera)) return null;
+    const patch = {};
+    ["eye", "center", "up"].forEach(function (part) {
+      if (!Object.prototype.hasOwnProperty.call(camera, part)) return;
+      const point = finiteCameraVector(camera[part]);
+      if (point) patch["scene.camera." + part] = point;
+    });
+    if (Object.prototype.hasOwnProperty.call(camera, "projection") && camera.projection != null && camera.projection !== "") {
+      const projection = camera.projection.type || camera.projection;
+      if (projection) patch["scene.camera.projection.type"] = String(projection);
+    }
+    return Object.keys(patch).length ? patch : null;
+  }
+  function dottedCameraUpdate(camera) {
+    const patch = partialCameraPatch(camera);
+    if (!patch || !patch["scene.camera.eye"] || !patch["scene.camera.center"] || !patch["scene.camera.up"]) return null;
+    return patch;
+  }
+  /* A whole scene.camera value is an editType "camera" relayout: Plotly calls
+   * setViewport and does not run Scene.plot. Dotted keys, including
+   * projection.type, are calc updates and redraw the meshes. Explicit dotted
+   * keys already on the update win over the expanded whole-camera fields. */
+  function expandWholeCameraRelayout(update) {
+    if (!update || typeof update !== "object" || Array.isArray(update)) return update;
+    const hasTop = update["scene.camera"] && typeof update["scene.camera"] === "object" && !Array.isArray(update["scene.camera"]);
+    const hasNested = update.scene && update.scene.camera && typeof update.scene.camera === "object" && !Array.isArray(update.scene.camera);
+    if (!hasTop && !hasNested) return update;
+    const dotted = {};
+    let expandedAny = false;
+    function absorb(camera) {
+      const part = partialCameraPatch(camera);
+      if (!part) return;
+      expandedAny = true;
+      Object.keys(part).forEach(function (key) { dotted[key] = part[key]; });
+    }
+    if (hasNested) absorb(update.scene.camera);
+    if (hasTop) absorb(update["scene.camera"]);
+    if (!expandedAny) return update;
+    const expanded = Object.assign({}, update);
+    if (hasTop) delete expanded["scene.camera"];
+    if (hasNested) {
+      expanded.scene = Object.assign({}, expanded.scene);
+      delete expanded.scene.camera;
+      if (!Object.keys(expanded.scene).length) delete expanded.scene;
+    }
+    Object.keys(dotted).forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(update, key)) expanded[key] = dotted[key];
+    });
+    return expanded;
+  }
+  function rendererDiag(kind, detail) {
+    const ring = window.__mvRendererDiag || (window.__mvRendererDiag = []);
+    ring.push({at: Date.now(), kind: kind, detail: detail || null});
+    if (ring.length > 20) ring.splice(0, ring.length - 20);
+  }
+  function coordinateValues(value) {
+    if (!value) return false;
+    if (Array.isArray(value) || (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(value))) return value.length > 0;
+    return typeof value === "object" && typeof value.bdata === "string" && value.bdata.length > 0 && !!value.dtype;
+  }
+  function visible3dData(gd) {
+    const data = gd && Array.isArray(gd.data) ? gd.data : [];
+    return data.some(function (trace) {
+      if (!trace || trace.visible === false || trace.visible === "legendonly") return false;
+      const type = String(trace.type || "").toLowerCase();
+      if (type === "mesh3d") return coordinateValues(trace.x) && coordinateValues(trace.i);
+      if (type === "scatter3d" || type === "cone" || type === "streamtube" || type === "surface" || type === "volume" || type === "isosurface") {
+        return coordinateValues(trace.x) || coordinateValues(trace.y) || coordinateValues(trace.z);
+      }
+      return false;
+    });
+  }
+  /* Plotly.js 4.1.1 private gl3d fields. A different published version must
+   * not choose the projection split or the empty-renderer path from them.
+   * Hosts that omit Plotly.version, including the node doubles, still read
+   * the fields those doubles installed. */
+  var PLOTLY_GL3D_PRIVATE_VERSION = "4.1.1";
+  function plotlyPrivateStateAllowed() {
+    const version = window.Plotly && window.Plotly.version;
+    if (version == null || version === "") return true;
+    if (String(version) === PLOTLY_GL3D_PRIVATE_VERSION) return true;
+    rendererDiag("plotly-private-skipped", {version: String(version)});
+    return false;
+  }
+  /* Explicitly empty gl3d state while input traces still exist. Hosts that
+   * do not expose scene.traces and glplot.objects are left to the data check. */
+  function liveRendererEmpty(gd) {
+    if (!plotlyPrivateStateAllowed()) return false;
+    const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    const plot = scene && scene.glplot;
+    if (!plot || !scene.traces || typeof scene.traces !== "object" || Array.isArray(scene.traces) || !Array.isArray(plot.objects)) return false;
+    const canvas = plot.canvas;
+    const gl = canvas && canvas.__mvGL;
+    if (plot.contextLost) return true;
+    if (gl && typeof gl.isContextLost === "function" && gl.isContextLost()) return true;
+    return Object.keys(scene.traces).length === 0 || plot.objects.length === 0;
+  }
+  /* gl3d keeps the previous scene's axis box until a later relayout rebuilds
+   * it. The follow-up is part of the frame task. A rejected relayout is a
+   * failed delivery, not a frame that was adopted. */
+  function sceneBoxRelayout(sceneLayout) {
+    if (!sceneLayout || typeof sceneLayout !== "object") return null;
+    const patch = {};
+    if (sceneLayout.camera) {
+      try { patch["scene.camera"] = JSON.parse(JSON.stringify(sceneLayout.camera)); }
+      catch (_) { return null; }
+    }
+    ["xaxis", "yaxis", "zaxis"].forEach(function (axis) {
+      const range = sceneLayout[axis] && sceneLayout[axis].range;
+      if (Array.isArray(range) && range.length >= 2) {
+        patch["scene." + axis + ".range"] = [range[0], range[1]];
+      }
+    });
+    if (sceneLayout.aspectmode) patch["scene.aspectmode"] = sceneLayout.aspectmode;
+    if (sceneLayout.aspectratio) {
+      try { patch["scene.aspectratio"] = JSON.parse(JSON.stringify(sceneLayout.aspectratio)); }
+      catch (_) {}
+    }
+    if (sceneLayout.uirevision !== undefined) patch["scene.uirevision"] = sceneLayout.uirevision;
+    return Object.keys(patch).length ? patch : null;
+  }
+  function adoptMountedSceneBox(gd, sceneLayout) {
+    const patch = sceneBoxRelayout(sceneLayout);
+    if (!gd || !patch || !window.Plotly || typeof window.Plotly.relayout !== "function") {
+      return Promise.reject(new Error("scene box was not adopted"));
+    }
+    const emit = gd.emit;
+    if (typeof emit === "function") {
+      gd.emit = function (eventName) {
+        if (eventName === "plotly_relayout") return gd;
+        return emit.apply(this, arguments);
+      };
+    }
+    gd.__mvAdoptingSceneBox = true;
+    const clear = function () {
+      gd.__mvAdoptingSceneBox = false;
+      if (typeof emit === "function") gd.emit = emit;
+    };
+    let pending;
+    try { pending = runAsQueueOwner(gd, function () { return window.Plotly.relayout(gd, patch); }); }
+    catch (err) {
+      clear();
+      return Promise.reject(err instanceof Error ? err : new Error("scene box was not adopted"));
+    }
+    return Promise.resolve(pending).then(function (value) {
+      clear();
+      return value;
+    }, function (err) {
+      clear();
+      return Promise.reject(err instanceof Error ? err : new Error("scene box was not adopted"));
+    });
+  }
+  window.MatterVisSceneBox = {patch: sceneBoxRelayout, adopt: adoptMountedSceneBox};
   function installPlotlyRenderGate() {
     if (!window.Plotly) { setTimeout(installPlotlyRenderGate,25); return; }
     function relayoutTouchesCamera(update) {
@@ -554,30 +775,178 @@
       const rightProjection = right.projection && (right.projection.type || right.projection);
       return !leftProjection || !rightProjection || String(leftProjection) === String(rightProjection);
     }
-    function cameraOnlyPatch(camera) {
-      if (!camera || !camera.eye || !camera.center || !camera.up) return null;
-      function vec(value) {
-        function num(index, name) {
-          if (value[name] !== undefined && value[name] !== null) return Number(value[name]);
-          return Number(value[index]);
-        }
-        return {x: num(0, "x"), y: num(1, "y"), z: num(2, "z")};
+    /* A wheel can leave the orbit radius at the previous distance after
+     * the server has the new eye. A same-revision frame would otherwise
+     * copy that stale gl eye over the layout and paint it again. */
+    function layoutOwnsUnadoptedWheel(gd, layoutCamera, liveCamera) {
+      const pending = window.__mvUnadoptedWheel;
+      if (!pending || !pending.camera || !layoutCamera || !liveCamera) return false;
+      if (sameSceneDragInProgress(gd)) return false;
+      const render = renderMetadataFromLayout(gd && gd.layout);
+      const sceneId = render && render.scene_id ? String(render.scene_id) : "";
+      if (!sceneId || String(pending.sceneId || "") !== sceneId) return false;
+      if (camerasClose(liveCamera, pending.camera)) {
+        window.__mvUnadoptedWheel = null;
+        return false;
       }
-      const eye = vec(camera.eye);
-      const center = vec(camera.center);
-      const up = vec(camera.up);
-      const finite = [eye, center, up].every(function (item) {
-        return [item.x, item.y, item.z].every(Number.isFinite);
-      });
-      if (!finite) return null;
-      const patch = {
-        "scene.camera.eye": eye,
-        "scene.camera.center": center,
-        "scene.camera.up": up,
+      return camerasClose(layoutCamera, pending.camera);
+    }
+    /* A boolean would drop to false when the first of two overlapping
+     * camera relayouts settles, and the foreign-scene restore would run
+     * against the one that is still in flight. */
+    function holdCameraRelayout() {
+      window.__mvAllowCameraRelayout = Number(window.__mvAllowCameraRelayout || 0) + 1;
+    }
+    function releaseCameraRelayout() {
+      window.__mvAllowCameraRelayout = Math.max(0, Number(window.__mvAllowCameraRelayout || 0) - 1);
+    }
+    function cameraOnlyPatch(camera) {
+      return dottedCameraUpdate(camera);
+    }
+    function projectionName(camera) {
+      if (!camera || camera.projection == null || camera.projection === "") return "";
+      const value = camera.projection.type || camera.projection;
+      return value ? String(value) : "";
+    }
+    function finiteAxisRanges(scene) {
+      if (!scene) return null;
+      const names = ["xaxis", "yaxis", "zaxis"];
+      const ranges = [];
+      for (let i = 0; i < names.length; i += 1) {
+        const axis = scene[names[i]];
+        const range = axis && axis.range;
+        if (!Array.isArray(range) || range.length < 2) return null;
+        const lo = Number(range[0]);
+        const hi = Number(range[1]);
+        if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+        ranges.push([lo, hi]);
+      }
+      return ranges;
+    }
+    function axisRangesDiffer(left, right) {
+      if (!left || !right) return false;
+      for (let i = 0; i < 3; i += 1) {
+        if (Math.abs(left[i][0] - right[i][0]) > 1e-6) return true;
+        if (Math.abs(left[i][1] - right[i][1]) > 1e-6) return true;
+      }
+      return false;
+    }
+    /* Plotly gl3d 4.1.1 Scene.plot installs the incoming fullSceneLayout and
+     * calls setViewport before it updates dataScale. A projection change
+     * redraws the previous glplot there, and that redraw's computeTickMarks
+     * writes the previous glRange/dataScale back into the new axis ranges.
+     * The clip box is then those stale ranges times the new scale, which
+     * can sit entirely outside the new meshes. Split only the reused-scene
+     * case where the projection and the axis ranges both change: draw the
+     * new geometry while the projection is still the live one, then apply
+     * the requested projection after dataScale and the clip box agree. */
+    /* Plotly's setViewport compares camera.projection.type === "orthographic"
+     * with the live controller's _ortho flag. The flag is the projection
+     * that redraw will see. A layout camera or getCamera() reading can still
+     * name the other projection after an abandoned geometry draw. */
+    function liveProjectionType(gd) {
+      const liveNamed = function () {
+        const live = window.mattervisCurrentCamera && window.mattervisCurrentCamera(gd);
+        const named = projectionName(live);
+        if (named === "orthographic" || named === "perspective") return named;
+        return "";
       };
-      const projection = camera.projection && (camera.projection.type || camera.projection);
-      if (projection) patch["scene.camera.projection.type"] = String(projection);
-      return patch;
+      if (!plotlyPrivateStateAllowed()) return liveNamed();
+      const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+      const controllers = scene ? [scene.camera, scene.glplot && scene.glplot.camera] : [];
+      for (let i = 0; i < controllers.length; i += 1) {
+        const controller = controllers[i];
+        if (controller && typeof controller._ortho === "boolean") {
+          return controller._ortho ? "orthographic" : "perspective";
+        }
+      }
+      const live = window.mattervisCurrentCamera && window.mattervisCurrentCamera(gd);
+      const named = projectionName(live);
+      if (named === "orthographic" || named === "perspective") return named;
+      return "";
+    }
+    /* An omitted projection is perspective: setViewport sets newOrtho from
+     * cameraData.projection.type === "orthographic", which is false when the
+     * camera or its projection was left out. */
+    function incomingProjectionType(layout) {
+      if (!layout || !layout.scene) return "";
+      const named = projectionName(layout.scene.camera);
+      if (named === "orthographic" || named === "perspective") return named;
+      const camera = layout.scene.camera;
+      const omitted = !camera || camera.projection == null || camera.projection === "" || named === "";
+      return omitted ? "perspective" : "";
+    }
+    function projectionRangeSplit(gd, layout) {
+      if (!plotlyPrivateStateAllowed()) return null;
+      const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+      if (!scene || !scene.glplot || !layout || !layout.scene) return null;
+      const incomingType = incomingProjectionType(layout);
+      const liveType = liveProjectionType(gd);
+      if ((incomingType !== "orthographic" && incomingType !== "perspective") ||
+          (liveType !== "orthographic" && liveType !== "perspective") ||
+          incomingType === liveType) return null;
+      const currentScene = (gd._fullLayout && gd._fullLayout.scene) || (gd.layout && gd.layout.scene);
+      if (!axisRangesDiffer(finiteAxisRanges(currentScene), finiteAxisRanges(layout.scene))) return null;
+      return {liveType: liveType, incomingType: incomingType};
+    }
+    /* The projection follow-up's setViewport redraws the previous glplot
+     * before dataScale changes and can write that clip back into the
+     * axis ranges. Putting the intended ranges back, without the
+     * projection, runs Scene.plot while the projection stays put so
+     * the clip box is rebuilt from those ranges. */
+    function axisRangeRepairPatch(sceneLayout) {
+      if (!sceneLayout) return null;
+      const patch = {};
+      ["x", "y", "z"].forEach(function (axis) {
+        const pair = sceneLayout[axis + "axis"] && sceneLayout[axis + "axis"].range;
+        if (!Array.isArray(pair) || pair.length < 2) return;
+        const lo = Number(pair[0]);
+        const hi = Number(pair[1]);
+        if (!Number.isFinite(lo) || !Number.isFinite(hi)) return;
+        patch["scene." + axis + "axis.range"] = [lo, hi];
+      });
+      return Object.keys(patch).length === 3 ? patch : null;
+    }
+    function layoutWithProjection(layout, projectionType) {
+      const scene = Object.assign({}, layout.scene);
+      ["xaxis", "yaxis", "zaxis"].forEach(function (name) {
+        const axis = scene[name];
+        if (!axis || typeof axis !== "object") return;
+        const copy = Object.assign({}, axis);
+        if (Array.isArray(axis.range)) copy.range = axis.range.slice();
+        scene[name] = copy;
+      });
+      const camera = Object.assign({}, scene.camera || {});
+      camera.projection = {type: projectionType};
+      scene.camera = camera;
+      return Object.assign({}, layout, {scene: scene});
+    }
+    function suppressCameraCapture(gd) {
+      if (!gd || typeof gd.emit !== "function") return function () {};
+      const emit = gd.emit;
+      gd.emit = function (eventName, data) {
+        if (eventName === "plotly_relayout" && relayoutTouchesCamera(data)) return gd;
+        return emit.apply(this, arguments);
+      };
+      return function () {
+        if (gd.emit !== emit) gd.emit = emit;
+      };
+    }
+    /* The geometry react and the projection relayout are one FIFO task.
+     * A tab or epoch change that lands while the geometry call is in
+     * flight must not receive the trailing projection. A newer camera
+     * revision is not this fence: that command is replayed after the
+     * frame releases the queue. */
+    function projectionFollowStillCurrent(render) {
+      if (!render) return false;
+      const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
+      if (selected && render.scene_id && String(selected) !== String(render.scene_id)) return false;
+      if (renderServerEpoch && render.server_started_at &&
+          String(renderServerEpoch) !== String(render.server_started_at)) return false;
+      const key = render.scene_id ? String(render.scene_id) : "";
+      if (key && expectedSceneGenerationByScene[key] !== undefined &&
+          String(render.scene_generation || "") !== String(expectedSceneGenerationByScene[key])) return false;
+      return true;
     }
     function sameSceneDragInProgress(gd) {
       if (window.__mvGestureEndedAt) return false;
@@ -644,7 +1013,7 @@
       if (!patch) return Promise.resolve();
       gd.__mvRestoringDrag = true;
       let pending = null;
-      try { pending = window.Plotly.relayout(gd, patch); }
+      try { pending = runAsQueueOwner(gd, function () { return window.Plotly.relayout(gd, patch); }); }
       catch (_) { gd.__mvRestoringDrag = false; return Promise.resolve(); }
       const clear = function () { gd.__mvRestoringDrag = false; };
       if (pending && typeof pending.then === "function") return pending.then(clear, clear);
@@ -654,6 +1023,99 @@
     window.__mvNoteInProgressDrag = noteInProgressDrag;
     window.__mvRestoreInProgressDrag = restoreInProgressDrag;
     window.__mvRetireDragSample = retireDragSample;
+    function wheelPoseOverBook(sceneId, ack) {
+      const pending = window.__mvUnadoptedWheel;
+      if (!pending || !pending.camera || String(pending.sceneId || "") !== String(sceneId || "")) return ack;
+      const pendingRevision = Number(pending.camera_revision);
+      const ackRevision = ack ? Number(ack.camera_revision) : NaN;
+      if (Number.isFinite(pendingRevision) && Number.isFinite(ackRevision) && ackRevision > pendingRevision) {
+        window.__mvUnadoptedWheel = null;
+        return ack;
+      }
+      if (ack && ack.camera && camerasClose(ack.camera, pending.camera)) {
+        window.__mvUnadoptedWheel = null;
+        return ack;
+      }
+      return {
+        camera: pending.camera,
+        camera_revision: Number.isFinite(pendingRevision) ? pendingRevision : (ack ? ack.camera_revision : 0),
+        scene_generation: ack ? ack.scene_generation : null,
+        server_started_at: ack ? ack.server_started_at : null,
+      };
+    }
+    function applyServerCamera(sceneId) {
+      const book = window.__mvServerCameraByScene;
+      let ack = wheelPoseOverBook(sceneId, book && book[String(sceneId || "")]);
+      const graph = graphDiv();
+      if (!ack || !ack.camera || !graph || !window.Plotly || graph.__mvApplyingServerCamera) return Promise.resolve();
+      const mounted = renderMetadataFromLayout(graph.layout);
+      if (!mounted || String(mounted.scene_id || "") !== String(sceneId)) return Promise.resolve();
+      if (sameSceneDragInProgress(graph)) return Promise.resolve();
+      if (ack.scene_generation !== undefined && ack.scene_generation !== null &&
+          mounted.scene_generation !== undefined && mounted.scene_generation !== null &&
+          String(ack.scene_generation) !== String(mounted.scene_generation)) return Promise.resolve();
+      const ackRevision = Number(ack.camera_revision);
+      const shownRevision = Number(mounted.camera_revision || 0);
+      if (Number.isFinite(ackRevision) && ackRevision < shownRevision) return Promise.resolve();
+      if (mounted.server_started_at && ack.server_started_at &&
+          String(mounted.server_started_at) !== String(ack.server_started_at)) return Promise.resolve();
+      const painted = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(graph) : null;
+      if (painted && camerasClose(painted, ack.camera)) return Promise.resolve();
+      const patch = cameraOnlyPatch(ack.camera);
+      if (!patch) return Promise.resolve();
+      /* Plotly keeps the WebGL camera while scene.uirevision is unchanged.
+       * A drag does not advance camera_revision, so the published token
+       * still matches and a dotted eye/center write is ignored. Tie the
+       * token to this pose. Replace only the ack suffix so the token
+       * does not grow on every return. */
+      const currentUi = graph.layout && graph.layout.scene && graph.layout.scene.uirevision;
+      const uiBase = String(currentUi || "scene").split("#ack")[0];
+      const eye = patch["scene.camera.eye"];
+      const center = patch["scene.camera.center"];
+      patch["scene.uirevision"] = uiBase + "#ack" + [eye.x, eye.y, eye.z, center.x, center.y, center.z].map(function (value) {
+        return Number(value).toFixed(4);
+      }).join(",");
+      const still = renderMetadataFromLayout(graph.layout);
+      if (!still || String(still.scene_id || "") !== String(sceneId)) return Promise.resolve();
+      if (ack.scene_generation !== undefined && ack.scene_generation !== null &&
+          still.scene_generation !== undefined && still.scene_generation !== null &&
+          String(ack.scene_generation) !== String(still.scene_generation)) return Promise.resolve();
+      if (Number.isFinite(ackRevision) && ackRevision < Number(still.camera_revision || 0)) return Promise.resolve();
+      graph.__mvApplyingServerCamera = true;
+      graph.__mvOwnedRelayoutDepth = Number(graph.__mvOwnedRelayoutDepth || 0) + 1;
+      const clear = function () {
+        graph.__mvApplyingServerCamera = false;
+        graph.__mvOwnedRelayoutDepth = Math.max(0, Number(graph.__mvOwnedRelayoutDepth || 1) - 1);
+      };
+      let pending = null;
+      try { pending = runAsQueueOwner(graph, function () { return window.Plotly.relayout(graph, patch); }); }
+      catch (err) {
+        clear();
+        return Promise.reject(err);
+      }
+      return Promise.resolve(pending).then(function (value) {
+        clear();
+        /* A dotted eye relayout can leave the orbit radius at the
+         * previous distance. The controller eye is what a later read
+         * and the next tab return paint. */
+        const cameraApi = window.MatterVisViewCamera;
+        if (cameraApi && typeof cameraApi.commitControllerPose === "function") {
+          const scene = graph._fullLayout && graph._fullLayout.scene && graph._fullLayout.scene._scene;
+          const controller = scene && (scene.camera || (scene.glplot && scene.glplot.camera));
+          /* The book may have been the previous distance when this
+           * relayout started. A wheel that landed while it was in
+           * flight is the pose to leave on the controller. */
+          const latest = wheelPoseOverBook(sceneId, (window.__mvServerCameraByScene || {})[String(sceneId || "")]);
+          const pose = latest && latest.camera ? latest.camera : ack.camera;
+          cameraApi.commitControllerPose(controller, pose);
+        }
+        return value;
+      }, function (err) {
+        clear();
+        return Promise.reject(err);
+      });
+    }
+    window.__mvApplyServerCamera = applyServerCamera;
     /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
      * and calls setViewport. Dash keeps only the latest relayoutData, so that
      * size event can hide the offscreen camera payload and the replot can
@@ -696,25 +1158,49 @@
         const objectFigure=fullFigure&&args[1]&&!Array.isArray(args[1])&&typeof args[1]==="object";
         if (fullFigure) layout=objectFigure?args[1].layout:args[2];
         else if (name==="update") layout=args[2];
-        else if (name==="relayout") layout=args[1];
+        else if (name==="relayout") {
+          if (typeof args[1] === "string") {
+            const keyed = {};
+            keyed[args[1]] = args[2];
+            args.splice(2, 1);
+            args[1] = keyed;
+          }
+          layout = args[1];
+        }
         const render=renderMetadataFromLayout(layout);
         const target=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
-        // Dash can replay an older figure prop without MatterVis render
-        // metadata while a selected-scene handoff is still in flight.  The
-        // metadata fence below cannot identify that payload, so it would
-        // overwrite the freshly submitted replacement frame with the previous
-        // scene.  Once a live canvas has a typed scene identity, keep an
-        // untyped full-frame call out when the selected scene has moved on.
+        const incomingTraces = fullFigure
+          ? (objectFigure
+            ? (Array.isArray(args[1].data) ? args[1].data : [])
+            : (Array.isArray(args[1]) ? args[1] : []))
+          : [];
+        // Dash can replay a figure prop without MatterVis render metadata.
+        // Once a live canvas belongs to a scene, an untyped call must not
+        // replace it when the selected scene has moved on, and an untyped
+        // call with no traces must not clear it. A typed complete frame is
+        // applied even when it has no atom coordinates.
         if (fullFigure && target && !render) {
           const shown = renderMetadataFromLayout(target.layout);
           const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
           if (shown && shown.scene_id && selected && String(shown.scene_id) !== String(selected)) {
             return Promise.resolve(target);
           }
+          if (shown && shown.scene_id && !incomingTraces.length) return Promise.resolve(target);
+        }
+        if (fullFigure && render && loadingPlaceholder(layout) && target) {
+          const shownNow = renderMetadataFromLayout(target.layout);
+          const shownPending = !!(target.layout && target.layout.meta && target.layout.meta.mattervis_pending);
+          const selectedNow = typeof currentSceneId === "function" ? currentSceneId() : null;
+          if (shownNow && shownNow.scene_id && !shownPending && selectedNow &&
+              String(shownNow.scene_id) === String(selectedNow) &&
+              String(render.scene_id) === String(selectedNow)) {
+            return Promise.resolve(target);
+          }
         }
         if (name==="relayout" && layout) {
           const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
-          refreshSettledGestureStamp(gd, layout);
+          if (gd && gd.__mvAdoptingSceneBox) return original.apply(this, args);
+          if (typeof refreshSettledGestureStamp === "function") refreshSettledGestureStamp(gd, layout);
           const shown=renderMetadataFromLayout(gd && gd.layout);
           const canvasId=shown && shown.scene_id ? String(shown.scene_id) : "";
           let gestureId=window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
@@ -731,14 +1217,42 @@
             // when its saved camera is actually its own; otherwise drop the
             // relayout so scene A's gesture cannot reframe scene B.
             if (gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner===canvasId) {
-              window.__mvAllowCameraRelayout = true;
-              const restored = original.call(this, gd, {"scene.camera": JSON.parse(JSON.stringify(gd.__mvSceneCamera))});
-              const clearAllow = function () { window.__mvAllowCameraRelayout = false; };
-              if (restored && typeof restored.then === "function") restored.then(clearAllow, clearAllow);
-              else clearAllow();
-              return Promise.resolve(restored);
+              const patch = cameraOnlyPatch(JSON.parse(JSON.stringify(gd.__mvSceneCamera)));
+              if (!patch) return Promise.resolve(gd);
+              const invoke = function () {
+                holdCameraRelayout();
+                let restored;
+                try { restored = original.call(window.Plotly, gd, patch); }
+                catch (err) {
+                  releaseCameraRelayout();
+                  throw err;
+                }
+                const clearAllow = function () {
+                  releaseCameraRelayout();
+                  if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installContextLoss === "function") {
+                    window.MatterVisViewCamera.installContextLoss(gd);
+                  }
+                };
+                if (restored && typeof restored.then === "function") {
+                  return restored.then(function (value) { clearAllow(); return value; }, function (err) { clearAllow(); throw err; });
+                }
+                clearAllow();
+                return restored;
+              };
+              /* Only a relayout issued by the running queue task may run
+               * inline. Any other caller waits behind that task. */
+              const state = gd.__mvRenderQueueState;
+              if (state && state.running && state.reentrantToken) return Promise.resolve().then(invoke);
+              return enqueueRender(gd, invoke);
             }
             return Promise.resolve(gd || args[0]);
+          }
+        }
+        if (name === "relayout") {
+          const expanded = expandWholeCameraRelayout(layout);
+          if (expanded !== layout) {
+            layout = expanded;
+            args[1] = expanded;
           }
         }
         if (render&&!figureMetadataIsCurrent(render,target)) return Promise.resolve(args[0]);
@@ -753,10 +1267,30 @@
         if (fullFigure&&render&&gd) {
           const receiver=this;
           const revision=function(lay) {return lay&&lay.scene&&lay.scene.uirevision!==undefined?lay.scene.uirevision:lay&&lay.uirevision;};
-          const key=JSON.stringify([render.server_started_at,render.scene_id,render.render_revision,render.camera_revision||0,revision(layout)]);
+          // Scene generation is part of the delivered identity. Close/undo
+          // resets the render revision and can reuse the same camera
+          // revision and uirevision on the same scene id.
+          const key=JSON.stringify([
+            render.server_started_at,
+            render.scene_id,
+            String(render.scene_generation||""),
+            render.render_revision,
+            render.camera_revision||0,
+            revision(layout),
+          ]);
           let frameApplied=false;
             const deliver=function() {
-            if (interactionActive) return interactionSettled.then(deliver);
+            /* The frame waits out an in-progress pointer before drawing, but
+             * it must not keep the FIFO closed while it waits. Camera
+             * relayouts during that gesture have to reach Plotly. */
+            if (interactionActive) {
+              const state = gd.__mvRenderQueueState;
+              if (state) state.parked = true;
+              return interactionSettled.then(function () {
+                if (state) state.parked = false;
+                return deliver();
+              });
+            }
             const shown = renderMetadataFromLayout(gd.layout);
             const shownScene = shown && shown.scene_id ? String(shown.scene_id) : "";
             const incomingScene = render.scene_id ? String(render.scene_id) : "";
@@ -765,12 +1299,40 @@
             /* Do not leave the busy pill behind when a stale/duplicate frame
              * is rejected. Mark the request busy only after the frame gate
              * confirms that this Plotly call will actually run. */
+            if (gd.__mvInFlightFrame===key) return gd;
             if (!figureMetadataIsCurrent(render,gd)||alreadyShowing) return gd;
+            if (loadingPlaceholder(layout)) {
+              const shownNow = renderMetadataFromLayout(gd.layout);
+              const shownPending = !!(gd.layout && gd.layout.meta && gd.layout.meta.mattervis_pending);
+              const selectedNow = typeof currentSceneId === "function" ? currentSceneId() : null;
+              if (shownNow && shownNow.scene_id && !shownPending && selectedNow &&
+                  String(shownNow.scene_id) === String(selectedNow) &&
+                  String(render.scene_id) === String(selectedNow)) return gd;
+            }
+            gd.__mvInFlightFrame=key;
             const statusNode = document.getElementById("mv-render-status");
             if (statusNode) {
               statusNode.hidden = false;
               statusNode.textContent = "Rendering structure…";
               statusNode.setAttribute("data-level", "busy");
+            }
+            if (layout && layout.scene && render && render.scene_id && window.__mvFittedFrames) {
+              const superseded = window.MatterVisViewCamera && typeof window.MatterVisViewCamera.noteFigureFrame === "function" && window.MatterVisViewCamera.noteFigureFrame(render, layout);
+              const fitted = window.__mvFittedFrames[String(render.scene_id)];
+              const identityOk = !window.MatterVisViewCamera || typeof window.MatterVisViewCamera.fittedIdentityMatches !== "function" || window.MatterVisViewCamera.fittedIdentityMatches(fitted, render);
+              const fittedAspect = identityOk && fitted && fitted.aspectratio;
+              if (!superseded && fittedAspect && Number.isFinite(Number(fittedAspect.x))) {
+                layout.scene.aspectmode = "manual";
+                layout.scene.aspectratio = {x: Number(fittedAspect.x), y: Number(fittedAspect.y), z: Number(fittedAspect.z)};
+                const fittedRanges = fitted.ranges || {};
+                ["xaxis", "yaxis", "zaxis"].forEach(function (axis) {
+                  const range = fittedRanges[axis[0]];
+                  if (!range || !Number.isFinite(Number(range[0])) || !Number.isFinite(Number(range[1]))) return;
+                  const target = layout.scene[axis] || (layout.scene[axis] = {});
+                  target.autorange = false;
+                  target.range = [Number(range[0]), Number(range[1])];
+                });
+              }
             }
             if (layout && layout.scene) {
               gd.__mvCanonicalViewport = {
@@ -782,12 +1344,15 @@
             let next=layout;
             if (layout.scene&&previous&&previous.scene_id===render.scene_id&&previous.server_started_at===render.server_started_at&&String(previous.scene_generation||"")===String(render.scene_generation||"")&&revision(gd.layout)===revision(layout)) {
               const camera=window.mattervisCurrentCamera&&window.mattervisCurrentCamera(gd);
-              if (camera) {
+              if (camera && !layoutOwnsUnadoptedWheel(gd, layout.scene.camera, camera)) {
                 const liveCamera=JSON.parse(JSON.stringify(camera));
                 /* The live GL camera is often still the previous projection
                  * when an orthographic frame arrives under the same
                  * uirevision. Keep the commanded projection; the eye stays
-                 * live so a drag is not snapped back. */
+                 * live so a drag is not snapped back. A wheel whose radius
+                 * the controller never adopted is the exception: that
+                 * layout eye is the server pose, and copying the live eye
+                 * would paint the previous distance. */
                 const commanded=layout.scene.camera&&layout.scene.camera.projection;
                 const commandedType=commanded&&(commanded.type||commanded);
                 const liveType=liveCamera.projection&&(liveCamera.projection.type||liveCamera.projection);
@@ -797,27 +1362,139 @@
                 next=Object.assign({},layout,{scene:Object.assign({},layout.scene,{camera:liveCamera})});
               }
             }
-            if (objectFigure) args[1]=Object.assign({},args[1],{layout:next});
-            else args[2]=next;
-            return Promise.resolve(original.apply(receiver,args)).then(function(result) {
+            const projectionSplit = projectionRangeSplit(gd, next);
+            const plotted = projectionSplit ? layoutWithProjection(next, projectionSplit.liveType) : next;
+            if (objectFigure) args[1]=Object.assign({},args[1],{layout:plotted});
+            else args[2]=plotted;
+            /* Hold camera relayouts inside this task so the intermediate
+             * geometry frame cannot be stored as the new scene's camera.
+             * The server already owns the camera in the incoming figure. */
+            const releaseCapture = projectionSplit ? suppressCameraCapture(gd) : null;
+            let pending;
+            try {
+              pending = original.apply(receiver, args);
+            } catch (err) {
+              if (releaseCapture) releaseCapture();
+              throw err;
+            }
+            let projectionSettled = !projectionSplit;
+            function replayGeometry() {
+              const replay = args.slice();
+              const stamp = "#recover" + String(Date.now());
+              function bump(lay) {
+                if (!lay || typeof lay !== "object") return lay;
+                const copy = Object.assign({}, lay);
+                copy.datarevision = String(copy.datarevision || "") + stamp;
+                return copy;
+              }
+              if (objectFigure && replay[1] && typeof replay[1] === "object") {
+                const figure = Object.assign({}, replay[1]);
+                if (Array.isArray(figure.data)) figure.data = figure.data.slice();
+                figure.layout = bump(figure.layout);
+                replay[1] = figure;
+              } else {
+                if (Array.isArray(replay[1])) replay[1] = replay[1].slice();
+                replay[2] = bump(replay[2]);
+              }
+              return original.apply(receiver, replay);
+            }
+            function clearRenderStatus() {
+              const done = document.getElementById("mv-render-status");
+              if (!done) return;
+              const level = done.getAttribute("data-level");
+              if (level === "busy" || level === "error") {
+                done.hidden = true;
+                done.textContent = "";
+                done.setAttribute("data-level", "");
+              }
+            }
+            function emptyRendererFailure() {
+              gd.__mvDeliveredFrame = undefined;
+              const failed = document.getElementById("mv-render-status");
+              if (failed) {
+                failed.hidden = false;
+                failed.textContent = "The 3D view did not finish drawing.";
+                failed.setAttribute("data-level", "error");
+              }
+              return Promise.reject(new Error("empty renderer"));
+            }
+            return Promise.resolve(pending).then(function(result) {
+              if (releaseCapture) releaseCapture();
               frameApplied=true;
+              if (!projectionSplit) return result;
+              /* A same-scene drag may still own the eye. Put that eye back
+               * before the projection change, and do not enqueue either
+               * call: both must finish before this FIFO task releases. */
+              return restoreInProgressDrag(gd).then(function () {
+                if (!projectionFollowStillCurrent(render)) return result;
+                const rawRelayout = window.Plotly.relayout && window.Plotly.relayout.__mattervisOriginal;
+                if (typeof rawRelayout !== "function") return result;
+                const releaseFollow = suppressCameraCapture(gd);
+                let follow;
+                try {
+                  follow = rawRelayout.call(window.Plotly, gd, {
+                    "scene.camera.projection.type": projectionSplit.incomingType,
+                  });
+                } catch (err) {
+                  releaseFollow();
+                  throw err;
+                }
+                return Promise.resolve(follow).then(function () {
+                  releaseFollow();
+                  const repair = axisRangeRepairPatch(next && next.scene);
+                  if (!repair) {
+                    projectionSettled = true;
+                    return result;
+                  }
+                  /* A range event here is the frame finishing its own box,
+                   * not a pointer gesture for Dash to store. */
+                  const releaseRepair = suppressCameraCapture(gd);
+                  const emit = gd.emit;
+                  if (typeof emit === "function") {
+                    gd.emit = function (eventName) {
+                      if (eventName === "plotly_relayout") return gd;
+                      return emit.apply(this, arguments);
+                    };
+                  }
+                  const restoreEmit = function () {
+                    if (typeof emit === "function" && gd.emit !== emit) gd.emit = emit;
+                    releaseRepair();
+                  };
+                  let repaired;
+                  try { repaired = rawRelayout.call(window.Plotly, gd, repair); }
+                  catch (err) {
+                    restoreEmit();
+                    throw err;
+                  }
+                  return Promise.resolve(repaired).then(function () {
+                    restoreEmit();
+                    projectionSettled = true;
+                    return result;
+                  }, function (err) {
+                    restoreEmit();
+                    throw err;
+                  });
+                }, function (err) {
+                  releaseFollow();
+                  throw err;
+                });
+              });
+            }, function (err) {
+              if (releaseCapture) releaseCapture();
+              throw err;
+            }).then(function (result) {
+              if (gd.__mvInFlightFrame===key) gd.__mvInFlightFrame="";
+              const done = document.getElementById("mv-render-status");
+              if (done && done.getAttribute("data-level") === "busy") {
+                done.hidden = true;
+                done.textContent = "";
+              }
               /* A Plotly figure replacement can leave the previous hover
                * payload alive on the recycled graph node.  Clear semantic
                * hover state after every complete frame so a right-click on
                * the new scene cannot dispatch an object from the old one. */
               if (typeof window.MatterVisInvalidateSemanticHover === "function") {
                 window.MatterVisInvalidateSemanticHover();
-              }
-              const done = document.getElementById("mv-render-status");
-              if (done && done.getAttribute("data-level") === "busy") {
-                done.hidden = true;
-                done.textContent = "";
-              }
-              gd.__mvDeliveredFrame=key;
-              gd.__mvGraphGeneration=Number(gd.__mvGraphGeneration||0)+1;
-              if (next && next.scene && next.scene.camera) {
-                gd.__mvSceneCamera = JSON.parse(JSON.stringify(next.scene.camera));
-                gd.__mvSceneCameraOwner = String(render.scene_id || "");
               }
               if (typeof releaseStaleWebGL === "function") releaseStaleWebGL(gd);
               if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installWheelZoom === "function") {
@@ -826,12 +1503,86 @@
               if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installCanvasRefit === "function") {
                 window.MatterVisViewCamera.installCanvasRefit(gd);
               }
-              return restoreInProgressDrag(gd).then(function () { return result; });
+              /* A projection relayout disposes the gl3d canvas. The loss
+               * listener is bound to that canvas, so attach it again on the
+               * canvas this frame left mounted. */
+              if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installContextLoss === "function") {
+                window.MatterVisViewCamera.installContextLoss(gd);
+              }
+              /* The geometry react has already replaced the mounted figure.
+               * Advance the generation even when the projection follow-up is
+               * skipped, so a callback stamped with the previous generation
+               * cannot still match. The delivery key stays unset until the
+               * requested projection is the one on screen. */
+              gd.__mvGraphGeneration=Number(gd.__mvGraphGeneration||0)+1;
+              if (!projectionSettled) return result;
+              if (visible3dData(gd) && liveRendererEmpty(gd)) {
+                rendererDiag("empty-renderer", {scene: render && render.scene_id || null});
+                if (!deliver.__mvRendererRetried) {
+                  deliver.__mvRendererRetried = true;
+                  rendererDiag("renderer-recovery", {scene: render && render.scene_id || null});
+                  return Promise.resolve(replayGeometry()).then(function () {
+                    if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installContextLoss === "function") {
+                      window.MatterVisViewCamera.installContextLoss(gd);
+                    }
+                    if (visible3dData(gd) && liveRendererEmpty(gd)) return emptyRendererFailure();
+                    return confirmDelivered(result);
+                  });
+                }
+                return emptyRendererFailure();
+              }
+              return confirmDelivered(result);
+              function confirmDelivered(value) {
+                /* The projection follow-up is the only post-react relayout
+                 * the frame task issues. A same-projection react already
+                 * installs the new ranges. A second scene-box relayout would
+                 * redraw ranges together with a projection change, which is
+                 * the clip this split exists to avoid. Fit restore and the
+                 * acknowledged camera still run here, and a rejection from
+                 * either one leaves the delivery key unset. */
+                return Promise.resolve().then(function () {
+                  const cameraApi = window.MatterVisViewCamera;
+                  const fittedRestore = cameraApi && typeof cameraApi.reapplyFittedFrame === "function"
+                    ? cameraApi.reapplyFittedFrame(gd)
+                    : null;
+                  return Promise.resolve(fittedRestore);
+                }).then(function () {
+                  const sceneId = render && render.scene_id ? String(render.scene_id) : "";
+                  return sceneId ? applyServerCamera(sceneId) : null;
+                }).then(function () {
+                  clearRenderStatus();
+                  gd.__mvDeliveredFrame=key;
+                  if (next && next.scene && next.scene.camera) {
+                    gd.__mvSceneCamera = JSON.parse(JSON.stringify(next.scene.camera));
+                    gd.__mvSceneCameraOwner = String(render.scene_id || "");
+                  }
+                  if (projectionSplit) return value;
+                  return restoreInProgressDrag(gd).then(function () { return value; });
+                });
+              }
+            }, function (err) {
+              if (gd.__mvInFlightFrame===key) gd.__mvInFlightFrame="";
+              const done = document.getElementById("mv-render-status");
+              if (done && done.getAttribute("data-level") === "busy") {
+                done.hidden = true;
+                done.textContent = "";
+              }
+              throw err;
             });
           };
           // Both Dash signatures and WS pass here. Retry after failures;
           // neither receipt nor a rejected react is a delivered frame.
-          return enqueueRender(gd, deliver).then(function (result) {
+          const sceneKey = render && render.scene_id ? String(render.scene_id) : "";
+          return enqueueRender(gd, deliver, {
+            frameKey: key,
+            supersede: {
+              scene: sceneKey,
+              generation: Number(render.scene_generation || 0),
+              revision: Number(render.render_revision || 0),
+              camera: Number(render.camera_revision || 0),
+              pending: loadingPlaceholder(layout),
+            },
+          }).then(function (result) {
             /* An already-running react cannot be cancelled when a newer
              * camera abandons its queue. Restore that command after the
              * frame releases the FIFO, through the bounded camera path. */
@@ -880,12 +1631,37 @@
         }
         const allowCamera = name === "relayout" && layout && (layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
           Object.keys(layout).some(function (key) { return key.indexOf("scene.camera.") === 0; }));
-        if (allowCamera) window.__mvAllowCameraRelayout = true;
-        try {
-          return original.apply(this, args);
-        } finally {
-          if (allowCamera) window.__mvAllowCameraRelayout = false;
+        const queueState = target && target.__mvRenderQueueState;
+        if (allowCamera && queueState && queueState.running && !queueState.reentrantToken && !queueState.parked) {
+          return enqueueRender(target, function () {
+            return original.apply(window.Plotly, args);
+          }).then(function (result) {
+            if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installContextLoss === "function") {
+              window.MatterVisViewCamera.installContextLoss(target);
+            }
+            return result;
+          });
         }
+        if (allowCamera) holdCameraRelayout();
+        let cameraPending;
+        try {
+          cameraPending = original.apply(this, args);
+        } catch (err) {
+          if (allowCamera) releaseCameraRelayout();
+          throw err;
+        }
+        if (!allowCamera) return cameraPending;
+        const clearCameraAllow = function () { releaseCameraRelayout(); };
+        return Promise.resolve(cameraPending).then(function (result) {
+          clearCameraAllow();
+          if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installContextLoss === "function") {
+            window.MatterVisViewCamera.installContextLoss(target);
+          }
+          return result;
+        }, function (err) {
+          clearCameraAllow();
+          throw err;
+        });
       };
       wrapped.__mattervisRenderGate=true;
       wrapped.__mattervisOriginal=original;
@@ -1840,10 +2616,25 @@
     const tool = event.target && event.target.closest && event.target.closest("#canvas-view-reset, #canvas-view-fit");
     if (!tool) return;
     const action = tool.id === "canvas-view-fit" ? "fit" : "reset";
+    const plot = document.querySelector("#crystal-graph .js-plotly-plot");
+    const canvas = plot && plot.querySelector("canvas");
+    const rect = (canvas || plot) && (canvas || plot).getBoundingClientRect ? (canvas || plot).getBoundingClientRect() : null;
+    const bar = document.getElementById("mv-status-bar");
+    const controls = document.getElementById("canvas-view-fit");
+    const limits = [rect ? rect.bottom : 0];
+    if (bar && bar.getBoundingClientRect) limits.push(bar.getBoundingClientRect().top);
+    if (controls && controls.getBoundingClientRect) limits.push(controls.getBoundingClientRect().top);
+    const visibleHeight = rect ? Math.max(1, Math.min.apply(null, limits) - rect.top) : undefined;
     fetch("/api/v2/camera/action", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({action: action, scene_id: currentSceneId()}),
+      body: JSON.stringify({
+        action: action,
+        scene_id: currentSceneId(),
+        width: rect ? rect.width : undefined,
+        height: rect ? rect.height : undefined,
+        visible_height: visibleHeight,
+      }),
     }).catch(function () {});
   });
 
@@ -2292,7 +3083,7 @@
     if (gd && typeof gd.on === "function" && !gd.__mvForeignCameraBound) {
       gd.__mvForeignCameraBound = true;
       gd.on("plotly_relayout", function () {
-        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera || gd.__mvRestoringDrag) return;
+        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera || gd.__mvRestoringDrag || gd.__mvOwnedRelayoutDepth) return;
         restoreOwnedCamera(gestureGeneration, foreignGuardScene());
       });
       gd.on("plotly_afterplot", function () {
@@ -2432,23 +3223,53 @@
     const scene = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
     const live = scene && scene.camera && scene.camera.center;
     if (cameraCenterOffset(live, camera.center) <= FOREIGN_CAMERA_CENTER_TOLERANCE) return;
-    gd.__mvForeignRestore = true;
-    window.__mvRestoreOwnedCamera = true;
-    let pending = null;
-    try {
-      pending = window.Plotly.relayout(gd, {"scene.camera": JSON.parse(JSON.stringify(camera))});
-    } catch (_error) {
-      window.__mvRestoreOwnedCamera = false;
-      gd.__mvForeignRestore = false;
-      return;
-    }
-    const clear = function () {
-      window.__mvRestoreOwnedCamera = false;
-      gd.__mvForeignRestore = false;
+    const patch = dottedCameraUpdate(JSON.parse(JSON.stringify(camera)));
+    if (!patch) return;
+    const owned = {
+      generation: generation,
+      gestureId: foreign,
+      canvasId: canvasId,
+      graphGeneration: Number(gd.__mvGraphGeneration || 0),
+      cameraRevision: Number(gd.__mvCameraRevision),
+      sceneGeneration: render.scene_generation,
     };
-    if (pending && typeof pending.then === "function") pending.then(clear, clear);
-    else clear();
+    gd.__mvForeignRestore = true;
+    const task = function () {
+      const now = renderMetadataFromLayout(gd.layout);
+      const nowId = now && now.scene_id ? String(now.scene_id) : "";
+      const generationMoved = owned.sceneGeneration !== undefined && owned.sceneGeneration !== null &&
+        String((now && now.scene_generation) || "") !== String(owned.sceneGeneration);
+      const revisionMoved = Number.isFinite(owned.cameraRevision) && Number(gd.__mvCameraRevision) !== owned.cameraRevision;
+      const stale = owned.generation !== gestureGeneration || nowId !== owned.canvasId ||
+        Number(gd.__mvGraphGeneration || 0) !== owned.graphGeneration || generationMoved || revisionMoved;
+      if (stale) {
+        window.__mvRestoreOwnedCamera = false;
+        gd.__mvForeignRestore = false;
+        return gd;
+      }
+      window.__mvRestoreOwnedCamera = true;
+      let pending = null;
+      try {
+        pending = window.Plotly.relayout(gd, patch);
+      } catch (_error) {
+        window.__mvRestoreOwnedCamera = false;
+        gd.__mvForeignRestore = false;
+        return gd;
+      }
+      const clear = function () {
+        window.__mvRestoreOwnedCamera = false;
+        gd.__mvForeignRestore = false;
+        if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installContextLoss === "function") {
+          window.MatterVisViewCamera.installContextLoss(gd);
+        }
+      };
+      if (pending && typeof pending.then === "function") return pending.then(function (value) { clear(); return value; }, function () { clear(); return gd; });
+      clear();
+      return pending;
+    };
+    enqueueRender(gd, task);
   }
+  window.__mvTestRestoreOwnedCamera = restoreOwnedCamera;
   function scheduleOwnedCameraRestore(generation, gestureId) {
     if (!gestureId) return;
     const step = function () {
@@ -2522,6 +3343,7 @@
   }, true);
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
+    window.__mvUnadoptedWheel = null;
     if (window.__mvRetireDragSample) window.__mvRetireDragSample();
     window.__mvGestureEndedAt = 0;
     window.__mvGesturePointerRelayoutSeen = false;

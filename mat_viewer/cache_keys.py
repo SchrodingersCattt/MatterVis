@@ -27,6 +27,8 @@ _VOLATILE_STATE_FIELDS = {
     "display_version",
     "camera_version",
     "camera_revision",
+    "camera_aspect_scale",
+    "fit_axis_ranges",
     "projection",
 }
 
@@ -265,6 +267,14 @@ def figure_state_cache_key(state: Mapping[str, Any]) -> str:
         ]
     if state.get("material") == "flat" and state.get("style") == "ortep":
         key_state["camera"] = state.get("camera")
+    scale = state.get("camera_aspect_scale")
+    if scale not in (None, 1, 1.0):
+        key_state["camera_aspect_scale"] = scale
+    # The fitted box is not a geometry revision. It is part of the figure
+    # body, so a real box misses the cache and a null does not.
+    fitted = state.get("fit_axis_ranges")
+    if isinstance(fitted, dict):
+        key_state["fit_axis_ranges"] = fitted
     return json.dumps(key_state, sort_keys=True, separators=(",", ":"))
 
 

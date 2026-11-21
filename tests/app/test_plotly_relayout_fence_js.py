@@ -90,8 +90,9 @@ const fence = sandbox.window.__mvFenceTest;
   gd.__mvSceneCameraOwner = 'canvas-b';
   await plot.relayout(gd, {'scene.camera': {eye: {x: 9, y: 9, z: 9}}});
   assert.equal(calls.length, 1, 'owned canvas camera was not restored');
-  assert.equal(calls[0]['scene.camera'].eye.x, 0);
-  assert.equal(calls[0]['scene.camera'].eye.y, 1);
+  assert.equal(calls[0]['scene.camera'], undefined, 'owned camera was restored as a whole scene.camera object');
+  assert.equal(calls[0]['scene.camera.eye'].x, 0);
+  assert.equal(calls[0]['scene.camera.eye'].y, 1);
 
   sandbox.window.__mvGestureSceneId = 'scene-a';
   sandbox.window.__mvGestureSceneGeneration = 1;

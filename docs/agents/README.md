@@ -43,6 +43,7 @@ The same routing as a quick table:
 | If you want to… | Read |
 |---|---|
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
+| Fit the camera to unit-cell corners or atom extents in either projection | [`dash_service.md`](dash_service.md) |
 | Update an already-open viewer from an external script without reloading the page | [`dash_service.md`](dash_service.md) |
 | Download the active loaded source structure as CIF | [`dash_service.md#rest-endpoints`](dash_service.md) |
 | Detect a running server whose code is older than the files on disk | [`dash_service.md`](dash_service.md) |
@@ -62,6 +63,8 @@ The same routing as a quick table:
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render cube isosurfaces as complete triangulated wireframes | [`cube_api.md`](cube_api.md#isosurface-wireframe) |
 | Color a cube isosurface from a second scalar cube | [`cube_api.md`](cube_api.md#isosurface-color) |
+| Write one offscreen PyVista PNG of a cube isosurface | [`cube_api.md`](cube_api.md#vtk-offscreen-figures) |
+| Clip displayed cube geometry to the primitive cell (experimental PyVista entry today) | [`cube_api.md`](cube_api.md#cell-boundary-policy) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Color atoms by charge, velocity, stress, or another per-atom field | [`atom_property_coloring.md`](atom_property_coloring.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |

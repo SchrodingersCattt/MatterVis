@@ -30,6 +30,7 @@
       delivered = Object.create(null);
       latestCameraRevision = Object.create(null);
       latestVersions = Object.create(null);
+      parkedCameraByScene = Object.create(null);
       root.__mv_view_diag.epochResets = (root.__mv_view_diag.epochResets || 0) + 1;
     }
     root.__mvServerEpoch = epoch;
@@ -40,6 +41,7 @@
       delivered = Object.create(null);
       latestCameraRevision = Object.create(null);
       latestVersions = Object.create(null);
+      parkedCameraByScene = Object.create(null);
       root.__mv_view_diag.remountResets = (root.__mv_view_diag.remountResets || 0) + 1;
     }
     if (gd) root.__mvDeliveryGraph = gd;
@@ -70,7 +72,7 @@
     var v = meta(update);
     var epoch = String(update.server_started_at || render.server_started_at || root.__mvServerEpoch || "");
     var operation = String(update.operation_id || "");
-    return [epoch, scene || render.scene_id || "", String(generationOf(update, gd)), Number(v.geometry_version || v.geometry || 0), Number(v.display_version || 0), Number(v.camera_version || v.camera_revision || 0), operation].join(":");
+    return [epoch, scene || render.scene_id || "", String(generationOf(update, gd)), Number(v.geometry_version || v.geometry || 0), Number(v.display_version || 0), Number(v.camera_version || v.camera_revision || 0), operation, updateKind(update)].join(":");
   }
   function cameraScope(update, gd) {
     var render = currentMeta(gd);
@@ -121,6 +123,74 @@
     }
     return "";
   }
+  var parkedCameraByScene = Object.create(null);
+  function parkKey(scene, generation) {
+    return String(scene || "") + ":" + (present(generation) ? String(generation) : "");
+  }
+  function commandGeneration(update) {
+    var generation = envelopeGeneration(update);
+    return present(generation) ? String(generation) : "";
+  }
+  function cameraWaitsForGeometry(update, gd) {
+    /* Hold a camera command until the canvas traces are that scene and
+     * generation. Matching ids are not enough: the previous generation can
+     * still be the drawn figure, and a resolved react can skip the swap. */
+    if (updateKind(update) !== "camera" || !update || !update.scene_id) return false;
+    var render = currentMeta(gd);
+    var shown = render && render.scene_id ? String(render.scene_id) : "";
+    var scene = String(update.scene_id);
+    var selected = selectedScene();
+    if (selected && selected !== scene) return true;
+    if (!shown || scene !== shown) return true;
+    var want = commandGeneration(update);
+    var have = present(render.scene_generation) ? String(render.scene_generation) : "";
+    return !!(want && have && want !== have);
+  }
+  function parkCamera(update) {
+    var key = parkKey(update.scene_id, commandGeneration(update));
+    var existing = parkedCameraByScene[key];
+    if (existing && cameraRevision(existing) > cameraRevision(update)) return "stale";
+    parkedCameraByScene[key] = update;
+    return "parked";
+  }
+  function tracesMatch(live, submitted) {
+    if (live === submitted) return true;
+    if (!Array.isArray(live) || !Array.isArray(submitted) || live.length !== submitted.length) return false;
+    for (var index = 0; index < live.length; index += 1) {
+      if (live[index] === submitted[index]) continue;
+      var left = live[index] || {};
+      var right = submitted[index] || {};
+      if (String(left.type || "") !== String(right.type || "")) return false;
+      if ((left.name != null || right.name != null) && String(left.name || "") !== String(right.name || "")) return false;
+      var leftX = Array.isArray(left.x) ? left.x.length : null;
+      var rightX = Array.isArray(right.x) ? right.x.length : null;
+      if (leftX !== rightX) return false;
+    }
+    return true;
+  }
+  function figureCommitted(gd, data, renderMeta) {
+    var live = currentMeta(gd);
+    if (String(live.scene_id || "") !== String(renderMeta.scene_id || "")) return false;
+    if (present(renderMeta.scene_generation) && String(live.scene_generation || "") !== String(renderMeta.scene_generation)) return false;
+    return tracesMatch(gd.data, data);
+  }
+  function reconcileParked(gd) {
+    var live = currentMeta(gd);
+    if (!live.scene_id) return;
+    var selected = selectedScene();
+    if (selected && String(live.scene_id) !== selected) return;
+    var key = parkKey(live.scene_id, live.scene_generation);
+    var parked = parkedCameraByScene[key];
+    if (!parked) return;
+    var shown = Number(live.camera_revision);
+    if (!Number.isFinite(shown)) shown = Number(live.camera_version);
+    if (Number.isFinite(shown) && cameraRevision(parked) < shown) {
+      delete parkedCameraByScene[key];
+      return;
+    }
+    delete parkedCameraByScene[key];
+    submit(parked);
+  }
   function expectedScene(scene) {
     if (!scene || typeof root.MatterVisExpectedRender !== "function") return null;
     return root.MatterVisExpectedRender(scene);
@@ -166,11 +236,33 @@
     var geometry = Number(v.geometry_version || v.geometry || 0);
     if (sameScene && geometry && current && geometry < current) return false;
     var generation = present(generationOf(update, null)) ? String(generationOf(update, null)) : "";
-    if (sameScene && generation && render.scene_generation !== undefined && generation !== String(render.scene_generation)) return false;
+    var shownGeneration = present(render.scene_generation) ? String(render.scene_generation) : "";
+    var generationChanged = !!(sameScene && generation && shownGeneration && generation !== shownGeneration);
+    var incomingGeneration = Number(generation);
+    var currentGeneration = Number(shownGeneration);
+    if (generationChanged && Number.isFinite(incomingGeneration) && Number.isFinite(currentGeneration) && incomingGeneration < currentGeneration) return false;
+    /* A camera command for the next generation is parked above. A patch for
+     * a generation that is not on the canvas still waits. A complete frame
+     * is what makes that generation current, so its camera version is not
+     * compared with the previous generation. */
+    if (!complete && generationChanged) return false;
     var display = Number(v.display_version || 0), currentDisplay = Math.max(Number(render.display_version || 0), seen.display);
-    var camera = Number(v.camera_version || v.camera_revision || 0), currentCamera = Math.max(Number(render.camera_version || render.camera_revision || 0), seen.camera);
-    if (sameScene && display && currentDisplay && display < currentDisplay) return false;
-    if (sameScene && camera && currentCamera && camera < currentCamera) return false;
+    /* Revision 0 is the first figure. ``0 &&`` used to skip the
+     * comparison, so that cell box could be painted again after Fit
+     * had moved the camera to revision 1. */
+    function finiteRevision(value) {
+      if (value === undefined || value === null || value === "") return null;
+      var number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    }
+    var incomingCamera = finiteRevision(v.camera_version);
+    if (incomingCamera === null) incomingCamera = finiteRevision(v.camera_revision);
+    var renderedCamera = finiteRevision(render.camera_version);
+    if (renderedCamera === null) renderedCamera = finiteRevision(render.camera_revision);
+    var seenCamera = finiteRevision(seen.camera);
+    var currentCamera = renderedCamera === null ? seenCamera : (seenCamera === null ? renderedCamera : Math.max(renderedCamera, seenCamera));
+    if (sameScene && !generationChanged && display && currentDisplay && display < currentDisplay) return false;
+    if (sameScene && !generationChanged && incomingCamera !== null && currentCamera !== null && incomingCamera < currentCamera) return false;
     if (updateKind(update) === "camera" && !cameraIsCurrent(update, gd)) return false;
     var key = deliveryKey(update, gd);
     if (!delivered[key]) return true;
@@ -306,6 +398,18 @@
       return "error";
     }
     root.__mv_view_diag.submissions += 1;
+    noteGraph(gd);
+    if (!noteEpoch(snapshot)) {
+      root.__mv_view_diag.staleDrops += 1;
+      if (kind === "camera") root.__mv_view_diag.cameraStale += 1;
+      noteDrop(snapshot, gd, "epoch");
+      return "stale";
+    }
+    if (!isCompleteFrame(snapshot)) reconcileParked(gd);
+    if (cameraWaitsForGeometry(snapshot, gd)) {
+      root.__mv_view_diag.cameraParked = (root.__mv_view_diag.cameraParked || 0) + 1;
+      return parkCamera(snapshot);
+    }
     if (!applicable(snapshot, gd)) {
       root.__mv_view_diag.staleDrops += 1;
       if (kind === "camera") root.__mv_view_diag.cameraStale += 1;
@@ -336,12 +440,20 @@
         root.__mv_view_diag.lastCameraMissingPayload = {key: cameraKey, revision: revision, scene: snapshot.scene_id};
         return "camera-missing";
       }
+      root.__mv_camera_diag = root.__mv_camera_diag || {};
+      root.__mv_camera_diag.lastApply = {
+        command: String(camera.command || snapshot.reason || ""),
+        aspect: camera.aspectratio || null,
+        revision: revision,
+      };
       var cameraOptions = {
         scene_id: snapshot.scene_id,
         scene_generation: generationOf(snapshot, gd),
         camera_version: revision,
         server_started_at: snapshot.server_started_at,
         command: String(camera.command || snapshot.reason || ""),
+        aspectratio: camera.aspectratio || null,
+        ranges: camera.ranges || null,
         graph_generation: Number(gd.__mvGraphGeneration || 0),
         isCurrent: function () {
           /* A camera command may outlive a Plotly remount. Resolve the graph
@@ -415,12 +527,20 @@
       /* Live-camera preservation belongs to the frame gate, which keeps it
        * only for the same scene and interaction generation. Copying it here
        * would paint scene A's camera onto scene B before that gate runs. */
-      pending[figureKey] = Promise.resolve(root.Plotly.react(gd, clone(snapshot.figure.data || []), layout)).then(function () {
+      var submittedData = clone(snapshot.figure.data || []);
+      pending[figureKey] = Promise.resolve(root.Plotly.react(gd, submittedData, layout)).then(function () {
+        /* A resolved react is not delivery. The render gate resolves when it
+         * skips an untyped or stale figure and leaves the previous traces. */
+        if (!figureCommitted(gd, submittedData, renderMeta)) return "skipped";
         gd.__mvGraphGeneration = Number(gd.__mvGraphGeneration || 0) + 1;
         markDelivered(snapshot, gd, figureKey);
+        reconcileParked(gd);
         return "figure";
       }, function (error) {
-        if (root.MatterVisViewCamera && typeof root.MatterVisViewCamera.reportStatus === "function") {
+        var doc = root.document || (typeof document !== "undefined" ? document : null);
+        var node = doc && doc.getElementById && doc.getElementById("mv-render-status");
+        var preserved = node && node.getAttribute && node.getAttribute("data-level") === "error" && node.textContent;
+        if (!preserved && root.MatterVisViewCamera && typeof root.MatterVisViewCamera.reportStatus === "function") {
           root.MatterVisViewCamera.reportStatus("error", "The latest frame did not render. The last good frame is unchanged.");
         }
         throw error;
@@ -440,6 +560,6 @@
     });
     return latest;
   }
-  root.MatterVisViewUpdates = { submit: submit, apply: submit, commit: submit, applicable: applicable, pickLatest: pickLatest, deliveredCount: function () { return Object.keys(delivered).length; }, reset: function () { delivered = Object.create(null); latestCameraRevision = Object.create(null); latestVersions = Object.create(null); } };
+  root.MatterVisViewUpdates = { submit: submit, apply: submit, commit: submit, applicable: applicable, pickLatest: pickLatest, deliveredCount: function () { return Object.keys(delivered).length; }, reset: function () { delivered = Object.create(null); latestCameraRevision = Object.create(null); latestVersions = Object.create(null); parkedCameraByScene = Object.create(null); } };
   (root.__mv_pending_view_updates || []).splice(0).forEach(function (update) { submit(update); });
 })(window);

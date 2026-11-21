@@ -141,6 +141,12 @@ Notes for callers:
   figure still belongs to another scene receives the selected scene's
   complete frame instead. Flat ORTEP still rebuilds its image when the
   camera changes, because the camera basis is rasterized into that image.
+  That figure's Plotly scene camera is `eye` / `center` / `up`. A stored
+  `position` / `focal_point` camera is converted before the layout is
+  built; the stored mapping itself is left unchanged. A zero-length look
+  vector uses the existing finite eye fallback. The orbit scene background
+  is transparent so its paper image stays visible; an opaque background
+  covers the raster and leaves the caption.
 - `pending_state` is armed for a broadcast write to the active scene
   (REST `POST /state`, WebSocket `set_state`, and external `/intent`
   calls). The existing agent-state poll writes the matching page's
@@ -180,8 +186,17 @@ Notes for callers:
   style owner. `uirevision` includes the scene id, structure name, camera
   revision, and viewport signature, so two scenes that share a structure and
   camera do not keep one WebGL camera. Clients preserve the live camera only
-  for the same scene, scene generation, server epoch, and `uirevision`. A
-  transient camera revision is read back only for that same generation and
+  for the same scene, scene generation, server epoch, and `uirevision`
+  while a gesture on that scene is still in progress. A settled drag,
+  pan, or zoom leaves `camera_revision` unchanged. The published figure
+  snapshot is not rewritten from that later camera.
+  `camera-state-store` carries the accepted pose, `camera_revision`, and
+  `scene_generation`. Every writer of that store uses `allow_duplicate`.
+  Returning to the scene paints the store camera for that same revision
+  and generation, not the pose baked into the last complete frame. A
+  store older than the mounted revision is ignored. A clipped or
+  off-screen camera is still replaced by the scene refit before the
+  store is what the canvas paints. A transient camera revision is read back only for that same generation and
   epoch. A width/height replot during an in-progress drag restores the live
   drag camera only when that drag's scene generation and, when both sides
   have one, server session still match the mounted figure. A frame or
@@ -324,7 +339,76 @@ Notes for callers:
   `{"action": "orbit", "yaw_deg": 12, "pitch_deg": -6}`,
   `{"action": "pan", "dx": 0.05, "dy": -0.03, "dz": 0.0}`,
   `{"action": "reset"}`,
-  `{"action": "fit"}`,
+  `{"action": "fit", "width": 939, "height": 750, "visible_height": 682}`,
+  Fit frames the displayed target inside an 8% margin of the shorter
+  side of the clear WebGL viewport. `width` and `height` are the
+  canvas CSS box in pixels. `visible_height` is that box cut off where
+  the status bar or the Fit button covers it. Omitted sizes use
+  939×800. The same update replaces the axis ranges with the data box
+  that was framed. Plotly normalizes that range onto the aspect box,
+  and the default perspective view widens it so a diagonal camera does
+  not clip a corner; leaving that wider range in place makes the cell
+  a small fraction of the box. Perspective moves the eye along its
+  current direction. Orthographic pixel size does not follow eye
+  length, so Fit scales the manual scene aspect ratio and leaves the
+  eye distance unchanged. Perspective uses that same aspect scale only
+  when eye distance alone leaves the target smaller than the margin.
+  The cell boundary selects unit-cell corners as the target, expanded by
+  the cell-edge tube radius so the stroke is inside the margin. With the
+  boundary off, the target is the drawn atom extent. Orthographic extent
+  is the sphere's silhouette in the camera plane. Perspective extent is
+  the tangent cone of that sphere, recomputed at the solved eye, so a
+  close sphere is not clipped past its equator. The stored camera is
+  that eye, center, and up. A position/focal pair
+  is not kept beside it, and an eye present on the same dict does not
+  widen the axis range. Fit pans the eye and the center together so the
+  target box is centered in the clear viewport, which is shorter than
+  the canvas where the status bar covers it. The uniform aspect search
+  runs up to 48 so a molecule that occupies a small part of its cell
+  can still reach the margin.   A Fit or Reset that sends an aspect is
+  checked against that aspect, within 1% on each component, rather than
+  against the canonical viewport. The canonical viewport still uses its
+  8% check when the command did not send an aspect. A failed check records the live eye,
+  center, ranges, and aspect before the restore status is shown.
+  The first figure's camera revision is 0. A later figure whose camera
+  revision is older than the Fit that is already on the canvas is not
+  applied, so that first cell box cannot replace the fitted ranges.
+  A later figure delivery rewrites the axis
+  ranges from that same data box, including a cache hit, a display-option
+  rebuild, and a return to the scene.   The same delivery keeps the fitted
+  aspect on the layout and on the gl scene: a scene plot after the camera
+  move writes that ratio, and the next figure for the scene is delivered
+  with it.   A later camera delivery while that fit is active carries the
+  same ratio and data box, including a relayout echo that would otherwise
+  leave the previous ratio on the layout.   A scene plot that finishes
+  after that delivery, including a second Fit whose data box did not
+  change, still leaves this ratio on the layout.   A projection change
+  disposes the gl scene and assigns a new one before that plot's last
+  aspect write; the fitted ratio is applied on the replacement, so the
+  previous ratio is not the value that remains.   A figure whose camera
+  revision is newer than the stored fit keeps that figure's ratio
+  instead of having the previous ratio stamped over it. A Fit or other
+  camera command for the selected scene waits until a figure for that
+  scene and generation has replaced the traces. A react that resolves
+  without installing those traces does not apply the command and does
+  not rewrite the canvas identity. A new generation keeps its own
+  command, including camera version 0; a higher version from an older
+  generation does not replace it. A later committed figure with a
+  higher camera revision drops the held command. A rejected react
+  leaves the command held.   A new server epoch clears it. Leaving the
+  scene does not apply it; returning, once that geometry is current,
+  does. A painted sample may keep the same eye, center, aspect, and
+  data box while `render_revision` advances. That sample also carries
+  the scene generation, the geometry version, and a digest of the
+  finite coordinates on the visible traces. Those three have to match
+  on both sides of the screenshot. The same camera and data box with a
+  different digest is not the same geometry.   An older camera
+  revision for the same scene generation and server epoch does not
+  replace it. A new scene, scene generation, or server epoch starts
+  its own camera clock. A state patch with a
+  non-finite or non-positive aspect scale, or a fitted range that is not
+  three finite non-empty intervals, does not change the stored Fit.
+  Reset restores aspect scale 1 and drops that fitted box.
   `{"action": "align", "axis": "c"}`  (VESTA-style "look down lattice
   axis ``c``"; valid axes are `a`, `b`, `c`, `a*`, `b*`, `c*`),
   `{"action": "projection", "type": "orthographic"}`  (toggle the

@@ -75,8 +75,7 @@ def register_view_callbacks(app, backend):
             if not kind:
                 return no_update
             if kind == UpdateKind.CAMERA.value:
-                payload["camera"] = copy.deepcopy(state.get("camera"))
-                payload["command"] = "state-confirmed"
+                payload.update(confirmed_camera_fields(backend, state))
             return make_update(
                 state, operation=kind, payload=payload, reason="state-confirmed"
             ).to_dict()
@@ -87,7 +86,7 @@ def register_view_callbacks(app, backend):
             update = make_update(
                 state,
                 before=before,
-                payload={**payload, "camera": copy.deepcopy(state.get("camera")), "command": "state-confirmed"},
+                payload={**payload, **confirmed_camera_fields(backend, state)},
                 reason="state-confirmed",
             )
         return update.to_dict()
@@ -524,7 +523,7 @@ def register_view_callbacks(app, backend):
         except Exception:  # pragma: no cover - best-effort, surface in console
             return no_update, no_update, no_update
         state = backend.get_state(scene_id)
-        camera_payload = _camera_store_payload(scene_id, camera)
+        camera_payload = _camera_store_for_state(state, camera)
         update = make_update(
             state,
             operation="camera",
@@ -570,7 +569,7 @@ def register_view_callbacks(app, backend):
         except Exception:  # pragma: no cover
             return (no_update,) * 4
         state = backend.get_state(scene_id)
-        camera_payload = _camera_store_payload(scene_id, camera)
+        camera_payload = _camera_store_for_state(state, camera)
         update = make_update(
             state,
             operation="camera",
@@ -584,55 +583,9 @@ def register_view_callbacks(app, backend):
             no_update,
         )
 
-    if hasattr(app, "clientside_callback"):
-        app.clientside_callback(
-            """
-            function(relayout) {
-              if (!relayout || typeof relayout !== "object") return window.dash_clientside.no_update;
-              var keys = Object.keys(relayout);
-              var touches = false;
-              for (var i = 0; i < keys.length; i++) {
-                var key = keys[i];
-                if (key === "scene.camera" || key.indexOf("scene.camera.") === 0) touches = true;
-                if (key === "scene" && relayout.scene && relayout.scene.camera) touches = true;
-              }
-              if (!touches) return window.dash_clientside.no_update;
-              var gd = document.querySelector("#crystal-graph .js-plotly-plot");
-              var meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
-              var canvasId = meta && meta.scene_id ? String(meta.scene_id) : "";
-              var gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
-              var gestureKind = window.__mvGestureKind ? String(window.__mvGestureKind) : "";
-              // Dash may deliver relayoutData after Plotly has already
-              // painted the next scene and after the pointer gesture ended.
-              // Keep the scene that owned the last pointer gesture as a
-              // second fence so a late camera payload from scene A cannot be
-              // reinterpreted as a drag on scene B. A new pointerdown refreshes
-              // this marker for legitimate drags on B.
-              var lastGestureId = window.__mvLastGestureSceneId
-                ? String(window.__mvLastGestureSceneId) : "";
-              if (gestureId && canvasId && gestureId !== canvasId && gestureKind !== "wheel") return window.dash_clientside.no_update;
-              // A wheel timeout clears the active gesture id and kind together
-              // but keeps the last scene fence. An empty kind still fails the
-              // wheel exception, so a late relayout cannot move onto the next
-              // canvas.
-              if (!gestureId && lastGestureId && canvasId && lastGestureId !== canvasId && gestureKind !== "wheel") {
-                return window.dash_clientside.no_update;
-              }
-              var sceneId = (gestureKind === "wheel" && canvasId) ? canvasId : (gestureId || canvasId);
-              if (!sceneId) return window.dash_clientside.no_update;
-              return {
-                scene_id: sceneId,
-                scene_generation: window.__mvGestureSceneGeneration,
-                camera_revision: window.__mvGestureCameraRevision,
-                relayout: relayout,
-                seq: Date.now(),
-              };
-            }
-            """,
-            Output("camera-capture-store", "data"),
-            Input("crystal-graph", "relayoutData"),
-            prevent_initial_call=True,
-        )
+    from .camera_clientside import register_camera_clientside
+
+    register_camera_clientside(app)
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
@@ -854,11 +807,14 @@ def register_view_callbacks(app, backend):
         # deduplicates that case after successful Plotly completion.
         current_layout = (current_figure or {}).get("layout") or {}
         layout = fig.get("layout") or {}
+        current_camera = (current_layout.get("scene") or {}).get("camera")
+        delivered_camera = (layout.get("scene") or {}).get("camera")
         if (
             (current_layout.get("meta") or {}).get("mattervis_render")
             == (layout.get("meta") or {}).get("mattervis_render")
             and (current_layout.get("scene") or {}).get("uirevision")
             == (layout.get("scene") or {}).get("uirevision")
+            and current_camera == delivered_camera
         ):
             fig = no_update
 

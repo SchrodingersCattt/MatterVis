@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from .shared import *
+from .camera_fit import *  # noqa: F401,F403
 
 class StaleCameraWrite(Exception):
     """A drag camera lost the compare-and-set at the locked write."""
@@ -11,8 +12,44 @@ class StaleCameraWrite(Exception):
 _CAMERA_FENCE_UNSET = object()
 
 
-def _camera_store_payload(scene_id: Optional[str], camera: Optional[dict[str, Any]]) -> dict[str, Any]:
-    return {"scene_id": scene_id, "camera": copy.deepcopy(camera)}
+
+def _camera_store_payload(
+    scene_id: Optional[str],
+    camera: Optional[dict[str, Any]],
+    *,
+    camera_revision: Any = None,
+    scene_generation: Any = None,
+) -> dict[str, Any]:
+    """Camera the browser may paint, with the clocks that accepted it.
+
+    ``camera_revision`` stays put for an ordinary drag. The browser uses
+    that clock to ignore an older store after Reset or a refit, and
+    ``scene_generation`` so a remount cannot reuse the previous pose.
+    """
+    payload: dict[str, Any] = {"scene_id": scene_id, "camera": copy.deepcopy(camera)}
+    if camera_revision is not None:
+        try:
+            payload["camera_revision"] = int(camera_revision)
+        except (TypeError, ValueError):
+            pass
+    if scene_generation is not None and scene_generation != "":
+        payload["scene_generation"] = scene_generation
+    return payload
+
+
+def _camera_store_for_state(
+    state: Optional[dict[str, Any]],
+    camera: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Store payload for one scene, including the clocks that accepted it."""
+    state = state or {}
+    chosen = state.get("camera") if camera is None else camera
+    return _camera_store_payload(
+        state.get("scene_id"),
+        chosen,
+        camera_revision=state.get("camera_revision"),
+        scene_generation=state.get("scene_generation"),
+    )
 
 
 def _camera_figure_patch(
@@ -110,6 +147,12 @@ def _plotly_camera(camera: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
     if not camera:
         return None
     if "eye" in camera:
+        if "position" in camera or "focal_point" in camera:
+            return {
+                key: value
+                for key, value in camera.items()
+                if key not in ("position", "focal_point")
+            }
         return camera
     position = np.array(camera.get("position", [0.0, 0.0, 1.0]), dtype=float)
     focal = np.array(camera.get("focal_point", [0.0, 0.0, 0.0]), dtype=float)
@@ -136,6 +179,76 @@ def _plotly_camera(camera: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
     elif isinstance(raw_projection, str) and raw_projection:
         converted["projection"] = {"type": raw_projection}
     return converted
+
+
+_PLOTLY_SCENE_CAMERA_KEYS = ("eye", "center", "up", "projection")
+
+
+def _finite_camera_vector(raw: Any) -> bool:
+    if isinstance(raw, dict):
+        try:
+            values = (float(raw["x"]), float(raw["y"]), float(raw["z"]))
+        except (KeyError, TypeError, ValueError):
+            return False
+    else:
+        try:
+            values = tuple(float(value) for value in raw)
+        except (TypeError, ValueError):
+            return False
+        if len(values) != 3:
+            return False
+    return all(bool(np.isfinite(value)) for value in values)
+
+
+def _plotly_scene_camera(camera: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Return a Plotly ``layout.scene.camera`` mapping.
+
+    ``_plotly_camera`` turns a legacy ``position`` / ``focal_point`` camera
+    into ``eye`` / ``center`` / ``up``. Plotly rejects those legacy keys, so
+    the mapping copied here keeps only the scene-camera properties. A
+    zero-length look vector stays on the finite fallback inside
+    ``_plotly_camera``. A present non-finite component raises ``ValueError``
+    instead of being replaced with another camera.
+    """
+    if not isinstance(camera, dict):
+        return None
+    for key in ("position", "focal_point", "eye", "center", "up"):
+        if key not in camera or camera[key] is None:
+            continue
+        if not _finite_camera_vector(camera[key]):
+            raise ValueError(f"camera {key} must be a finite 3-vector")
+    converted = _plotly_camera(camera)
+    if not isinstance(converted, dict) or "eye" not in converted:
+        return None
+    if not _finite_camera_vector(converted["eye"]):
+        raise ValueError("camera eye must be a finite 3-vector")
+    return {
+        key: copy.deepcopy(converted[key])
+        for key in _PLOTLY_SCENE_CAMERA_KEYS
+        if key in converted
+    }
+
+
+# The publication drawing is a paper image underneath the orbit scene.
+# An opaque scene background covers that image and leaves only the caption.
+FLAT_ORTEP_SCENE_BACKGROUND = "rgba(0,0,0,0)"
+
+
+def _flat_ortep_layout_camera(
+    camera: Optional[dict[str, Any]],
+    scene: Optional[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """Plotly camera for the flat ORTEP anchor.
+
+    Prefer the caller's camera, then the scene camera. Legacy
+    position/focal mappings are converted. ``None`` means the figure
+    should omit the camera rather than forward an unusable mapping.
+    """
+    chosen = _plotly_scene_camera(camera)
+    if chosen is not None:
+        return chosen
+    scene_camera = scene.get("camera") if isinstance(scene, dict) else None
+    return _plotly_scene_camera(scene_camera if isinstance(scene_camera, dict) else None)
 
 
 def _relayout_touches_camera(relayout_data: Optional[dict[str, Any]]) -> bool:
@@ -252,7 +365,7 @@ def _persist_relayout_camera(
         ), state=state)
     return {
         "scene_id": str(scene_id),
-        "camera_store": _camera_store_payload(scene_id, state.get("camera")),
+        "camera_store": _camera_store_for_state(state),
         "agent_state": copy.deepcopy(state) if flat_ortep else None,
         "refit": replaced,
         "view_update": view_update,
