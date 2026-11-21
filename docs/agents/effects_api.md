@@ -31,6 +31,17 @@ snapshot = session.snapshot(result.output_ref)
 
 `expected_revision` must match the current revision. A candidate built
 against an older revision is rejected and does not change history.
+Duplicate scenes share that structure id. The Dash Commit button passes
+the visible scene's revision. The check and the session save share the
+file lock on `.local/effect-session.json`. That lock is the transaction
+when two processes share the file: the process adopts committed frames
+that are already ahead of its memory, then checks `expected_revision`.
+A stale revision raises `RevisionConflict` and does not write the file.
+A later flush of an older in-memory session adopts the newer file
+instead of replacing it. The committing page receives
+`{operation, source_scene_id, result_scene_id, revision, generation}`
+and selects `result_scene_id` only after the scene catalog lists it.
+A conflict sends no focus payload. Other open pages keep their tab.
 Revision numbers are monotonic for a structure frame. Undo does not
 make the next commit reuse a retired number, so two scientific
 structures never share one `StructureRef`.
@@ -40,9 +51,11 @@ property policy returns the recorded commit and leaves the current
 revision where it is. The same id with a different payload is rejected.
 A retry does not rewind the pointer to the older output.
 
-Session files keep crystal metadata, formula moiety, and the
-`image_shift` site array. A field the file cannot represent raises
-instead of being replaced.
+Session files keep crystal metadata, formula moiety, the
+`image_shift` site array, and each molecule's neighbor-list edges. A
+periodic contact that the saved coordinates do not reproduce on their
+own is restored from those edges. A field the file cannot represent
+raises instead of being replaced.
 
 The same session implements `build_slab`, `insert_molecule`,
 `delete_sites`, `replace_species`, `add_hydrogens`, `remove_solvent`,

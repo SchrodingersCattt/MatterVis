@@ -8,10 +8,13 @@ commit a structure.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
-from collections.abc import Mapping
+import threading
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 import numpy as np
@@ -34,6 +37,100 @@ from .snapshot import canonical_metadata, snapshot_from_crystal, to_jsonable
 
 SCHEMA = "mattervis.effects/v1"
 LEGACY_SCENE_VERSION = 1
+# flock is per open-file description. A second descriptor in the thread
+# that already holds the lock waits on itself, so re-entry is counted here.
+_SESSION_LOCKS = threading.local()
+
+
+@contextmanager
+def session_file_lock(path: str) -> Iterator[None]:
+    """Exclusive lock for one effect-session file.
+
+    Every process that commits or flushes that file takes this lock
+    first. The thread that already holds it may re-enter. The lock is
+    released on the way out, including when the body raises.
+    """
+
+    key = os.path.abspath(path)
+    held = getattr(_SESSION_LOCKS, "depths", None)
+    if held is None:
+        held = {}
+        _SESSION_LOCKS.depths = held
+    depth = int(held.get(key, 0))
+    if depth:
+        held[key] = depth + 1
+        try:
+            yield
+        finally:
+            held[key] = depth
+        return
+    directory = os.path.dirname(key)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    descriptor = os.open(key + ".lock", os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        held[key] = 1
+        try:
+            yield
+        finally:
+            held[key] = 0
+    finally:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+            held.pop(key, None)
+
+
+def adopt_committed(memory: EffectSession, disk: EffectSession) -> bool:
+    """Copy committed frames from ``disk`` when that file is ahead.
+
+    Candidates stay in ``memory``. A frame is adopted only when the
+    disk cursor, or the next revision at the same cursor, is ahead of
+    memory. An older file does not replace a newer in-memory commit.
+    """
+
+    changed = False
+    with memory._lock, disk._lock:
+        adopted: list[tuple[str, str]] = []
+        for key in set(disk._frames):
+            disk_rank = (
+                int(disk._cursor.get(key, -1)),
+                int(disk._next_revision.get(key, 0)),
+            )
+            if key not in memory._frames:
+                memory_rank = (-1, -1)
+            else:
+                memory_rank = (
+                    int(memory._cursor.get(key, -1)),
+                    int(memory._next_revision.get(key, 0)),
+                )
+            if disk_rank <= memory_rank:
+                continue
+            structure_id, frame_ref = key
+            for revision_key in list(memory._viewer_names):
+                if revision_key[0] == structure_id and revision_key[1] == frame_ref:
+                    memory._viewer_names.pop(revision_key, None)
+            memory._frames[key] = list(disk._frames[key])
+            memory._cursor[key] = disk._cursor[key]
+            memory._next_revision[key] = disk._next_revision[key]
+            for revision_key, name in disk._viewer_names.items():
+                if revision_key[0] == structure_id and revision_key[1] == frame_ref:
+                    memory._viewer_names[revision_key] = name
+            adopted.append(key)
+            changed = True
+        if adopted:
+            adopted_keys = set(adopted)
+            for request_key, result in list(memory._requests.items()):
+                frame_key = (result.output_ref.id, result.output_ref.frame_ref)
+                if frame_key in adopted_keys:
+                    memory._requests.pop(request_key, None)
+            for request_key, result in disk._requests.items():
+                frame_key = (result.output_ref.id, result.output_ref.frame_ref)
+                if frame_key in adopted_keys:
+                    memory._requests[request_key] = result
+    return changed
 
 
 def session_to_payload(session: EffectSession) -> dict[str, Any]:
@@ -293,6 +390,7 @@ def _crystal_payload(crystal) -> dict[str, Any]:
                 "positions": np.asarray(molecule.positions, dtype=float).tolist(),
                 "info": info,
                 "arrays": arrays,
+                "graph_edges": _graph_edges_payload(molecule),
             }
         )
     body = {
@@ -339,6 +437,8 @@ def _crystal_from_payload(payload: Mapping[str, Any]):
             raise PersistenceError("persisted site ids do not match atom count")
         wrapped = CrystalMolecule(atoms, check_pbc=False)
         wrapped.info.update(dict(molecule.get("info") or {}))
+        if "graph_edges" in molecule:
+            _restore_graph_edges(wrapped, molecule.get("graph_edges") or [])
         molecules.append(wrapped)
     crystal = crystal_from_molecules(
         lattice,
@@ -364,6 +464,45 @@ def _restore_json_field(crystal, name: str, value) -> None:
         setattr(crystal, f"_persisted_{name}_json", value)
 
 
+def _graph_edges_payload(molecule) -> list[dict[str, Any]]:
+    """Neighbor-list edges that a position rebuild does not reproduce.
+
+    A periodic network can keep an edge whose finite embedding is longer
+    than the contact perceived from the saved coordinates. The edge list
+    is that graph, not a second bond heuristic.
+    """
+
+    graph = getattr(molecule, "graph", None)
+    if graph is None:
+        return []
+    edges = []
+    for left, right, data in graph.edges(data=True):
+        item: dict[str, Any] = {"left": int(left), "right": int(right)}
+        if data and "vector" in data:
+            item["vector"] = [float(value) for value in np.asarray(data["vector"], dtype=float).tolist()]
+        if data and "image_shift" in data:
+            item["image_shift"] = [int(value) for value in np.asarray(data["image_shift"], dtype=int).tolist()]
+        if data and "distance" in data:
+            item["distance"] = float(data["distance"])
+        edges.append(item)
+    edges.sort(key=lambda item: (item["left"], item["right"], tuple(item.get("image_shift") or ())))
+    return edges
+
+
+def _restore_graph_edges(molecule, edges) -> None:
+    graph = molecule.graph
+    graph.remove_edges_from(list(graph.edges()))
+    for item in edges:
+        attrs = {}
+        if "vector" in item:
+            attrs["vector"] = np.asarray(item["vector"], dtype=float)
+        if "image_shift" in item:
+            attrs["image_shift"] = np.asarray(item["image_shift"], dtype=int)
+        if "distance" in item:
+            attrs["distance"] = float(item["distance"])
+        graph.add_edge(int(item["left"]), int(item["right"]), **attrs)
+
+
 def _array_from_json(values):
     array = np.asarray(values)
     if array.dtype.kind in {"U", "O"}:
@@ -373,9 +512,11 @@ def _array_from_json(values):
 
 __all__ = [
     "SCHEMA",
+    "adopt_committed",
     "export_structure",
     "load_session",
     "migrate_legacy_session",
     "save_session",
+    "session_file_lock",
     "session_to_payload",
 ]

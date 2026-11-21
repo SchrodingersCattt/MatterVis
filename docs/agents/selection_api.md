@@ -114,7 +114,11 @@ target identity rather than trace order.
 The invisible `*_selection` traces are marked as probes. They provide stable
 IDs for surfaces that cannot expose per-face customdata, but never become an
 occluder themselves. Thin bonds use a smaller pick tolerance than atoms and
-faces so a broad marker cannot steal a click at an atom centre. The policy is
+faces so a broad marker cannot steal a click at an atom centre.
+The browser picker keeps that rule when the pointer is inside an
+atom disc: the atom wins even if a bond cylinder at that pixel is
+nearer in depth. A bond shaft that is outside every atom disc stays
+a bond pick. The policy is
 backend-neutral and can be reused by browser fixtures or a future native
 renderer without depending on Plotly internals.
 
