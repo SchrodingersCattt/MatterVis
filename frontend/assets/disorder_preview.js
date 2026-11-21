@@ -26,28 +26,44 @@
     return Promise.resolve().then(task);
   }
 
-  function liveViewport(gd) {
-    try {
-      var scene = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
-      if (!scene || typeof scene.getCamera !== "function") return null;
-      return {
-        scene: scene,
-        camera: JSON.parse(JSON.stringify(scene.getCamera())),
-        aspectratio: scene.glplot && scene.glplot.getAspectratio && scene.glplot.getAspectratio(),
-      };
-    } catch (_) {
-      return null;
-    }
+  function liveScene(gd) {
+    return gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene || null;
   }
 
-  function restoreViewport(viewport) {
-    if (!viewport || !viewport.scene || !viewport.camera) return;
-    try {
-      viewport.scene.setViewport({
-        camera: viewport.camera,
-        aspectratio: viewport.aspectratio || (viewport.scene.glplot && viewport.scene.glplot.getAspectratio && viewport.scene.glplot.getAspectratio()),
-      });
-    } catch (_) {}
+  function orthoFlag(scene) {
+    var camera = scene && scene.camera;
+    if (!camera || typeof camera._ortho !== "boolean") return null;
+    return camera._ortho;
+  }
+
+  function component(value, index, name) {
+    if (!value) return NaN;
+    if (value[name] !== undefined && value[name] !== null) return Number(value[name]);
+    return Number(value[index]);
+  }
+
+  function vector(value) {
+    var point = {
+      x: component(value, 0, "x"),
+      y: component(value, 1, "y"),
+      z: component(value, 2, "z"),
+    };
+    return [point.x, point.y, point.z].every(function (item) { return Number.isFinite(item); }) ? point : null;
+  }
+
+  /* Eye, center, and up only. A whole scene.camera object, or a private
+   * Scene.setViewport call, disposes the glplot when the projection differs
+   * and does not run Scene.plot, which leaves the new scene undrawn. */
+  function sameProjectionPatch(camera) {
+    var eye = vector(camera && camera.eye);
+    var center = vector(camera && camera.center);
+    var up = vector(camera && camera.up);
+    if (!eye || !center || !up) return null;
+    return {
+      "scene.camera.eye": eye,
+      "scene.camera.center": center,
+      "scene.camera.up": up,
+    };
   }
 
   function prepare(store) {
@@ -70,13 +86,28 @@
         meta: {kind: "disorder-preview-outline", replica_id: replicaId},
       });
     });
-    var viewport = liveViewport(gd);
+    if (!oldIndices.length && !traces.length) return nope();
     var sceneAtStart = sceneId(gd);
     var generationAtStart = Number(gd.__mvGraphGeneration || 0);
+    var sceneObject = liveScene(gd);
+    var orthoAtStart = orthoFlag(sceneObject);
+    var saved = null;
+    try {
+      saved = sceneObject && typeof sceneObject.getCamera === "function"
+        ? JSON.parse(JSON.stringify(sceneObject.getCamera()))
+        : null;
+    } catch (_) {
+      saved = null;
+    }
     function current() {
-      var scene = sceneId(gd);
-      if (sceneAtStart && scene && scene !== sceneAtStart) return false;
-      return Number(gd.__mvGraphGeneration || 0) === generationAtStart;
+      var shown = sceneId(gd);
+      if (sceneAtStart && shown && shown !== sceneAtStart) return false;
+      if (Number(gd.__mvGraphGeneration || 0) !== generationAtStart) return false;
+      var scene = liveScene(gd);
+      if (sceneObject && scene && scene !== sceneObject) return false;
+      var ortho = orthoFlag(scene);
+      if (orthoAtStart !== null && ortho !== null && ortho !== orthoAtStart) return false;
+      return true;
     }
     var chain = Promise.resolve();
     if (oldIndices.length) {
@@ -95,11 +126,16 @@
         });
       });
     }
-    chain.then(function () {
-      if (!current()) return;
-      var schedule = root.requestAnimationFrame || function (fn) { fn(); };
-      schedule(function () { restoreViewport(viewport); });
-    });
+    var patch = sameProjectionPatch(saved);
+    if (patch && typeof root.Plotly.relayout === "function") {
+      chain = chain.then(function () {
+        return enqueue(gd, function () {
+          if (!current()) return null;
+          return root.Plotly.relayout(gd, patch);
+        });
+      });
+    }
+    chain.catch(function () {});
     return nope();
   }
 
