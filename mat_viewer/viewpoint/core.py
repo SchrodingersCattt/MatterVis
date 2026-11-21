@@ -440,6 +440,62 @@ def _auto_view_cache_key(atoms, M, cell, compound_name, weights) -> tuple:
     )
 
 
+def _pca_axes(centered: np.ndarray) -> list[np.ndarray]:
+    """Three axes from a centered coordinate matrix.
+
+    ``svd(..., full_matrices=False)`` returns one row per available
+    component. A single point has one row and a two-point set has two, so
+    indexing a third row raises ``IndexError``. Missing rows are filled
+    with the coordinate axes. A fallback axis parallel to a vector already
+    kept is skipped, so a rank-deficient line does not contribute the same
+    direction twice. A failed or non-finite decomposition uses the
+    coordinate axes alone.
+    """
+    fallback = [
+        np.array([1.0, 0.0, 0.0]),
+        np.array([0.0, 1.0, 0.0]),
+        np.array([0.0, 0.0, 1.0]),
+    ]
+    points = np.asarray(centered, dtype=float)
+    axes: list[np.ndarray] = []
+
+    def _parallel(left: np.ndarray, right: np.ndarray) -> bool:
+        left_norm = float(np.linalg.norm(left))
+        right_norm = float(np.linalg.norm(right))
+        if left_norm < 1e-8 or right_norm < 1e-8:
+            return True
+        cosine = abs(float(np.dot(left, right))) / (left_norm * right_norm)
+        return cosine >= 1.0 - 1e-6
+
+    if (
+        points.ndim == 2
+        and points.shape[1] == 3
+        and points.shape[0] >= 1
+        and np.all(np.isfinite(points))
+    ):
+        try:
+            _u, _s, vt = np.linalg.svd(points, full_matrices=False)
+        except np.linalg.LinAlgError:
+            vt = None
+        if getattr(vt, "ndim", 0) == 2:
+            for row in vt:
+                vector = np.asarray(row, dtype=float).reshape(-1)
+                if (
+                    vector.shape == (3,)
+                    and np.all(np.isfinite(vector))
+                    and float(np.linalg.norm(vector)) >= 1e-8
+                    and not any(_parallel(vector, existing) for existing in axes)
+                ):
+                    axes.append(vector)
+    for axis in fallback:
+        if len(axes) >= 3:
+            break
+        if any(_parallel(axis, existing) for existing in axes):
+            continue
+        axes.append(axis.copy())
+    return axes[:3]
+
+
 # ── Public entry point ───────────────────────────────────────────────────────
 
 
@@ -474,6 +530,13 @@ def auto_view_dir(
     -------
     tuple[ndarray, ndarray]
         ``(view_direction, up_vector)`` — unit vectors.
+
+    A scored coordinate set with fewer than three singular vectors, including
+    a single point, does not raise. The available vectors are kept and the
+    missing axes are the coordinate axes, so candidate scoring still runs.
+    Fewer than three non-hydrogen major atoms keep the fixed fallback
+    direction. Non-finite coordinates use that same axis fallback instead of
+    a partial vector.
     """
     source_atoms = [dict(atom) for atom in atoms]
     if molcrys_analysis is None:
@@ -518,8 +581,17 @@ def auto_view_dir(
 
     coords = np.array([at["cart"] for at in valid_atoms], dtype=float)
     radii = np.array([cov_r(at["elem"]) for at in valid_atoms], dtype=float)
-    org_coords = coords[np.array(org_pos)]
-    centered = org_coords - org_coords.mean(axis=0)
+    org_index = np.asarray(org_pos, dtype=int)
+    if (
+        org_index.size == 0
+        or coords.ndim != 2
+        or coords.shape[1] != 3
+        or not np.all(np.isfinite(coords))
+    ):
+        centered = np.zeros((0, 3), dtype=float)
+    else:
+        org_coords = coords[org_index]
+        centered = org_coords - org_coords.mean(axis=0)
     valid_by_source: dict[int, int] = {}
     for local_index, atom in enumerate(valid_atoms):
         source_index = atom.get("_source_index")
@@ -536,15 +608,7 @@ def auto_view_dir(
             visible_bonds.append((left, right))
     excluded_pairs = _build_pair_exclusions(len(valid_atoms), visible_bonds)
 
-    try:
-        _, _, vt = np.linalg.svd(centered, full_matrices=False)
-        pca_axes = [vt[0], vt[1], vt[2]]
-    except np.linalg.LinAlgError:
-        pca_axes = [
-            np.array([1.0, 0.0, 0.0]),
-            np.array([0.0, 1.0, 0.0]),
-            np.array([0.0, 0.0, 1.0]),
-        ]
+    pca_axes = _pca_axes(centered)
 
     candidates: List[np.ndarray] = []
     seen: set = set()
