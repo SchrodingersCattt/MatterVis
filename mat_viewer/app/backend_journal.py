@@ -9,7 +9,25 @@ the other order.
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any, Optional
+
+from ..render.retention import (
+    FIGURE_JOURNAL_MAX_BYTES,
+    FIGURE_JOURNAL_MAX_ENTRIES,
+    clear_bundle_render_caches,
+    payload_nbytes,
+)
+
+
+def _figure_cache_scene_id(key: str) -> str | None:
+    try:
+        payload = json.loads(key)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(payload, dict) and payload.get("scene_id") is not None:
+        return str(payload["scene_id"])
+    return None
 
 
 class _JournalBackendMixin:
@@ -134,6 +152,110 @@ class _JournalBackendMixin:
         """Return the armed poll payload without consuming it."""
         with self._lock:
             return copy.deepcopy(self.pending_state) if self.pending_state else None
+
+    def _queue_scene_render_release(
+        self, scene_id: str, structure_name: str | None = None
+    ) -> None:
+        """Drop one scene's figure bodies, and its meshes when nothing else uses them.
+
+        Figure-cache eviction takes only the figure lock. Journal entries
+        are removed on the next journal critical section, because a
+        broadcast holds that lock and then takes the backend lock.
+        Scene lifecycle methods already hold the backend lock.
+        """
+
+        self._drop_figure_cache_for_scene(str(scene_id))
+        if structure_name and not self._structure_has_open_scene(str(structure_name)):
+            bundle = self.bundles.get(str(structure_name))
+            if bundle is not None:
+                clear_bundle_render_caches(bundle)
+        self._journal_drop_scene_ids.add(str(scene_id))
+
+    def _structure_has_open_scene(self, structure_name: str) -> bool:
+        scenes = getattr(getattr(self, "scene_store", None), "scenes", {}) or {}
+        return any(
+            getattr(scene, "structure_name", None) == structure_name
+            for scene in scenes.values()
+        )
+
+    def _drop_figure_cache_for_scene(self, scene_id: str) -> None:
+        scene_id = str(scene_id)
+        with self._figure_cache_lock:
+            stale = [
+                key
+                for key in list(self._figure_cache.keys())
+                if _figure_cache_scene_id(key) == scene_id
+            ]
+            for key in stale:
+                self._figure_cache.pop(key, None)
+
+    def _note_journal_locked(self, payload: dict[str, Any]) -> None:
+        """Append one journal envelope and enforce the count and byte caps.
+
+        Caller holds ``_figure_broadcast_lock``.
+        """
+
+        self._apply_journal_scene_drops_locked()
+        figure = payload.get("figure") if isinstance(payload, dict) else None
+        size = payload_nbytes(figure) if isinstance(figure, (dict, list)) else 0
+        self._figure_broadcasts.append(payload)
+        sizes = getattr(self, "_figure_broadcast_bytes", None)
+        if not isinstance(sizes, dict):
+            sizes = self._figure_broadcast_bytes = {}
+        sizes[id(payload)] = size
+        self._trim_journal_locked()
+
+    def _apply_journal_scene_drops_locked(self) -> None:
+        pending = getattr(self, "_journal_drop_scene_ids", None)
+        if not pending:
+            return
+        scene_ids = set(pending)
+        pending.clear()
+        sizes = getattr(self, "_figure_broadcast_bytes", {}) or {}
+        kept: list[dict[str, Any]] = []
+        for payload in self._figure_broadcasts:
+            scene_id = ""
+            if isinstance(payload, dict):
+                scene_id = str(payload.get("scene_id") or "")
+            if (
+                scene_id in scene_ids
+                and isinstance(payload, dict)
+                and payload.get("type") != "scene_catalog"
+            ):
+                sizes.pop(id(payload), None)
+                continue
+            kept.append(payload)
+        self._figure_broadcasts[:] = kept
+
+    def _trim_journal_locked(self) -> None:
+        broadcasts = self._figure_broadcasts
+        sizes = getattr(self, "_figure_broadcast_bytes", {}) or {}
+        while len(broadcasts) > FIGURE_JOURNAL_MAX_ENTRIES:
+            old = broadcasts.pop(0)
+            sizes.pop(id(old), None)
+
+        def total() -> int:
+            return sum(sizes.get(id(item), 0) for item in broadcasts)
+
+        def figure_indexes() -> list[int]:
+            return [
+                index
+                for index, item in enumerate(broadcasts)
+                if isinstance(item, dict)
+                and item.get("type") == "figure"
+                and item.get("figure") is not None
+            ]
+
+        while total() > FIGURE_JOURNAL_MAX_BYTES:
+            indexes = figure_indexes()
+            if not indexes:
+                break
+            # Drop the oldest figure body first. A body that is still over
+            # the budget after every older body is gone is dropped too.
+            # The caller that just built it still holds that object; a
+            # later subscriber rebuilds through ``ensure_scene_figure``.
+            old = broadcasts.pop(indexes[0])
+            sizes.pop(id(old), None)
 
 
 __all__ = ["_JournalBackendMixin"]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 import re
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -17,6 +17,18 @@ from ..cache_keys import (
     legacy_scene_cache_key,
     scene_cache_key,
     transformed_scene_cache_key,
+)
+from ..render.retention import (
+    FRAGMENT_TABLE_CACHE_MAX_BYTES,
+    FRAGMENT_TABLE_CACHE_MAX_ENTRIES,
+    SCENE_CACHE_MAX_BYTES,
+    SCENE_CACHE_MAX_ENTRIES,
+    TRANSFORMED_SCENE_CACHE_MAX_BYTES,
+    TRANSFORMED_SCENE_CACHE_MAX_ENTRIES,
+    payload_nbytes,
+    remember_plain_lru,
+    scene_geometry_nbytes,
+    touch_plain_lru,
 )
 
 
@@ -527,6 +539,20 @@ def _fragment_table_from_atoms(
     return final_table, atom_fragment_labels
 
 
+def _lru_sizes(bundle: LoadedCrystal, name: str) -> dict:
+    sizes = getattr(bundle, name, None)
+    if not isinstance(sizes, dict):
+        sizes = {}
+        setattr(bundle, name, sizes)
+    return sizes
+
+
+def _ordered_cache(cache: dict | None) -> OrderedDict:
+    if isinstance(cache, OrderedDict):
+        return cache
+    return OrderedDict(cache or {})
+
+
 def build_bundle_scene(
     bundle: LoadedCrystal,
     *,
@@ -557,6 +583,7 @@ def build_bundle_scene(
         bond_thresholds=bundle.bond_thresholds,
     )
     base_scene = bundle.scene_cache.get(base_cache_key)
+    scene_hit_key = base_cache_key if base_scene is not None else None
     if base_scene is None and include_cross_boundary_bond_endpoints and include_minor:
         # Scenes cached before this option existed implicitly included bonded
         # boundary endpoints. Reuse those entries instead of rebuilding them
@@ -569,6 +596,8 @@ def build_bundle_scene(
             bond_thresholds=bundle.bond_thresholds,
         )
         base_scene = bundle.scene_cache.get(legacy_base_cache_key)
+        if base_scene is not None:
+            scene_hit_key = legacy_base_cache_key
     if base_scene is None:
         perf_log.record(
             "cache:scene",
@@ -632,17 +661,33 @@ def build_bundle_scene(
                 use_source_indices=False,
                 include_minor=include_minor,
             )
-            bundle.fragment_table_cache[fragment_cache_key] = (
-                copy.deepcopy(fragment_table),
-                list(atom_fragment_labels),
+            bundle.fragment_table_cache = remember_plain_lru(
+                bundle.fragment_table_cache,
+                fragment_cache_key,
+                (copy.deepcopy(fragment_table), list(atom_fragment_labels)),
+                _lru_sizes(bundle, "_fragment_table_cache_nbytes"),
+                max_entries=FRAGMENT_TABLE_CACHE_MAX_ENTRIES,
+                max_bytes=FRAGMENT_TABLE_CACHE_MAX_BYTES,
+                measure=payload_nbytes,
             )
         else:
             fragment_table = copy.deepcopy(cached_fragments[0])
             atom_fragment_labels = list(cached_fragments[1])
         base_scene["fragment_table"] = fragment_table
         base_scene["atom_fragment_labels"] = atom_fragment_labels
-        bundle.scene_cache[base_cache_key] = base_scene
+        bundle.scene_cache = remember_plain_lru(
+            bundle.scene_cache,
+            base_cache_key,
+            base_scene,
+            _lru_sizes(bundle, "_scene_cache_nbytes"),
+            max_entries=SCENE_CACHE_MAX_ENTRIES,
+            max_bytes=SCENE_CACHE_MAX_BYTES,
+            measure=scene_geometry_nbytes,
+        )
     else:
+        bundle.scene_cache = _ordered_cache(bundle.scene_cache)
+        if scene_hit_key is not None:
+            touch_plain_lru(bundle.scene_cache, scene_hit_key)
         perf_log.record(
             "cache:scene",
             kind="cache",
@@ -673,12 +718,19 @@ def build_bundle_scene(
         include_minor=include_minor,
         transforms=transforms,
     )
+    if isinstance(transformed_cache, dict):
+        transformed_cache = _ordered_cache(transformed_cache)
+        try:
+            bundle._transformed_scene_cache = transformed_cache
+        except Exception:
+            pass
     cached = (
         transformed_cache.get(cache_key)
         if isinstance(transformed_cache, dict)
         else None
     )
     if cached is not None:
+        touch_plain_lru(transformed_cache, cache_key)
         # ``transforms_cache_key`` intentionally ignores presentation-only
         # transform ids so raw geometry can be reused after a rename.  The
         # cached scene still carries request-specific provenance, though;
@@ -728,7 +780,19 @@ def build_bundle_scene(
     transformed["up"] = base_scene.get("up")
     transformed["unwrap_overflow"] = []
     if isinstance(transformed_cache, dict):
-        transformed_cache[cache_key] = transformed
+        ordered = remember_plain_lru(
+            transformed_cache,
+            cache_key,
+            transformed,
+            _lru_sizes(bundle, "_transformed_scene_cache_nbytes"),
+            max_entries=TRANSFORMED_SCENE_CACHE_MAX_ENTRIES,
+            max_bytes=TRANSFORMED_SCENE_CACHE_MAX_BYTES,
+            measure=scene_geometry_nbytes,
+        )
+        try:
+            bundle._transformed_scene_cache = ordered
+        except Exception:
+            pass
     return transformed
 
 

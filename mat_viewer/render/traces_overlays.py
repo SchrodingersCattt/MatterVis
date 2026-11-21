@@ -1,6 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+from .retention import ensure_budgeted_cache
 from .common import *
 from .meshes import *
 from .style import *
@@ -200,7 +201,8 @@ def _highlight_traces(scene: dict, style: dict):
 
 def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
     hidden_labels = hidden_labels or set()
-    cache = scene.setdefault("_label_trace_cache", {})
+    cache = ensure_budgeted_cache(scene.get("_label_trace_cache"), "label")
+    scene["_label_trace_cache"] = cache
     # ``monochrome`` is inert once atom_groups is non-empty (see
     # ``_style_color``); collapse it in the key so the same cache hit
     # serves both pre- and post-migration callers.
@@ -217,6 +219,7 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
         repr(style.get("label_selector")),
     )
     if key in cache:
+        cache.touch(key)
         perf_log.record("cache:mesh", kind="cache", info={"hit": True, "entries": len(cache)})
         return cache[key]
     perf_log.record("cache:mesh", kind="cache", info={"hit": False, "entries": len(cache)})
@@ -263,7 +266,7 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
                 showlegend=False,
             ), "labels", is_minor=is_minor)
         )
-    cache[key] = [_round_coord_arrays(tr.to_plotly_json()) for tr in traces]
+    cache.remember(key, [_round_coord_arrays(tr.to_plotly_json()) for tr in traces])
     return cache[key]
 
 

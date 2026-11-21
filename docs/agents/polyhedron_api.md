@@ -49,7 +49,7 @@ flowchart LR
   M --> R["cached_geometry<br/>(spec_results: hulls, overlays)"]
   R --> S["_attach_spec_colors<br/>(stamps per-spec color +<br/>per-overlay overrides)"]
   P --> S
-  S --> F["renderer.build_figure<br/>(painter cache keyed on<br/>per-spec color tuple)"]
+  S --> F["renderer.build_figure<br/>(painter cache keyed on<br/>per-spec color tuple;<br/>4 entries / 24 MiB per map)"]
 ```
 
 ### State integration

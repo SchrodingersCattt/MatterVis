@@ -158,6 +158,8 @@ boolean is recorded in both `scene["show_hydrogen"]` and
 This is a display filter, not a change to source atoms or connectivity.
 `build_bundle_scene` retains its boolean `show_hydrogen=False` default and
 separate on/off scene-cache entries; it does not adopt omission semantics.
+Those entries are bounded (8 scenes / 64 MiB for the base map, 6 scenes /
+96 MiB after transforms). See `docs/redesign/caches.md`.
 
 `build_scene_from_atoms(..., include_minor=False)` and
 `build_bundle_scene(..., include_minor=False)` omit occupancy-minor disorder

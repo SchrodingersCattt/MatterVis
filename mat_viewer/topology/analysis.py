@@ -26,6 +26,12 @@ from molcrys_kit.structures.polyhedra import (
 )
 
 from ..config import current_config, element_color
+from ..render.retention import (
+    ANALYZE_TOPOLOGY_CACHE_MAX_BYTES,
+    ANALYZE_TOPOLOGY_CACHE_MAX_ENTRIES,
+    payload_nbytes,
+    remember_plain_lru,
+)
 from ..structure import molcrys_bridge
 from .disorder_policy import (
     DEFAULT_DISORDER_POLICY,
@@ -921,7 +927,26 @@ def analyze_topology(
             fallback_max=fallback,
             disorder_policy=disorder_policy,
         )
-        cache[key] = cached
+        sizes = getattr(bundle, "_analyze_topology_cache_nbytes", None)
+        if not isinstance(sizes, dict):
+            sizes = {}
+            try:
+                bundle._analyze_topology_cache_nbytes = sizes
+            except Exception:
+                pass
+        cache = remember_plain_lru(
+            cache,
+            key,
+            cached,
+            sizes,
+            max_entries=ANALYZE_TOPOLOGY_CACHE_MAX_ENTRIES,
+            max_bytes=ANALYZE_TOPOLOGY_CACHE_MAX_BYTES,
+            measure=payload_nbytes,
+        )
+        try:
+            bundle._analyze_topology_cache = cache
+        except Exception:
+            pass
     # Display fields shift per call (camera / formula-unit centering); patch
     # them onto a shallow copy so the cache stays generic.
     out = dict(cached)
