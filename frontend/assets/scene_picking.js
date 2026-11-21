@@ -117,6 +117,14 @@
       }
       if(depth!==null) candidates.push({target:p.target,depth,opacity:p.opacity,pickable:p.pickable!==false});
     });
+    // A pointer inside an atom disc selects that atom. The bond cylinder
+    // crosses the same centre and must not take the click; the shaft
+    // outside every atom disc is still a bond.
+    if(candidates.some(hit=>hit.target&&hit.target.kind==='atom')) {
+      for(let i=candidates.length-1;i>=0;i-=1) {
+        if(candidates[i].target&&candidates[i].target.kind==='bond') candidates.splice(i,1);
+      }
+    }
     const priority={atom:6,bond:5,polyhedron:4,facet:3,geometry:2};
     candidates.sort((a,b)=>Math.abs(a.depth-b.depth)>POLICY.depthEpsilon ? a.depth-b.depth :
       (priority[b.target&&b.target.kind]||0)-(priority[a.target&&a.target.kind]||0) || key(a.target||{}).localeCompare(key(b.target||{})));

@@ -21,6 +21,10 @@ assert.equal(api.hits(graph([bond]),35,100)[0].id,'bond:one'); // away from midp
 assert.equal(api.hits(graph([bond]),35,108).length,0);
 const atom={type:'scatter3d',x:[0],y:[0],z:[-.7],customdata:[{kind:'atom',id:'atom:source:0|image:1,0,0'}],meta:{mv_role:'atom_selection',mv_radii:[.1],mv_parents:[[{kind:'part',id:'part:a'}]]}};
 assert.equal(api.hits(graph([bond,atom]),100,100)[0].kind,'atom');
+const coveringAtom={type:'scatter3d',x:[0],y:[0],z:[0],customdata:[{kind:'atom',id:'atom:center'}],meta:{mv_role:'atom_selection',mv_radii:[.05]}};
+const frontStick={type:'scatter3d',x:[0],y:[0],z:[0],customdata:[{kind:'bond',id:'bond:front'}],meta:{mv_role:'bond_selection',mv_segments:[[[-.8,0,-.2],[.8,0,-.2]]]}};
+assert.equal(api.hits(graph([frontStick,coveringAtom]),100,100)[0].id,'atom:center');
+assert.equal(api.hits(graph([frontStick]),100,100)[0].id,'bond:front');
 assert.equal(api.hits(graph([atom]),100,100)[0].metadata.parents[0].id,'part:a');
 const gd=graph([front]);assert.equal(api.index(gd),api.index(gd));gd.data=[back];gd._fullData=gd.data;assert.equal(api.hits(gd,60,140)[0].id,'back');
 assert.equal(api.hits(graph([front]),190,10).length,0);

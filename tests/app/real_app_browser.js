@@ -29,6 +29,15 @@ function log(message) {
   console.error(new Date().toISOString() + " " + message);
 }
 
+async function settledView(page) {
+  await page.waitForFunction(() => {
+    const busy = document.getElementById("mv-status-busy");
+    const render = document.getElementById("mv-render-status");
+    const working = busy && !busy.classList.contains("is-hidden");
+    const rendering = render && !render.hidden;
+    return !working && !rendering;
+  }, null, {timeout: 20000});
+}
 async function graphReady(page) {
   await page.waitForFunction(() => {
     const gd = document.querySelector("#crystal-graph .js-plotly-plot");
@@ -1225,7 +1234,32 @@ async function runSemanticPick(page) {
     const r=await fetch('/api/v2/selection/appearance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),targets})}).then(r=>r.json());
     return r.items[0].effective.color==='#aa6688' && r.items[1].effective.color==='#8299ac';
   },[afterOrbit.target,inherited]);
-  const exactPoint=await page.evaluate(target=>{const idx=window.MatterVisScenePicking.index(window.MatterVisSemantic.graph()),p=idx.primitives.find(p=>p.target?.id===target.id);return {x:p.p[0],y:p.p[1]};},afterOrbit.target);
+  await settledView(page);
+  let exactPoint=null;
+  for (let attempt=0; attempt<8 && !exactPoint; attempt+=1) {
+    exactPoint=await page.evaluate(target=>{
+      const gd=window.MatterVisSemantic.graph();
+      const api=window.MatterVisScenePicking;
+      const idx=api.index(gd);
+      if(!idx) return null;
+      const primitive=idx.primitives.find(item=>item.target&&item.target.id===target.id&&item.p);
+      if(!primitive) return null;
+      const points=[[primitive.p[0], primitive.p[1]]];
+      for(let ring=4; ring<=16; ring+=4) {
+        for(let step=0; step<8; step+=1) {
+          const angle=step*Math.PI/4;
+          points.push([primitive.p[0]+Math.cos(angle)*ring, primitive.p[1]+Math.sin(angle)*ring]);
+        }
+      }
+      for(const point of points) {
+        const hits=api.hits(gd, point[0], point[1])||[];
+        if(hits[0]&&hits[0].id===target.id) return {x:point[0], y:point[1]};
+      }
+      return null;
+    },afterOrbit.target);
+    if(!exactPoint) await page.waitForTimeout(150);
+  }
+  if(!exactPoint) fail('colored atom center is not the front pick');
   await page.mouse.click(exactPoint.x,exactPoint.y);await selected([afterOrbit.target.id]);
   await page.waitForFunction(()=>document.querySelector('[aria-label="Inherit Color"]')?.disabled===false);
   await inspector.getByRole('button',{name:'Inherit Color',exact:true}).click();
@@ -1760,6 +1794,7 @@ async function runSurfacePick(page) {
     }return null;
   },{kind,id});}
   for(const id of ['surface-left','surface-right']){
+    await settledView(page);
     const hit=await pixel('geometry',id);if(!hit) fail('surface face not pickable: '+id);
     await page.evaluate(hit=>document.getElementById('crystal-graph').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:hit.x,clientY:hit.y,button:2})),hit);
     await page.waitForFunction(id=>window.MatterVisSemantic.selected()[0]?.id===id,id,{timeout:3000}).catch(async error=>{fail(error.message+JSON.stringify(await page.evaluate(({x,y})=>({debug:document.getElementById('crystal-graph').__mvContextDebug,bound:document.getElementById('crystal-graph').dataset.rcmBound,selected:window.MatterVisSemantic.selected(),hits:window.MatterVisScenePicking.hits(window.MatterVisSemantic.graph(),x,y)}),hit)));});

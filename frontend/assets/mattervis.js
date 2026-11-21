@@ -1598,7 +1598,16 @@
   window.MatterVisSemantic = {
     targetFromPoint: targetFromPoint,
     select: publishSemanticSelection,
-    selected: function () { return persistentTargetsForScene(currentSceneId()).slice(); },
+    selected: function () {
+      const id = currentSceneId();
+      const targets = persistentTargetsForScene(id).slice();
+      if (targets.length || sceneTabIntentSource === "programmatic") return targets;
+      const gd = graphDiv();
+      const render = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+      const painted = render && render.scene_id ? String(render.scene_id) : "";
+      if (painted && painted !== String(id || "")) return persistentTargetsForScene(painted).slice();
+      return targets;
+    },
     sceneId: currentSceneId,
     graph: graphDiv,
   };
@@ -1779,8 +1788,15 @@
       // mouse clicks have already been handled by the pointer controller.
       if(!ignoreClick && e.detail===0 && !ignored(e)) select(e);
     });
-    function openContext(e) {
+    function openContext(e, allowRetry) {
+      const busy=document.getElementById("mv-status-busy");
+      const status=document.getElementById("mv-render-status");
+      const rendering=(busy && !busy.classList.contains("is-hidden")) || (status && !status.hidden);
       const target=resolve(e,!!e.altKey);
+      if(!target && rendering && allowRetry!==false){
+        requestAnimationFrame(function(){ openContext(e, false); });
+        return;
+      }
       pushTarget({kind:target?target.kind:"_global",payload:target,scene_id:currentSceneId(),x:e.clientX,y:e.clientY,ts:Date.now()});
       if(target) publishSemanticSelection(target,"replace");
     }
