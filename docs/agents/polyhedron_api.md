@@ -154,7 +154,9 @@ Qhull still rejects uses `hull.reason = "qhull_numerical_failure"` and
 when MolCrysKit did not already record a rejection. The shape card does not
 assign a 3D catalogue label. The analysis text says that no faces were
 generated, and it calls the shell coplanar or collinear only for the rank
-failure. A shell Qhull accepts, including an octahedron with continuous
+failure. Non-finite coordinates and a hull with no recorded reason
+use `qhull_numerical_failure`; neither is reported as a flat shell.
+A shell Qhull accepts, including an octahedron with continuous
 shape measure 0, is unchanged.
 
 A JSON `disorder_policy` on one CLI `--polyhedron` object overrides

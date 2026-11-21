@@ -54,9 +54,10 @@ def render_hull_payload(shell_coords: Any) -> dict[str, Any]:
     ``convex_hull_payload`` asks Qhull for a volume. A flat set raises
     ``QhullError`` (QH6154, the initial simplex is flat). That error is
     ``not_a_3d_polyhedron`` only when :func:`affine_rank` is below 3.
-    A full-rank set that Qhull still rejects is
-    ``qhull_numerical_failure``: the ligands are not reported as coplanar.
-    Either payload keeps the reported coordinates and emits no simplices
+    A full-rank set that Qhull still rejects, and any non-finite
+    coordinate, is ``qhull_numerical_failure``. Neither is reported as
+    coplanar. A finite rejection keeps the reported coordinates. A
+    non-finite rejection stores no coordinates. Neither emits simplices
     or edges.
     """
     coords = np.asarray(shell_coords, dtype=float)
@@ -71,14 +72,25 @@ def render_hull_payload(shell_coords: Any) -> dict[str, Any]:
     try:
         return convex_hull_payload(coords)
     except QhullError:
-        vertices = []
-        rank = 0
-        if coords.ndim == 2 and coords.shape[1:] == (3,):
-            vertices = coords.tolist()
-            rank = affine_rank(coords)
+        finite_shell = (
+            coords.ndim == 2
+            and coords.shape[1:] == (3,)
+            and coords.shape[0] > 0
+            and bool(np.all(np.isfinite(coords)))
+        )
+        if not finite_shell:
+            return {
+                "vertices": [],
+                "simplices": [],
+                "edges": [],
+                "degenerate": True,
+                "reason": REASON_QHULL_NUMERICAL,
+                "affine_rank": 0,
+            }
+        rank = affine_rank(coords)
         reason = REASON_NOT_3D if rank < 3 else REASON_QHULL_NUMERICAL
         return {
-            "vertices": vertices,
+            "vertices": coords.tolist(),
             "simplices": [],
             "edges": [],
             "degenerate": True,
@@ -90,10 +102,10 @@ def render_hull_payload(shell_coords: Any) -> dict[str, Any]:
 def rejected_hull_card(reason: str | None) -> tuple[str, str]:
     """Return ``(hull_reason, error)`` for a hull the renderer did not draw.
 
-    Rank below 3 is the flat-shell card. Every other reason is a numerical
-    failure and does not describe the ligands as flat.
+    Rank below 3 is the flat-shell card. A missing reason is not evidence
+    that the ligands are flat, so it uses the numerical card.
     """
-    if reason in (None, REASON_NOT_3D):
+    if reason == REASON_NOT_3D:
         return (
             REASON_NOT_3D,
             "Ligand positions do not span a 3D polyhedron "
@@ -101,12 +113,12 @@ def rejected_hull_card(reason: str | None) -> tuple[str, str]:
         )
     return (
         REASON_QHULL_NUMERICAL,
-        "Qhull could not build a hull for this full-rank ligand set. "
-        "This is a numerical failure. No faces were generated.",
+        "Qhull could not build a hull. This is a numerical failure, "
+        "not a flat shell. No faces were generated.",
     )
 
 
 def note_degenerate_hull(gap_info: dict[str, Any], hull: dict[str, Any]) -> None:
     """Record a render rejection without erasing a chemistry rejection."""
     if hull.get("degenerate") and not gap_info.get("rejection_reason"):
-        gap_info["rejection_reason"] = hull.get("reason") or REASON_NOT_3D
+        gap_info["rejection_reason"] = hull.get("reason") or REASON_QHULL_NUMERICAL

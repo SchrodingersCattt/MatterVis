@@ -218,7 +218,7 @@ Not strictly a *score* but a very useful geometric summary for visualisation:
 | `simplices` | `list[list[int]]` | triangle indices of the convex hull |
 | `edges` | `list[list[int]]` | unique undirected edges of the hull |
 | `degenerate` | bool, optional | present when no hull faces were generated |
-| `reason` | str, optional | `not_a_3d_polyhedron` when the affine rank is below 3; `qhull_numerical_failure` when the points span 3D and Qhull still rejects them |
+| `reason` | str, optional | `not_a_3d_polyhedron` when the affine rank is below 3; `qhull_numerical_failure` when the points span 3D, are non-finite, or Qhull rejects them without a rank below 3 |
 | `affine_rank` | int, optional | rank used to choose `reason` after a `QhullError` |
 
 The renderer draws `hull.simplices` as a translucent mesh and `hull.edges` as

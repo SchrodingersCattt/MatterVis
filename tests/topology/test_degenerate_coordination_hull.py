@@ -297,3 +297,35 @@ def test_qhull_error_on_a_full_rank_set_is_numerical(monkeypatch):
     assert "numerical failure" in shape["error"]
     assert "coplanar" not in shape["error"]
     assert "collinear" not in shape["error"]
+
+
+def test_nonfinite_coordinates_are_not_called_coplanar(monkeypatch):
+    from scipy.spatial import QhullError
+
+    points = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, np.nan],
+        ],
+        dtype=float,
+    )
+
+    def _fail(_coords):
+        raise QhullError("QH6154 initial simplex is flat")
+
+    monkeypatch.setattr(
+        "mat_viewer.topology.hull_payload.convex_hull_payload",
+        _fail,
+    )
+    hull = render_hull_payload(points)
+    assert hull["reason"] == REASON_QHULL_NUMERICAL
+    assert hull["reason"] != REASON_NOT_3D
+    assert hull["affine_rank"] == 0
+    shape = _degenerate_shape_payload(4, reason=None)
+    assert shape["hull_reason"] == REASON_QHULL_NUMERICAL
+    assert "coplanar" not in shape["error"]
+    gap: dict = {}
+    note_degenerate_hull(gap, {"degenerate": True})
+    assert gap["rejection_reason"] == REASON_QHULL_NUMERICAL

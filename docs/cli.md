@@ -513,7 +513,8 @@ cannot build a volume, and the command does not invent faces. The topology
 query keeps the reported coordination number and ligand coordinates, with
 empty hull simplices. `gap_info.rejection_reason` is `not_a_3d_polyhedron`
 when the ligand affine rank is below 3, and `qhull_numerical_failure` when
-the points span 3D and Qhull still cannot build the simplex.
+the points span 3D and Qhull still cannot build the simplex. Non-finite
+coordinates use `qhull_numerical_failure` as well.
 
 `--cell-overlays` and `--bond-scale` require the general renderer. An explicit batch request fails instead of silently dropping either option.
 
