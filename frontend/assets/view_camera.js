@@ -702,11 +702,14 @@
     /* A scene relayout updates the camera and the axis ranges, and can
      * leave aspectratio at the previous figure. Write the commanded
      * ratio into the existing layout objects (so a plot that already
-     * holds those objects sees the new numbers) and the gl scene. */
-    installAspectLock(gd);
+     * holds those objects sees the new numbers) and the gl scene.
+     * The glplot hook is only for a ratio we are about to defend. Arming
+     * it on an ordinary frame replaces the controller under an in-progress
+     * orbit. Fit still installs the hook before its own relayout. */
     var frame = fittedFrame(gd);
     var source = aspect && Number.isFinite(Number(aspect.x)) ? aspect : frame && frame.aspectratio;
     if (!gd || !source || !Number.isFinite(Number(source.x))) return;
+    installAspectLock(gd);
     var copy = {x: Number(source.x), y: Number(source.y), z: Number(source.z)};
     writeAspect(gd._fullLayout && gd._fullLayout.scene, copy);
     writeAspect(gd.layout && gd.layout.scene, copy);

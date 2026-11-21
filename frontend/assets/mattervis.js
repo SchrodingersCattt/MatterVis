@@ -671,8 +671,7 @@
       if (projection) patch["scene.camera.projection.type"] = String(projection);
       return patch;
     }
-    function sameSceneDragInProgress(gd) {
-      if (window.__mvGestureEndedAt) return false;
+    function gestureMatchesMountedScene(gd) {
       const render = renderMetadataFromLayout(gd && gd.layout);
       const canvasId = render && render.scene_id ? String(render.scene_id) : "";
       const gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
@@ -686,6 +685,10 @@
       const canvasEpoch = render.server_started_at != null ? String(render.server_started_at) : "";
       if (gestureEpoch && canvasEpoch && gestureEpoch !== canvasEpoch) return false;
       return true;
+    }
+    function sameSceneDragInProgress(gd) {
+      if (window.__mvGestureEndedAt) return false;
+      return gestureMatchesMountedScene(gd);
     }
     function newerCameraCommand(gd) {
       const render = renderMetadataFromLayout(gd && gd.layout);
@@ -727,7 +730,18 @@
     }
     function restoreInProgressDrag(gd) {
       if (!gd || gd.__mvRestoringDrag || !window.Plotly || typeof window.Plotly.relayout !== "function") return Promise.resolve();
-      if (!sameSceneDragInProgress(gd) || newerCameraCommand(gd)) return Promise.resolve();
+      const inProgress = sameSceneDragInProgress(gd);
+      /* A figure react that started before pointer-up captured the pre-drag
+       * camera and can finish after the button is up. That completion is
+       * still this gesture: put the sampled eye back. A react that starts
+       * after pointer-up copies the committed camera itself. A size replot
+       * after pointer-up does not use this path. */
+      const ended = Number(window.__mvGestureEndedAt || 0);
+      const reactStarted = Number(gd.__mvFrameReactStartedAt || 0);
+      const frameOverlappedGesture = !!(
+        ended && reactStarted && reactStarted < ended && gestureMatchesMountedScene(gd)
+      );
+      if ((!inProgress && !frameOverlappedGesture) || newerCameraCommand(gd)) return Promise.resolve();
       const saved = dragSampleCamera();
       if (!saved) return Promise.resolve();
       const now = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
@@ -1023,6 +1037,7 @@
             }
             if (objectFigure) args[1]=Object.assign({},args[1],{layout:next});
             else args[2]=next;
+            gd.__mvFrameReactStartedAt = Date.now();
             return Promise.resolve(original.apply(receiver,args)).then(function(result) {
               frameApplied=true;
               if (gd.__mvInFlightFrame===key) gd.__mvInFlightFrame="";
@@ -2807,11 +2822,11 @@
   document.addEventListener("pointerup", function() {
     // Capture runs before Plotly's pointerup relayout. The ended clock has
     // to be set first so that relayout is the gesture's own commit, and a
-    // command that follows it can read the live revision. Drop the sampled
-    // orbit with the gesture so the next press cannot restore it.
+    // command that follows it can read the live revision. The sampled orbit
+    // stays until the next pointerdown: a figure react that already started
+    // still has the pre-drag camera and finishes after this event.
     window.__mvGestureEndedAt = Date.now();
     window.__mvGesturePointerRelayoutSeen = false;
-    if (window.__mvRetireDragSample) window.__mvRetireDragSample();
   }, true);
   document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();
