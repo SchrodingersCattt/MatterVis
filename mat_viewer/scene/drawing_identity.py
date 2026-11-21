@@ -8,14 +8,15 @@ of a source site, not an additional crystallographic site.
 Replica producers still write ``_is_boundary_replica``,
 ``_is_bonded_image_replica``, and ``_is_framework_context_replica``. Those
 private flags are assembly stamps. :func:`drawing_identity` reads them only
-when ``instance_kind`` is absent, in that order: boundary, then bonded
-image, then framework context, otherwise ``source``.
+when ``instance_kind`` is absent. The more specific flag wins: framework
+context, then bonded image, then boundary, otherwise ``source``. A
+framework-context replica also carries the boundary stamp, so boundary
+must not be read first.
 
-The flag fallback is not a second provenance standard. A framework-context
-replica also carries the boundary stamp, so the fallback cannot tell those
-two kinds apart. New replica producers must call
-:func:`stamp_drawing_identity`. Remove the fallback once every scene rebuild
-stamps ``instance_kind``; do not add another flag-only path.
+:func:`ensure_source_identity` writes that resolved kind onto the atom.
+After a scene rebuild, counts read ``instance_kind`` and do not consult
+the flags again. New replica producers must call
+:func:`stamp_drawing_identity`. Do not add another flag-only path.
 ``image_shift`` is the identity component. ``_image_shift`` is read only
 when ``image_shift`` was not stored.
 """
@@ -40,13 +41,12 @@ INSTANCE_KINDS = (
 
 _ZERO_SHIFT = (0, 0, 0)
 _INDEX_KEYS = ("_source_index", "source_index", "site_index")
-# Boundary before bonded-image before framework. A framework-context
-# replica also carries the boundary stamp, so producers must set
-# ``instance_kind`` themselves when the more specific kind matters.
+# Framework context also sets the boundary flag. Bonded images are more
+# specific than a bare boundary stamp. Read the specific flag first.
 _FLAG_KINDS = (
-    ("_is_boundary_replica", INSTANCE_BOUNDARY),
-    ("_is_bonded_image_replica", INSTANCE_BONDED_IMAGE),
     ("_is_framework_context_replica", INSTANCE_FRAMEWORK_CONTEXT),
+    ("_is_bonded_image_replica", INSTANCE_BONDED_IMAGE),
+    ("_is_boundary_replica", INSTANCE_BOUNDARY),
 )
 
 
@@ -167,15 +167,23 @@ def stamp_home_source(atom: dict[str, Any], *, fallback: Any = "") -> dict[str, 
 
 
 def ensure_source_identity(atoms: list[Any]) -> list[Any]:
-    """Stamp source identity on drawings a replica producer left blank.
+    """Stamp ``instance_kind`` on drawings a replica producer left blank.
 
-    A drawing that already carries a replica flag keeps that flag. Stamping
-    it as ``source`` would hide the copy from the source-site count.
+    A drawing that already carries a replica flag is stamped with the kind
+    those flags resolve to. It is not stamped ``source``. After this call
+    the atom's ``instance_kind`` is the identity later counts read.
     """
     for index, atom in enumerate(atoms):
         if not isinstance(atom, dict) or atom.get("instance_kind"):
             continue
         if any(atom.get(flag) for flag, _kind in _FLAG_KINDS):
+            source_id, shift, kind = drawing_identity(atom)
+            stamp_drawing_identity(
+                atom,
+                source_site_id=source_id or indexed_source_site_id(atom, index),
+                image_shift=shift,
+                instance_kind=kind,
+            )
             continue
         stamp_home_source(atom, fallback=index)
     return atoms

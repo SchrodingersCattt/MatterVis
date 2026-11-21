@@ -238,8 +238,10 @@ the drawing list and stamps unstamped home atoms as `source`, so a
 previous replica kind does not survive the wrap. The private flags
 `_is_boundary_replica`, `_is_framework_context_replica`, and
 `_is_bonded_image_replica` remain assembly stamps. They fill
-`instance_kind` only when a drawing has none, and that fallback is not
-a second provenance standard. The disorder line also keeps the drawn
+`instance_kind` only when a drawing has none, and the more specific
+flag wins: framework context, then bonded image, then boundary. The
+rebuild writes that kind onto the drawing, so later counts do not
+read the flags. The disorder line also keeps the drawn
 subset separate
 from loader disorder flags on the canonical source atoms, so an ordered
 formula-unit cluster does not describe the loaded structure as ordered.

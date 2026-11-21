@@ -401,10 +401,12 @@ Notes for callers:
   repeated visual copy and is not added as a source site. The private
   flags `_is_boundary_replica`, `_is_framework_context_replica`, and
   `_is_bonded_image_replica` remain assembly stamps. They supply
-  `instance_kind` only when that field is absent, and that fallback is
-  not a second provenance standard: new replica producers stamp
-  `instance_kind`, and a display-mode rebuild stamps home drawings as
-  `source`. The line reads
+  `instance_kind` only when that field is absent. The more specific
+  flag wins: framework context, then bonded image, then boundary. A
+  framework copy also carries the boundary flag, so boundary is not
+  read first. A display-mode rebuild writes that resolved kind onto
+  the drawing and stamps unstamped home atoms as `source`. Later
+  counts read `instance_kind`. The line reads
   loader disorder flags (`is_disordered`, `_is_minor`,
   `disorder_resolved`). It does not infer disorder from occupancy.
 - `POST /topology`

@@ -645,28 +645,45 @@ def test_several_images_of_one_site_count_as_one_source_site():
     assert shifts == {(0, 0, 0), (1, 0, 0), (0, -1, 0)}
 
 
-def test_legacy_flags_read_image_shift_until_identity_is_stamped():
-    """Flag fallback is compatibility, and it still keeps the image axis."""
-    legacy = {
+def test_legacy_flags_resolve_specific_kind_then_stamp_it():
+    """Framework wins over the boundary flag it also carries."""
+    from mat_viewer.scene.drawing_identity import ensure_source_identity
+
+    bonded = {
         "_source_index": 4,
         "_image_shift": (0, 1, 0),
         "_is_bonded_image_replica": True,
         "_is_boundary_replica": True,
     }
-    assert drawing_identity(legacy) == ("4", (0, 1, 0), "boundary")
-    explicit = dict(legacy)
+    framework = {
+        "_source_index": 4,
+        "_image_shift": (0, 1, 0),
+        "_is_framework_context_replica": True,
+        "_is_boundary_replica": True,
+    }
+    boundary = {
+        "_source_index": 4,
+        "_image_shift": (0, 1, 0),
+        "_is_boundary_replica": True,
+    }
+    assert drawing_identity(bonded) == ("4", (0, 1, 0), "bonded_image")
+    assert drawing_identity(framework) == ("4", (0, 1, 0), "framework_context")
+    assert drawing_identity(boundary) == ("4", (0, 1, 0), "boundary")
+    explicit = dict(framework)
     stamp_drawing_identity(
         explicit,
         source_site_id="4",
         image_shift=(0, 1, 0),
-        instance_kind="framework_context",
+        instance_kind="boundary",
     )
-    assert drawing_identity(explicit) == ("4", (0, 1, 0), "framework_context")
-    from mat_viewer.scene.drawing_identity import ensure_source_identity
-
-    kept = ensure_source_identity([dict(legacy)])
-    assert drawing_identity(kept[0]) == ("4", (0, 1, 0), "boundary")
-    assert "instance_kind" not in kept[0]
+    assert drawing_identity(explicit) == ("4", (0, 1, 0), "boundary")
+    kept = ensure_source_identity([dict(framework), dict(bonded), dict(boundary)])
+    assert [atom["instance_kind"] for atom in kept] == [
+        "framework_context",
+        "bonded_image",
+        "boundary",
+    ]
+    assert drawing_identity(kept[0]) == ("4", (0, 1, 0), "framework_context")
 
 
 def test_display_mode_switch_stamps_source_identity_and_keeps_copies():
