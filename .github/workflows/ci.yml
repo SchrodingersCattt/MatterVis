@@ -389,6 +389,73 @@ jobs:
           path: ci-diagnostics/
           if-no-files-found: ignore
 
+  windows-upload-share-modes:
+    name: Windows upload share-mode tests
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned molcrys-kit and test dependencies
+        run: |
+          python -m pip install "pip==${CI_PIP_VERSION}"
+          python -m pip install -c requirements/ci-constraints.txt -e ".[all,test]"
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics --expected-runner windows-latest
+
+      - name: Run Windows file-lock tests
+        run: |
+          python -m pytest tests/app/test_windows_file_cleanup.py -q --tb=short \
+            --junitxml=windows-file-locks.xml
+          python - << 'PY'
+          import xml.etree.ElementTree as ET
+
+          required = {
+              "test_remove_candidate_deletes_a_real_readonly_file",
+              "test_windows_readonly_unlink_needs_candidate_cleanup",
+              "test_exclusive_reader_makes_upload_retry_fail_closed",
+              "test_shared_read_without_delete_keeps_the_published_inode",
+          }
+          found = {}
+          for case in ET.parse("windows-file-locks.xml").iter("testcase"):
+              name = case.get("name")
+              if name not in required:
+                  continue
+              found[name] = (
+                  case.find("skipped") is not None,
+                  case.find("failure") is not None or case.find("error") is not None,
+              )
+          missing = sorted(required - found.keys())
+          skipped = sorted(name for name, (was_skipped, _) in found.items() if was_skipped)
+          failed = sorted(name for name, (_, was_failed) in found.items() if was_failed)
+          if missing or skipped or failed:
+              raise SystemExit(
+                  "Windows share-mode tests did not execute: "
+                  f"missing={missing} skipped={skipped} failed={failed}"
+              )
+          print("Windows share-mode tests executed:", ", ".join(sorted(required)))
+          PY
+
+      - name: Upload Windows file-lock results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-file-locks
+          path: |
+            windows-file-locks.xml
+            ci-diagnostics/
+          if-no-files-found: ignore
+
   # Warn-only. A checkout or script failure here must not fail the workflow.
   # The script exits 0 and emits a warning annotation.
   docs-policy-warn:

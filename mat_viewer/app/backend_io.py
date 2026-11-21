@@ -8,6 +8,11 @@ from .style_helpers import *
 from .runtime import _prewarm_bundle_async
 from ..loader.cif_export import loaded_crystal_to_cif
 
+# A sharing violation is transient. Retry the digest read, then fail closed.
+# Equal file size is not a substitute for the SHA-256 check.
+_UPLOAD_DIGEST_READ_ATTEMPTS = 3
+_UPLOAD_DIGEST_READ_PAUSE_S = 0.05
+
 
 class _IOBackendMixin:
     def _drop_placeholder(self) -> None:
@@ -127,6 +132,39 @@ class _IOBackendMixin:
             _prewarm_bundle_async(self, bundle.name)
         return bundle
 
+    @staticmethod
+    def _reuse_published_upload(path: str, data: bytes, digest: str) -> None:
+        """Keep an existing upload only when its bytes match ``digest``.
+
+        A Windows sharing violation while reading a published file is not
+        proof of the requested object. Retry that read a few times. If the
+        digest still cannot be read, fail and leave the path unchanged.
+        Equal size is not a verified digest. A readable file with a
+        different digest is a collision and is not overwritten.
+        """
+        import time
+
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise RuntimeError(
+                "content-addressed upload digest does not match the supplied bytes"
+            )
+        denied: PermissionError | None = None
+        for attempt in range(_UPLOAD_DIGEST_READ_ATTEMPTS):
+            try:
+                with open(path, "rb") as existing:
+                    existing_digest = hashlib.sha256(existing.read()).hexdigest()
+            except PermissionError as exc:
+                denied = exc
+                if attempt + 1 < _UPLOAD_DIGEST_READ_ATTEMPTS:
+                    time.sleep(_UPLOAD_DIGEST_READ_PAUSE_S)
+                continue
+            if existing_digest != digest:
+                raise RuntimeError("content-addressed upload digest collision")
+            return
+        raise RuntimeError(
+            "content-addressed upload could not be verified"
+        ) from denied
+
     def add_uploaded_file_bytes(self, data: bytes, filename: str) -> LoadedCrystal:
         # Sanitise the user-supplied filename before joining it onto a
         # writable directory. ``os.path.join("/tmp/uploads", "/etc/passwd")``
@@ -140,10 +178,12 @@ class _IOBackendMixin:
 
         digest = hashlib.sha256(data).hexdigest()
 
-        # The file path is content-addressed, so concurrent requests for the
-        # same bytes may safely write it before taking the backend lock.  The
-        # lock below then makes digest/name reservation atomic and prevents two
-        # requests from creating a ``foo_2`` tab for one upload.
+        # The path is content-addressed. Each request writes a private
+        # temporary file, then the backend lock publishes it only when the
+        # destination is absent. A retry must not replace that path: on
+        # Windows a reader with the file open rejects the replace. The
+        # digest is checked outside the lock so the read does not stall
+        # every other backend operation.
 
         upload_dir = os.path.realpath(os.path.join(tempfile.gettempdir(), "mat_viewer_uploads"))
         os.makedirs(upload_dir, exist_ok=True)
@@ -164,17 +204,22 @@ class _IOBackendMixin:
             filename=safe,
             bytes=len(data),
         ):
-            # Write to a per-request temporary inode and atomically replace
-            # the content-addressed target.  Two concurrent retries can then
-            # never expose a truncated CIF to MolCrysKit while one request is
-            # still writing the shared path.
+            # Write to a per-request temporary inode. The first publisher
+            # atomically moves it into place. A retry keeps the published
+            # inode, so a reader never observes a truncated CIF and Windows
+            # never has to replace a file it already has open.
             fd, temporary_path = tempfile.mkstemp(
                 prefix=f".{digest[:12]}-", suffix=".tmp", dir=upload_dir
             )
             try:
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(data)
-                os.replace(temporary_path, path)
+                with self._lock:
+                    reuse = os.path.exists(path)
+                    if not reuse:
+                        os.replace(temporary_path, path)
+                if reuse:
+                    self._reuse_published_upload(path, data, digest)
             finally:
                 try:
                     os.unlink(temporary_path)

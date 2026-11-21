@@ -149,6 +149,29 @@ figure: a process-wide camera or display classification does not skip the
 frame when the mounted figure still belongs to another scene. The delivery
 contract is `docs/reliability-scene-delivery.md`.
 
+## CIF upload and native extension files
+
+Uploaded CIFs are named from a content hash plus the sanitized filename.
+Each request writes a private temporary file. The backend lock covers
+concurrent requests in one process and publishes that file only when the
+destination is absent. A later retry does not replace the published path.
+It checks the full digest when the file can be read, and that read does
+not hold the backend lock. A Windows sharing violation retries that digest
+read a few times. If the bytes still cannot be read, the retry fails and
+leaves the published file in place. Equal size is not treated as a
+verified digest. A readable file whose digest differs is left unchanged
+and the retry fails.
+
+Native structure writes mark candidate CIFs read-only until host shutdown.
+Failed and cancelled candidates, and retained files at shutdown, are made
+owner-writable before deletion. A deletion error does not replace the
+original write failure. Windows can then remove the same files POSIX would
+remove.
+
+The read-only deletion case and the Win32 `CreateFileW` share-mode cases
+run in CI on `windows-latest`. A result that skips those cases does not
+meet this contract.
+
 ## Documentation of the render interface
 
 Atomaestro is a pure render interface. Stable docs describe geometry, bond

@@ -74,25 +74,80 @@ def test_package_build_uses_pinned_backends_without_isolation() -> None:
         assert "python -m build\n" not in workflow
 
 
+def _jobs(workflow: str) -> dict[str, str]:
+    lines = workflow.splitlines()
+    start = lines.index("jobs:")
+    jobs: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in lines[start + 1 :]:
+        if line and not line.startswith(" "):
+            break
+        if (
+            line.startswith("  ")
+            and not line.startswith("   ")
+            and line.rstrip().endswith(":")
+        ):
+            current = line.strip()[:-1]
+            jobs[current] = []
+            continue
+        if current is not None:
+            jobs[current].append(line)
+    return {name: "\n".join(body) for name, body in jobs.items()}
+
+
+def _runner(job_body: str) -> str:
+    runs = [
+        line.strip()
+        for line in job_body.splitlines()
+        if line.strip().startswith("runs-on:")
+    ]
+    assert len(runs) == 1
+    return runs[0].split(":", 1)[1].strip()
+
+
 def test_expected_runner_comes_from_each_workflow() -> None:
     assert "ubuntu-24.04" not in RECORDER
     assert "ubuntu-latest" not in RECORDER
+    assert "windows-latest" not in RECORDER
     assert "--expected-runner" in RECORDER
-    for workflow, runner in ((CI, "ubuntu-24.04"), (DRIFT, "ubuntu-latest")):
-        runs = [
-            line.strip()
-            for line in workflow.splitlines()
-            if line.strip().startswith("runs-on:")
-        ]
+    drift_runs = [
+        line.strip()
+        for line in DRIFT.splitlines()
+        if line.strip().startswith("runs-on:")
+    ]
+    drift_calls = [
+        line.strip()
+        for line in DRIFT.splitlines()
+        if "record_ci_environment.py" in line
+    ]
+    assert drift_runs
+    assert drift_calls
+    assert all(line == "runs-on: ubuntu-latest" for line in drift_runs)
+    assert all("--expected-runner ubuntu-latest" in line for line in drift_calls)
+
+    jobs = _jobs(CI)
+    windows = jobs["windows-upload-share-modes"]
+    assert _runner(windows) == "windows-latest"
+    assert "tests/app/test_windows_file_cleanup.py" in windows
+    assert "Windows share-mode tests did not execute" in windows
+    assert "--expected-runner windows-latest" in windows
+    for name, body in jobs.items():
+        runner = _runner(body)
         calls = [
             line.strip()
-            for line in workflow.splitlines()
+            for line in body.splitlines()
             if "record_ci_environment.py" in line
         ]
-        assert runs
-        assert calls
-        assert all(line == f"runs-on: {runner}" for line in runs)
-        assert all(f"--expected-runner {runner}" in line for line in calls)
+        if name == "windows-upload-share-modes":
+            assert runner == "windows-latest"
+            assert calls
+        elif name == "docs-policy-warn":
+            assert runner == "ubuntu-24.04"
+            assert not calls
+        else:
+            assert runner == "ubuntu-24.04", name
+            assert calls, name
+        assert all(f"--expected-runner {runner}" in line for line in calls), name
 
 
 def test_camera_job_keeps_traces_and_environment_artifacts() -> None:
