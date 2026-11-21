@@ -738,11 +738,12 @@
        * after pointer-up does not use this path. */
       const ended = Number(window.__mvGestureEndedAt || 0);
       const reactStarted = Number(gd.__mvFrameReactStartedAt || 0);
-      /* A relayout after pointer-up is a newer pose (the offscreen
-       * repair, a refit). Do not put the sampled orbit back over it. */
-      const serialMatches = Number(gd.__mvRelayoutSerial || 0) === Number(gd.__mvGestureRelayoutSerial || 0);
+      /* Relayouts inside the overlapping figure are that figure. A
+       * camera relayout after pointer-up, outside that figure, is a
+       * newer pose (the offscreen repair, a refit) and keeps the eye. */
+      const externalMatches = Number(gd.__mvExternalRelayouts || 0) === Number(gd.__mvGestureExternalRelayouts || 0);
       const frameOverlappedGesture = !!(
-        ended && reactStarted && reactStarted < ended && serialMatches && gestureMatchesMountedScene(gd)
+        ended && reactStarted && reactStarted < ended && externalMatches && gestureMatchesMountedScene(gd)
       );
       if ((!inProgress && !frameOverlappedGesture) || newerCameraCommand(gd)) return Promise.resolve();
       const saved = dragSampleCamera();
@@ -858,8 +859,8 @@
         const args=Array.prototype.slice.call(arguments);
         if (name === "relayout") {
           const relayoutGraph = typeof args[0] === "string" ? document.getElementById(args[0]) : args[0];
-          if (relayoutGraph && !relayoutGraph.__mvRestoringDrag) {
-            relayoutGraph.__mvRelayoutSerial = Number(relayoutGraph.__mvRelayoutSerial || 0) + 1;
+          if (relayoutGraph && !relayoutGraph.__mvRestoringDrag && !relayoutGraph.__mvInsideFrameReact) {
+            relayoutGraph.__mvExternalRelayouts = Number(relayoutGraph.__mvExternalRelayouts || 0) + 1;
           }
         }
         let layout=null;
@@ -1047,7 +1048,12 @@
             if (objectFigure) args[1]=Object.assign({},args[1],{layout:next});
             else args[2]=next;
             gd.__mvFrameReactStartedAt = Date.now();
+            gd.__mvInsideFrameReact = Number(gd.__mvInsideFrameReact || 0) + 1;
+            const releaseFrameReact = function () {
+              gd.__mvInsideFrameReact = Math.max(0, Number(gd.__mvInsideFrameReact || 1) - 1);
+            };
             return Promise.resolve(original.apply(receiver,args)).then(function(result) {
+              releaseFrameReact();
               frameApplied=true;
               if (gd.__mvInFlightFrame===key) gd.__mvInFlightFrame="";
               /* A Plotly figure replacement can leave the previous hover
@@ -1096,6 +1102,7 @@
                 });
               });
             }, function (error) {
+              releaseFrameReact();
               if (gd.__mvInFlightFrame===key) gd.__mvInFlightFrame="";
               throw error;
             });
@@ -2840,7 +2847,7 @@
   document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();
     const gd = graphDiv();
-    if (gd) gd.__mvGestureRelayoutSerial = Number(gd.__mvRelayoutSerial || 0);
+    if (gd) gd.__mvGestureExternalRelayouts = Number(gd.__mvExternalRelayouts || 0);
     if (interactionActive) markInactiveSoon();
     const generation = gestureGeneration;
     const stamped = window.__mvGestureSceneId || "";
