@@ -54,7 +54,13 @@ curl -X PATCH http://localhost:50001/api/v2/config \
 Top-level sections:
 
 - `style`: default render style keys, mirroring
-  `mat_viewer.presets.DEFAULT_STYLE`.
+  `mat_viewer.presets.DEFAULT_STYLE`. Builtin cube defaults are
+  `isosurface_stride=2` and `isosurface_smooth=False`, the historical
+  marching-cubes mesh. `prepare_render` uses them. Pass stride 1 and
+  `isosurface_smooth=True` for the Taubin publication mesh.
+  `build_figure` isosurface traces ignore smoothing and stay raw
+  marching cubes. `style["material"]` remains `mesh` or `flat`; CPU
+  Blinn–Phong presets are `surface_material`, not this field.
 - `colors`: Atomaestro scene palette, radii, polyhedron auto-colours,
   and `selection_highlight`.
 - `cube`: cube/orbital panel palette and radii.

@@ -208,6 +208,7 @@ class RenderSpec:
     isosurface_positive_color: str = "#D55E00"
     isosurface_negative_color: str = "#0072B2"
     isosurface_stride: int = 2
+    isosurface_smooth: bool = False
     isosurface_ambient: float = 0.68
     isosurface_diffuse: float = 0.32
     isosurface_color_cube: str | None = None
@@ -217,6 +218,9 @@ class RenderSpec:
     # Lighting rig. This is not style["material"] (mesh versus flat) and not
     # a surface-material preset. studio_soft is the historical camera light.
     lighting: str = "studio_soft"
+    # Blinn–Phong preset. None keeps today's per-primitive shade.
+    # This is not style["material"], which remains mesh versus flat.
+    surface_material: str | None = None
 
     def __post_init__(self) -> None:
         if self.backend not in ("cpu", "matplotlib", "plotly", "gpu"):
@@ -279,6 +283,8 @@ class RenderSpec:
             raise ValueError("isosurface_opacity must lie in [0, 1]")
         if int(self.isosurface_stride) != self.isosurface_stride or int(self.isosurface_stride) <= 0:
             raise ValueError("isosurface_stride must be a positive integer")
+        if not isinstance(self.isosurface_smooth, bool):
+            raise TypeError("isosurface_smooth must be a bool")
         for name, value in (
             ("isosurface_ambient", self.isosurface_ambient),
             ("isosurface_diffuse", self.isosurface_diffuse),
@@ -308,6 +314,26 @@ class RenderSpec:
         from .lighting import get_lighting_rig
 
         object.__setattr__(self, "lighting", get_lighting_rig(self.lighting).id)
+        if self.surface_material is not None:
+            from .surface_material import (
+                CPU_ONLY_SURFACE_MATERIALS,
+                resolve_surface_material,
+            )
+
+            resolved = resolve_surface_material(
+                str(self.surface_material),
+                ambient=self.isosurface_ambient,
+                diffuse=self.isosurface_diffuse,
+            )
+            object.__setattr__(self, "surface_material", resolved.id)
+            if resolved.id in CPU_ONLY_SURFACE_MATERIALS and self.backend in {
+                "plotly",
+                "gpu",
+            }:
+                raise ValueError(
+                    f"surface material {resolved.id!r} is drawn only by the CPU "
+                    f"renderer; backend {self.backend!r} would not show the highlight"
+                )
 
 
 @dataclass(frozen=True, slots=True)

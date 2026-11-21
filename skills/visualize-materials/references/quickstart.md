@@ -17,6 +17,10 @@ override unless the requested evidence needs one.
 
 Use `--style ball_stick` for molecules and covalent networks. Use `--style ball`
 for a dense ionic/coordination structure when bonds are not part of the evidence.
+`--surface-material hard_plastic`, `metal_like`, or `glass_like` is a CPU preset.
+`matte` is the default look. `metal` and `glass` are rejected. It is not `--shading`.
+`--backend plotly` or `gpu` rejects those three (`matte` and an omitted preset stay allowed). `--renderer auto` switches those presets to
+the general CPU renderer; `--renderer batch` with either specular preset errors.
 LAMMPS numeric types require the provenance-backed full `--type-map`; never
 guess elements from type numbers or a model filename.
 

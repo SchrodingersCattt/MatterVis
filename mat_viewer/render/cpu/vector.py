@@ -21,15 +21,9 @@ from ..contracts import (
     ViewportPlan,
 )
 from ..compass_overlay import draw_matplotlib_compass
-from ..lighting import (
-    cpu_shader_id,
-    get_lighting_rig,
-    keeps_legacy_response,
-    lighting_id_for_cpu,
-    read_surface_response,
-    shade_with_rig,
-)
+from ..lighting import STUDIO_SOFT_DIRECTION, lighting_id_for_cpu
 from ..property_colorbar import draw_matplotlib_colorbar
+from ..surface_material import material_from_metadata, shade_blinn_phong
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
 from .raster_lines import _clipped_endpoint_rgb, endpoint_screen_weight
 from .visibility import anchor_occluded, projected_polygon_depth
@@ -315,10 +309,10 @@ def _mesh_polygons(
     *,
     lighting: str = "studio_soft",
 ) -> list[BSPPolygon]:
-    lighting = cpu_shader_id(lighting)
     result: list[BSPPolygon] = []
     rotation = transform.view_matrix[:3, :3]
-    light = np.asarray([-0.32, 0.42, 1.0])
+    unlit = lighting == "unlit"
+    light = np.asarray(STUDIO_SOFT_DIRECTION, dtype=float)
     light /= np.linalg.norm(light)
     meshes = sorted(
         (
@@ -333,14 +327,10 @@ def _mesh_polygons(
         material = primitive.metadata.get("material", {})
         ambient = float(material.get("ambient", 0.68))
         diffuse = float(material.get("diffuse", 0.32))
-        surface = read_surface_response(primitive.metadata)
-        apply_surface = (
-            surface is not None
-            and lighting != "unlit"
-            and primitive.metadata.get("kind") != "polyhedron"
-            and not keeps_legacy_response(surface)
-        )
-        surface_rig = get_lighting_rig(lighting) if apply_surface else None
+        surface = material_from_metadata(primitive.metadata.get("surface_material"))
+        if surface is not None and surface.specular <= 0.0:
+            ambient = float(surface.ambient)
+            diffuse = float(surface.diffuse)
         for triangle_index, indices in enumerate(primitive.triangles):
             world_triangle = primitive.vertices[indices]
             normal = np.cross(
@@ -359,32 +349,31 @@ def _mesh_polygons(
                 averaged_length = float(np.linalg.norm(averaged))
                 if averaged_length > 1e-14:
                     shading_normal = rotation @ (averaged / averaged_length)
-            illumination = ambient + diffuse * abs(float(shading_normal @ light))
+            if unlit:
+                illumination = 1.0
+            else:
+                illumination = ambient + diffuse * abs(float(shading_normal @ light))
             if primitive.vertex_colors is None:
                 base_rgb = primitive.rgba[:3]
             else:
                 base_rgb = np.mean(primitive.vertex_colors[indices], axis=0)
-            if lighting == "unlit":
-                shaded_rgb = base_rgb
-            elif apply_surface:
-                shaded_rgb = shade_with_rig(
-                    np.asarray(base_rgb, dtype=float),
-                    shading_normal,
-                    surface,
-                    surface_rig,
+            if not unlit and surface is not None and surface.specular > 0.0:
+                shaded = shade_blinn_phong(
+                    np.asarray(base_rgb, dtype=float), shading_normal, surface
+                )
+                rgba = (
+                    float(np.clip(shaded[0], 0.0, 1.0)),
+                    float(np.clip(shaded[1], 0.0, 1.0)),
+                    float(np.clip(shaded[2], 0.0, 1.0)),
+                    float(primitive.rgba[3]),
                 )
             else:
-                shaded_rgb = (
+                rgba = (
                     float(base_rgb[0]) * illumination,
                     float(base_rgb[1]) * illumination,
                     float(base_rgb[2]) * illumination,
+                    float(primitive.rgba[3]),
                 )
-            rgba = (
-                float(shaded_rgb[0]),
-                float(shaded_rgb[1]),
-                float(shaded_rgb[2]),
-                float(primitive.rgba[3]),
-            )
             clipped = transform.clip_polygon_camera(camera_vertices[indices])
             for fragment_index, triangle in enumerate(triangulate_polygon(clipped)):
                 result.append(

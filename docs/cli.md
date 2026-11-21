@@ -330,12 +330,19 @@ substitutes one frame backend for another.
 | --view MODE | auto | Periodic input uses unit_cell; nonperiodic or synthetic-cell input uses cluster |
 | --style STYLE | ball_stick | ball_stick, ball, space_filling, stick, ortep, or wireframe |
 | --shading MODE | smooth | smooth or flat mesh shading |
+| --surface-material PRESET | current matte shade | CPU Blinn–Phong preset: `matte`, `hard_plastic`, `metal_like`, or `glass_like`. Separate from `--shading smooth\|flat`. `metal` and `glass` are rejected. Specular presets and `glass_like` with `--backend plotly` or `gpu` are rejected. `--renderer batch` with those presets errors; `auto` uses the general renderer |
 | --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), plotly, or explicit native GPU PNG; never selected by fallback |
 | --orthogonal | yes | Orthographic projection |
 | --perspective | no | Perspective projection |
 | --isovalue VALUE | automatic | Explicit positive cube isosurface magnitude |
 | --isosurface-opacity VALUE | style default | Cube surface opacity in (0, 1] |
 | --isosurface-mode MODE | surface | surface or complete triangulated wireframe |
+| --isosurface-positive-color COLOR | #D55E00 | Positive cube phase colour |
+| --isosurface-negative-color COLOR | #0072B2 | Negative cube phase colour |
+| --isosurface-ambient VALUE | 0.68 | Lambert ambient when no specular preset is selected. With `--isosurface-diffuse`, the sum must not exceed 1. This is not a specular highlight |
+| --isosurface-diffuse VALUE | 0.32 | Lambert diffuse paired with `--isosurface-ambient` |
+| --isosurface-stride N | 2 | Marching-cubes grid stride on the `prepare_render` path. `1` is the fine mesh |
+| --isosurface-smooth / --no-isosurface-smooth | off | Taubin-smooth each phase on the `prepare_render` path (`mat-vis render`, including `--backend plotly` geometry). Off keeps the raw marching-cubes mesh. The isovalue is unchanged. `build_cube_figure` / `build_figure` ignore it and stay raw marching cubes |
 | --isosurface-wireframe-width VALUE | 1.0 | Wireframe line width in pixels |
 | --isosurface-wireframe-opacity VALUE | 1.0 | Wireframe line opacity in [0, 1] |
 | --isosurface-color-cube PATH | none | Second cube sampled in physical coordinates onto the isosurface |
@@ -348,6 +355,31 @@ substitutes one frame backend for another.
 Static exports omit browser-only picking traces. Interactive HTML retains them.
 For comparable cube panels, pass the same explicit `--isovalue` rather than
 allowing each source to select its own percentile threshold.
+
+`--surface-material` chooses a Blinn–Phong preset for the CPU renderer.
+Omitting it, or passing `matte`, keeps the current default. `hard_plastic`
+and `metal_like` add visible highlights on ball-and-stick atoms and bonds and
+on cube isosurfaces. On a translucent surface those highlights are not
+multiplied by the surface opacity. `glass_like` adds a view-angle rim:
+the face-on center is clearer than `--isosurface-opacity`, and the silhouette
+stays more opaque and colored. Fully opaque atoms and bonds stay opaque.
+Element colors and isosurface phase or colormap colors stay. Isosurface
+opacity stays 0.55 unless `--isosurface-opacity` is set, and that value still
+scales `glass_like`. `metal` and `glass` are rejected. `hard_plastic`,
+`metal_like`, and `glass_like` with `--backend plotly` or `gpu` are rejected,
+because those backends do not draw the highlight. The array batch renderer
+does not evaluate these presets; use `--renderer general`, which is what
+`auto` selects for them.
+
+```bash
+mat-vis render structure.cif -o matte.png --backend cpu --renderer general
+mat-vis render structure.cif -o plastic.png --backend cpu --renderer general \
+  --surface-material hard_plastic
+mat-vis render structure.cif -o metal-like.png --backend cpu --renderer general \
+  --surface-material metal_like
+mat-vis render orbital.cube -o glass.png --backend cpu --renderer general \
+  --surface-material glass_like --isosurface-opacity 0.55
+```
 
 ### Camera
 
