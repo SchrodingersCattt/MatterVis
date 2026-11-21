@@ -14,12 +14,6 @@ from typing import Any
 
 import numpy as np
 from molcrys_kit.constants.config import KEY_ASSEMBLY, KEY_ATOM_ID, KEY_DISORDER_GROUP
-from molcrys_kit.operations import (
-    add_hydrogens,
-    create_supercell,
-    generate_topological_slab,
-    remove_solvents,
-)
 
 from .errors import (
     AmbiguousSelection,
@@ -27,18 +21,7 @@ from .errors import (
     UnsupportedOperation,
     ValidationError,
 )
-from .materialize import (
-    crystal_from_molecules,
-    molecule_from_spec,
-    molecule_without_locals,
-    replace_symbols,
-)
 from .refs import parse_image
-from .site_geometry import (
-    STALE_REPERCEPTION_KEYS,
-    coordinate_edit,
-    rebase_unwrapped_image_shifts,
-)
 
 
 @dataclass
@@ -105,6 +88,8 @@ IMPLEMENTED_COMMANDS = (
 
 
 def build_supercell(crystal, params: Mapping[str, Any]) -> Outcome:
+    from molcrys_kit.operations import create_supercell
+
     scaling = _strict_scaling(params, pbc=tuple(bool(value) for value in crystal.pbc))
     result = create_supercell(crystal.copy(), scaling)
     mappings, index_map = _supercell_mapping(crystal, result, scaling)
@@ -120,6 +105,8 @@ def build_supercell(crystal, params: Mapping[str, Any]) -> Outcome:
 
 
 def build_slab(crystal, params: Mapping[str, Any]) -> Outcome:
+    from molcrys_kit.operations import generate_topological_slab
+
     miller = _miller(params.get("miller"))
     layers = params.get("layers")
     vacuum = params.get("vacuum", 10.0)
@@ -159,6 +146,8 @@ def build_slab(crystal, params: Mapping[str, Any]) -> Outcome:
 
 
 def insert_molecule(crystal, params: Mapping[str, Any]) -> Outcome:
+    from .materialize import crystal_from_molecules, molecule_from_spec
+
     symbols = [str(symbol) for symbol in params.get("symbols") or []]
     positions = params.get("positions")
     if not symbols or positions is None:
@@ -217,6 +206,8 @@ def insert_molecule(crystal, params: Mapping[str, Any]) -> Outcome:
 
 
 def delete_sites(crystal, params: Mapping[str, Any]) -> Outcome:
+    from .materialize import crystal_from_molecules, molecule_without_locals
+
     targets = _explicit_source_sites(params)
     by_molecule: dict[int, set[int]] = {}
     records = {str(record.site_id): record for record in crystal.get_site_records()}
@@ -252,6 +243,8 @@ def delete_sites(crystal, params: Mapping[str, Any]) -> Outcome:
 
 
 def replace_species(crystal, params: Mapping[str, Any]) -> Outcome:
+    from .materialize import crystal_from_molecules, replace_symbols
+
     symbol = str(params.get("symbol") or "").strip()
     if not symbol:
         raise ValidationError("replace_species requires symbol")
@@ -293,6 +286,8 @@ def transform_coordinates(command: str, crystal, params: Mapping[str, Any]) -> O
     such as ``u_cart`` in the input orientation. The geometry helper applies
     that same rotation and records it for session properties.
     """
+    from .site_geometry import coordinate_edit
+
     result, details, orientations = coordinate_edit(
         command,
         crystal,
@@ -320,6 +315,7 @@ def reperceive_bonds(crystal, params: Mapping[str, Any]) -> Outcome:
     describe the previous image are dropped.
     """
     from molcrys_kit.structures.crystal import MolecularCrystal
+    from .site_geometry import STALE_REPERCEPTION_KEYS, rebase_unwrapped_image_shifts
 
     try:
         scale = float(params.get("bond_scale", 1.0))
@@ -365,6 +361,8 @@ def reperceive_bonds(crystal, params: Mapping[str, Any]) -> Outcome:
 
 
 def add_hydrogens_op(crystal, params: Mapping[str, Any]) -> Outcome:
+    from molcrys_kit.operations import add_hydrogens
+
     if params.get("optimize_torsion"):
         raise UnsupportedOperation("add_hydrogens does not run torsion or energy optimization")
     elements = params.get("target_elements")
@@ -388,6 +386,8 @@ def add_hydrogens_op(crystal, params: Mapping[str, Any]) -> Outcome:
 
 
 def remove_solvent(crystal, params: Mapping[str, Any]) -> Outcome:
+    from molcrys_kit.operations import remove_solvents
+
     targets = params.get("targets")
     indices = params.get("molecule_indices")
     if targets and indices:
@@ -866,6 +866,8 @@ def _materialize_cluster(
     metadata,
     diagnostics,
 ) -> Outcome:
+    from .materialize import crystal_from_molecules, molecule_from_spec
+
     molecule = molecule_from_spec(
         symbols,
         positions,
@@ -911,6 +913,8 @@ def _formulas(crystal) -> list[str]:
 
 
 def _remove_molecule_indices(crystal, indices) -> Outcome:
+    from .materialize import crystal_from_molecules
+
     if not isinstance(indices, (list, tuple)) or not indices:
         raise ValidationError("molecule_indices must be a non-empty list")
     selected = {int(index) for index in indices}

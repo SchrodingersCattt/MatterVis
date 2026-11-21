@@ -305,13 +305,18 @@ def test_periodic_bond_raster_length_matches_minimum_image_distance() -> None:
             show_cell=False,
             bonds=bonds,
             bond_radius=0.02,
+            # Atom spheres are drawn on top of bonds and span the whole
+            # cell here; shrink them so only the bond raster is measured.
+            atom_scale=1.0e-4,
         )
         foreground = np.any(rendered.rgba[:, :, :3] != 255, axis=2)
         _, columns = np.where(foreground)
-        return int(columns.max() - columns.min() + 1)
+        return int(columns.max() - columns.min() + 1) if columns.size else 0
 
     assert raster_width([-0.2, 0.0, 0.0]) == 10
     assert raster_width([1.8, 0.0, 0.0]) == 74
+    # Clip/visibility: a bond end behind the far plane is not rasterized.
+    assert raster_width([0.0, 0.0, -30.0]) == 0
 
 
 def test_fast_polyhedron_context_uses_declared_species_and_cutoff() -> None:
