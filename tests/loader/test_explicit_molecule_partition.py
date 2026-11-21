@@ -286,6 +286,24 @@ def test_one_partition_keeps_every_component_and_reordered_sites() -> None:
     assert molecules[0].info['bond_pairs'] == [(1, 0)]
 
 
+def test_unknown_local_index_field_is_not_published_as_a_frame_index() -> None:
+    atoms, _molecule_indices = _interleaved_frame()
+    indices = np.array([4, 4, 4, 9], dtype=int)
+
+    def identify(subset, **_kwargs):
+        if len(subset) == 1:
+            return []
+        return [_molecule([0, 1], [{
+            'left': 0,
+            'right': 1,
+            'right_image_shift': [0, 0, 1],
+            'asym_index': 0,
+        }])]
+
+    with pytest.raises(ValueError, match="asym_index"):
+        identify_source_partitions(atoms, identify, {}, indices)
+
+
 def test_upstream_partition_argument_is_forwarded_without_a_second_remap() -> None:
     atoms, molecule_indices = _interleaved_frame()
     seen = {}

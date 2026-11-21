@@ -203,8 +203,11 @@ atom, MolCrysKit perceives bonds and periodic images within each source group;
 nearby atoms from different groups are not merged into a larger molecule.
 Disconnected atoms within a group may still become separate components. IDs
 need not be contiguous and the original per-atom array remains available.
-The current MolCrysKit identifier has no partition argument, so the loader
-slices each group and rewrites only the partition-local endpoint indices.
+The current MolCrysKit identifier has no partition argument. The loader
+passes atoms outside each group as `exclude_indices` and keeps the
+indices MolCrysKit returns. It slices a group only for an identifier
+that accepts neither `exclude_indices` nor a partition array, and then
+rewrites only the partition-local endpoint indices.
 Without that array, the usual whole-frame bond perception is unchanged. The
 `--bond-scale` and `--bond-threshold` options apply within each group.
 
