@@ -153,9 +153,15 @@ vertices in one Cartesian frame: the source origin plus voxel axes, mapped
 into the density cube's own origin and axes. A grid with different spacing
 or shape is sampled with trilinear interpolation when that frame covers the
 surface. A triangle wholly above ρ_cut is removed. A triangle that crosses
-ρ_cut is split where the edge samples interpolate to ρ_cut, and positions,
-normals, and colours on that edge use the same weight. Dropping the whole
-triangle would make the hole follow the marching-cubes stride. Vertices
+ρ_cut is split where the sampled density field crosses ρ_cut. An edge longer
+than one density voxel is subdivided until that parameter follows samples
+spaced at most one voxel apart. A same-side edge is included when an interior
+sample is on the other side of ρ_cut. An edge whose samples stay on one side
+is left whole, so the cutoff is not the straight chord between the two
+marching-cubes endpoint samples. Positions, normals, and colours use the same
+parameter.
+Dropping the whole triangle would make the hole follow the marching-cubes
+stride. Vertices
 above the cutoff are not drawn. The mesh stored on the scene is that
 clipped result. Later smoothing or a camera fit has to use those vertices,
 not the triangulation from before the mask. The field cube, the density cube, and any

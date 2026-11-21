@@ -124,10 +124,32 @@ def sample_cube_at_mesh_indices(
     usable Cartesian frame, are an error. ``read_cube`` stores coordinates
     in angstroms and does not convert a Bohr grid into that frame.
     """
+    values = np.asarray(other.values, dtype=float)
+    other_index = _other_index_at_mesh_indices(
+        source, other, mesh_indices, stride=stride, role=role
+    )
+    if other_index.size == 0:
+        return np.empty(0, dtype=float)
+    return _sample_trilinear(values, other_index)
+
+
+def _other_index_at_mesh_indices(
+    source: CubeData,
+    other: CubeData,
+    mesh_indices: np.ndarray,
+    *,
+    stride: int,
+    role: str,
+) -> np.ndarray:
+    """Floating index of ``mesh_indices`` inside ``other``.
+
+    Empty input returns shape ``(0, 3)``. The coverage and axis checks match
+    :func:`sample_cube_at_mesh_indices`.
+    """
     label = f"isosurface {role} cube"
     points = np.asarray(mesh_indices, dtype=float)
     if points.size == 0:
-        return np.empty(0, dtype=float)
+        return np.empty((0, 3), dtype=float)
     if points.ndim != 2 or points.shape[1] != 3:
         raise ValueError("mesh vertices must have shape (N, 3)")
     values = np.asarray(other.values, dtype=float)
@@ -154,7 +176,7 @@ def sample_cube_at_mesh_indices(
             "Cartesian frame. read_cube stores coordinates in angstroms and "
             "does not convert a Bohr grid into that frame."
         )
-    return _sample_trilinear(values, other_index)
+    return other_index
 
 
 def sample_color_cube(

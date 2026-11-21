@@ -59,6 +59,30 @@ def _interaction_field() -> tuple[CubeData, CubeData, np.ndarray, np.ndarray]:
     )
 
 
+def _sampled_density(
+    source: CubeData,
+    density_values: np.ndarray,
+    positions: np.ndarray,
+) -> np.ndarray:
+    from mat_viewer.cube.color_field import sample_cube_at_mesh_indices
+
+    return sample_cube_at_mesh_indices(
+        source,
+        _cube(density_values, name="density.cube"),
+        positions,
+        stride=1,
+        role="density",
+    )
+
+
+def _signed_z(positions: np.ndarray, faces: np.ndarray) -> float:
+    total = 0.0
+    for face in faces:
+        first, second, third = positions[face]
+        total += float(np.cross(second - first, third - first)[2])
+    return total
+
+
 def _closer_to(vertices: np.ndarray, target: np.ndarray, other: np.ndarray) -> np.ndarray:
     return np.linalg.norm(vertices - target, axis=1) < np.linalg.norm(
         vertices - other, axis=1
@@ -118,8 +142,15 @@ def test_vertex_rule_keeps_only_the_low_density_triangle() -> None:
 
     assert filtered is not None
     kept_triangles, (kept_positions,) = filtered
-    assert kept_triangles.shape == (1, 3)
-    assert np.allclose(kept_positions[:, 0], [0.0, 1.0, 0.0])
+    assert kept_triangles.shape[0] >= 1
+    assert kept_triangles.shape[1] == 3
+    high = np.asarray([[1.0, 1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.0, 1.0]])
+    for corner in high:
+        assert not np.any(np.all(np.isclose(kept_positions, corner), axis=1))
+    for corner in (np.array([0.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])):
+        assert np.any(np.all(np.isclose(kept_positions, corner), axis=1))
+    # The diagonal toward (1, 1) bulges to ρ = 0.075. That sample is not a vertex.
+    assert not np.any(np.all(np.isclose(kept_positions, [0.5, 0.5, 0.0]), axis=1))
 
 
 def test_crossing_triangle_is_clipped_at_the_cutoff() -> None:
@@ -129,20 +160,31 @@ def test_crossing_triangle_is_clipped_at_the_cutoff() -> None:
     density_values[2, 0, 0] = 10.0
     density_values[0, 2, 0] = 0.0
     indices = np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]])
+    colors = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
     coarse = filter_mesh_by_density(
         source,
         _cube(density_values, name="density.cube"),
         indices,
         np.asarray([[0, 1, 2]], dtype=np.int64),
-        (indices,),
+        (indices, colors),
         stride=1,
         cutoff=5.0,
     )
     assert coarse is not None
-    coarse_faces, (coarse_positions,) = coarse
-    assert coarse_faces.shape[0] == 2
-    assert any(np.allclose(point, [1.0, 0.0, 0.0]) for point in coarse_positions)
-    assert not any(np.allclose(point, [2.0, 0.0, 0.0]) for point in coarse_positions)
+    coarse_faces, (coarse_positions, coarse_colors) = coarse
+    assert coarse_faces.shape[0] >= 1
+    # Endpoint samples are ρ = 0 and ρ = 10, so a chord would cut at x = 1
+    # and would paint that vertex with color 0.5. The voxel between them is
+    # ρ = 0, so the field crosses 5 at x = 1.5 and the color follows 0.75.
+    base = coarse_positions[np.isclose(coarse_positions[:, 1], 0.0) & np.isclose(coarse_positions[:, 2], 0.0)]
+    assert np.max(base[:, 0]) == pytest.approx(1.5)
+    assert np.any(np.all(np.isclose(coarse_positions, [1.5, 0.0, 0.0]), axis=1))
+    assert not np.any(np.all(np.isclose(coarse_positions, [2.0, 0.0, 0.0]), axis=1))
+    cut = np.all(np.isclose(coarse_positions, [1.5, 0.0, 0.0]), axis=1)
+    assert np.allclose(coarse_colors[cut][0], [0.75, 0.0, 0.0])
+    assert np.all(_sampled_density(source, density_values, coarse_positions) <= 5.0 + 1e-8)
+    signed = _signed_z(coarse_positions, coarse_faces)
+    assert signed > 0.0
     # The same edge, split once, still cuts at x = 1. The midpoint sample is
     # ρ = 5 and stays. Whole-triangle deletion would have removed both.
     density_values[1, 0, 0] = 5.0
@@ -160,8 +202,90 @@ def test_crossing_triangle_is_clipped_at_the_cutoff() -> None:
     )
     assert fine is not None
     _faces, (fine_positions,) = fine
-    assert np.max(fine_positions[:, 0]) == pytest.approx(1.0)
+    fine_base = fine_positions[
+        np.isclose(fine_positions[:, 1], 0.0) & np.isclose(fine_positions[:, 2], 0.0)
+    ]
+    assert np.max(fine_base[:, 0]) == pytest.approx(1.0)
+    assert np.any(np.all(np.isclose(fine_positions, [1.0, 0.0, 0.0]), axis=1))
     assert not np.any(np.all(np.isclose(fine_positions, [2.0, 0.0, 0.0]), axis=1))
+    assert np.all(_sampled_density(source, density_values, fine_positions) <= 5.0 + 1e-8)
+
+
+def test_same_side_edge_is_cut_when_the_field_bulges_past_the_cutoff() -> None:
+    source = _cube(np.zeros((5, 2, 2)))
+    density_values = np.zeros((5, 2, 2))
+    density_values[2, :, :] = 10.0
+    indices = np.asarray([[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    filtered = filter_mesh_by_density(
+        source,
+        _cube(density_values, name="density.cube"),
+        indices,
+        np.asarray([[0, 1, 2]], dtype=np.int64),
+        (indices.copy(),),
+        stride=1,
+        cutoff=5.0,
+    )
+    assert filtered is not None
+    faces, (positions,) = filtered
+    # Both endpoints are ρ = 0, so a chord between them would keep x = 2.
+    base = positions[np.isclose(positions[:, 1], 0.0) & np.isclose(positions[:, 2], 0.0)]
+    assert not np.any(np.isclose(base[:, 0], 2.0))
+    assert np.any(np.isclose(base[:, 0], 1.5))
+    assert np.any(np.isclose(base[:, 0], 2.5))
+    assert not np.any((base[:, 0] > 1.5 + 1e-8) & (base[:, 0] < 2.5 - 1e-8))
+    assert np.all(_sampled_density(source, density_values, positions) <= 5.0 + 1e-8)
+    assert _signed_z(positions, faces) > 0.0
+
+
+def test_long_edge_that_stays_below_the_cutoff_is_not_subdivided() -> None:
+    source = _cube(np.zeros((5, 2, 2)))
+    indices = np.asarray([[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    filtered = filter_mesh_by_density(
+        source,
+        _cube(np.zeros((5, 2, 2)), name="density.cube"),
+        indices,
+        np.asarray([[0, 1, 2]], dtype=np.int64),
+        (indices.copy(),),
+        stride=1,
+        cutoff=5.0,
+    )
+    assert filtered is not None
+    faces, (positions,) = filtered
+    assert faces.shape == (1, 3)
+    assert np.allclose(positions, indices)
+
+
+def test_cut_follows_the_density_index_when_voxel_axes_differ() -> None:
+    source = _cube(np.zeros((2, 2, 2)))
+    density_values = np.zeros((5, 2, 2))
+    density_values[4, 0, 0] = 10.0
+    density = _cube(
+        density_values,
+        axes=np.eye(3) * 0.25,
+        name="density.cube",
+    )
+    indices = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.25, 0.0]])
+    colors = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    filtered = filter_mesh_by_density(
+        source,
+        density,
+        indices,
+        np.asarray([[0, 1, 2]], dtype=np.int64),
+        (indices, colors),
+        stride=1,
+        cutoff=5.0,
+    )
+    assert filtered is not None
+    _faces, (positions, colors_out) = filtered
+    # Mesh x = 1 is density index 4. Samples stay 0 through index 3, so the
+    # field crosses 5 at density index 3.5, mesh x = 0.875. The endpoint
+    # chord would cut at mesh x = 0.5 and color 0.5.
+    base = positions[np.isclose(positions[:, 1], 0.0) & np.isclose(positions[:, 2], 0.0)]
+    assert np.max(base[:, 0]) == pytest.approx(0.875)
+    assert np.any(np.isclose(base[:, 0], 0.875))
+    assert not np.any(np.isclose(positions[:, 0], 1.0) & np.isclose(positions[:, 1], 0.0))
+    cut = np.isclose(positions[:, 0], 0.875) & np.isclose(positions[:, 1], 0.0)
+    assert np.allclose(colors_out[cut][0], [0.875, 0.0, 0.0])
 
 
 def test_mask_removes_the_high_density_well_and_keeps_the_other() -> None:

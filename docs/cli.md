@@ -355,7 +355,11 @@ allowing each source to select its own percentile threshold.
 `--isosurface-density-mask` is off unless you set it. Omitting it leaves
 orbital and electron-density isosurfaces unchanged, even when a density cube
 and a cutoff are also present. The cutoff is in the density cube's scalar
-values. For electron density those values are atomic units, e/Bohr³
+values. Crossing triangles are clipped where the sampled field crosses ρ_cut.
+An edge longer than one density voxel follows those samples, including a
+same-side edge whose interior crosses ρ_cut, rather than the chord between
+its marching-cubes endpoints. For electron density those values are atomic
+units, e/Bohr³
 (1 a.u. ≈ 6.748 e/Å³, so 0.05 a.u. ≈ 0.337 e/Å³). The command does not
 convert e/Å³ and does not choose ρ_cut. 0.05 a.u. is a starting point some
 NCI/RDG figures use for weak contacts. It is not a default, not an IRI
