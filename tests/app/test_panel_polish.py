@@ -207,6 +207,16 @@ def test_status_counts_follow_the_drawn_display_mode(tmp_path):
         assert scope == "Formula unit"
         assert int(str(counts).split(" ", 1)[0]) == formula_atoms
         assert _listed_atom_total(atoms) == formula_atoms
+
+        stale = dict(backend.get_state())
+        backend.update_scene(stale["scene_id"], {"label": "QA Scene B"})
+        label, scope, counts, _atoms = refresh(
+            stale, "summary", {"action": "scene-rename-btn"}
+        )
+        assert label == "QA Scene B"
+        assert stale.get("scene_label") != "QA Scene B"
+        assert scope == "Formula unit"
+        assert "atoms" in str(counts)
     finally:
         backend.close()
 

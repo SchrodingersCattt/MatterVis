@@ -151,7 +151,8 @@ Notes for callers:
 - Scene create, rename, delete, reorder, duplicate, and undo append a
   `scene_catalog` envelope to the same journal and include
   `scene_catalog` on the WebSocket snapshot and on `GET /view-updates`.
-  The page rebuilds its existing tab strip from that message. The
+  The page rebuilds its existing tab strip from that message. The scene
+  display name comes from this catalog event; tab text is a projection. The
   selected tab stays put, except on the page that clicked Duplicate:
   that page selects the catalog `active_id` locally. `focus` stays
   false for create, rename, delete, reorder, duplicate, and undo, so
@@ -633,7 +634,12 @@ The full list (authoritative; the diagram only groups them):
 - `mv-status-bar`, `mv-status-structure`, `mv-status-scope`,
   `mv-status-counts`, `mv-status-busy`: canvas status bar and the
   working/rendering indicator. Counts follow the scene drawn for the
-  current display mode and transforms.
+  current display mode and transforms. A rename refreshes
+  `mv-status-structure` from the live scene in the same round as the tab
+  strip (`scene-event-store`), without waiting for another
+  `agent-state-store` write or a scene switch. The sidebar
+  `#upload-status` line (`Loaded: …`) takes the scene display name from
+  the catalog event, including a same-scene rename; tab text is a projection.
 - `perf-log-level`: server-log level filter (`debug` shows all,
   `info` hides fast callbacks, `warn` and `error` are stricter)
 - `save-preset-btn`
