@@ -109,9 +109,10 @@ must not change scene B, and a stale revision must not replace a newer one.
   receive the pre-remount drag eye. A camera command that arrives during that
   replot still wins. A frame or internal replot that finishes while that
   drag is still down puts that gesture's sampled eye back when the
-  generation and session still match. A figure react that started before
+  generation and session still match.   A figure react that started before
   pointer-up captured the pre-drag camera and can finish after the button
-  is up; that completion puts the same sampled eye back once. A react that
+  is up; that completion puts the same sampled eye back once, unless a
+  camera relayout has already landed after pointer-up. A react that
   starts after pointer-up does not. The sample is dropped when the next
   gesture is stamped, so a later press cannot restore the previous orbit
   before it samples its own eye. A size replot does not put back a

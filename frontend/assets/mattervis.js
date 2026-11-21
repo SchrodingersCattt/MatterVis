@@ -738,8 +738,11 @@
        * after pointer-up does not use this path. */
       const ended = Number(window.__mvGestureEndedAt || 0);
       const reactStarted = Number(gd.__mvFrameReactStartedAt || 0);
+      /* A relayout after pointer-up is a newer pose (the offscreen
+       * repair, a refit). Do not put the sampled orbit back over it. */
+      const serialMatches = Number(gd.__mvRelayoutSerial || 0) === Number(gd.__mvGestureRelayoutSerial || 0);
       const frameOverlappedGesture = !!(
-        ended && reactStarted && reactStarted < ended && gestureMatchesMountedScene(gd)
+        ended && reactStarted && reactStarted < ended && serialMatches && gestureMatchesMountedScene(gd)
       );
       if ((!inProgress && !frameOverlappedGesture) || newerCameraCommand(gd)) return Promise.resolve();
       const saved = dragSampleCamera();
@@ -853,6 +856,12 @@
       if (typeof original!=="function"||original.__mattervisRenderGate) return;
       const wrapped=function() {
         const args=Array.prototype.slice.call(arguments);
+        if (name === "relayout") {
+          const relayoutGraph = typeof args[0] === "string" ? document.getElementById(args[0]) : args[0];
+          if (relayoutGraph && !relayoutGraph.__mvRestoringDrag) {
+            relayoutGraph.__mvRelayoutSerial = Number(relayoutGraph.__mvRelayoutSerial || 0) + 1;
+          }
+        }
         let layout=null;
         const fullFigure=name==="newPlot"||name==="react";
         const objectFigure=fullFigure&&args[1]&&!Array.isArray(args[1])&&typeof args[1]==="object";
@@ -2830,6 +2839,8 @@
   }, true);
   document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();
+    const gd = graphDiv();
+    if (gd) gd.__mvGestureRelayoutSerial = Number(gd.__mvRelayoutSerial || 0);
     if (interactionActive) markInactiveSoon();
     const generation = gestureGeneration;
     const stamped = window.__mvGestureSceneId || "";

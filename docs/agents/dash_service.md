@@ -201,8 +201,9 @@ Notes for callers:
   drag camera only when that drag's scene generation and, when both sides
   have one, server session still match the mounted figure. A frame or
   replot that finishes during that drag puts that gesture's sampled eye
-  back under the same rule. A figure react that started before pointer-up
-  still puts that sampled eye back if it finishes after the button is up.
+  back under the same rule.   A figure react that started before pointer-up
+  still puts that sampled eye back if it finishes after the button is up,
+  unless a camera relayout has already landed after pointer-up.
   A react that starts after pointer-up does not. The sample is cleared
   when the next gesture is stamped. A newer camera revision wins over both
   the sample and a pose captured before the replot. Explicit camera revisions use
