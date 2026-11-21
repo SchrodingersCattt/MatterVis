@@ -47,11 +47,24 @@ def backend(tmp_path: Path) -> ViewerBackend:
     return ViewerBackend(preset_path=default_preset_path(), root_dir=str(tmp_path))
 
 
+def _write_is_blocked(path: Path) -> bool:
+    """Report the platform signal that a candidate cannot be replaced.
+
+    POSIX uses the write permission bit. Windows ``chmod`` only sets
+    ``FILE_ATTRIBUTE_READONLY``, which is the bit ``_remove_candidate`` clears.
+    """
+
+    if sys.platform == "win32":
+        attributes = getattr(path.stat(), "st_file_attributes", 0)
+        return bool(attributes & stat.FILE_ATTRIBUTE_READONLY)
+    return not os.access(path, os.W_OK)
+
+
 def test_remove_candidate_deletes_a_real_readonly_file(tmp_path: Path) -> None:
     path = tmp_path / "candidate.cif"
     path.write_bytes(b"data_synthetic\n")
     path.chmod(0o400)
-    assert not os.access(path, os.W_OK)
+    assert _write_is_blocked(path)
     StructureWriter._remove_candidate(path)
     assert not path.exists()
 
@@ -89,6 +102,66 @@ def _win32_file():
     return create_file, close_handle
 
 
+def _invalid_handle_values():
+    import ctypes
+
+    width = ctypes.sizeof(ctypes.c_void_p) * 8
+    all_ones = (1 << width) - 1
+    return {None, 0, -1, all_ones, ctypes.c_void_p(-1).value}
+
+
+def _handle_is_invalid(handle) -> bool:
+    invalid = _invalid_handle_values()
+    if handle in invalid:
+        return True
+    try:
+        return int(handle) in invalid
+    except (TypeError, ValueError):
+        return False
+
+
+def _win32_file_index(handle):
+    """Return the NTFS volume and file index of an already-open handle."""
+
+    import ctypes
+    from ctypes import wintypes
+
+    class _FileTime(ctypes.Structure):
+        _fields_ = [
+            ("dwLowDateTime", wintypes.DWORD),
+            ("dwHighDateTime", wintypes.DWORD),
+        ]
+
+    class _ByHandleFileInformation(ctypes.Structure):
+        _fields_ = [
+            ("dwFileAttributes", wintypes.DWORD),
+            ("ftCreationTime", _FileTime),
+            ("ftLastAccessTime", _FileTime),
+            ("ftLastWriteTime", _FileTime),
+            ("dwVolumeSerialNumber", wintypes.DWORD),
+            ("nFileSizeHigh", wintypes.DWORD),
+            ("nFileSizeLow", wintypes.DWORD),
+            ("nNumberOfLinks", wintypes.DWORD),
+            ("nFileIndexHigh", wintypes.DWORD),
+            ("nFileIndexLow", wintypes.DWORD),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_info = kernel32.GetFileInformationByHandle
+    get_info.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    ]
+    get_info.restype = wintypes.BOOL
+    info = _ByHandleFileInformation()
+    if not get_info(handle, ctypes.byref(info)):
+        raise OSError(ctypes.get_last_error(), "GetFileInformationByHandle failed")
+    index = (int(info.nFileIndexHigh) << 32) | int(info.nFileIndexLow)
+    if index == 0:
+        raise OSError("Windows file index was zero")
+    return (int(info.dwVolumeSerialNumber), index)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing modes")
 def test_exclusive_reader_makes_upload_retry_fail_closed(backend: ViewerBackend) -> None:
     bundle = backend.add_uploaded_file_bytes(_VALID_CIF, "locked.cif")
@@ -97,16 +170,16 @@ def test_exclusive_reader_makes_upload_retry_fail_closed(backend: ViewerBackend)
     create_file, close_handle = _win32_file()
     generic_read = 0x80000000
     open_existing = 3
-    invalid = wintypes_invalid()
     handle = create_file(str(path), generic_read, 0, None, open_existing, 0, None)
-    assert handle != invalid
     try:
+        assert not _handle_is_invalid(handle), ctypes_last_error()
         with pytest.raises(RuntimeError, match="could not be verified"):
             ViewerBackend._reuse_published_upload(
                 str(path), before, _sha256(before)
             )
     finally:
-        close_handle(handle)
+        if not _handle_is_invalid(handle):
+            close_handle(handle)
     assert path.read_bytes() == before
 
 
@@ -117,17 +190,20 @@ def test_shared_read_without_delete_keeps_the_published_inode(
     bundle = backend.add_uploaded_file_bytes(_VALID_CIF, "shared.cif")
     path = Path(bundle.cif_path)
     before = path.read_bytes()
-    identity = path.stat().st_ino
+    ino = path.stat().st_ino
     create_file, close_handle = _win32_file()
     generic_read = 0x80000000
     file_share_read = 0x1
+    file_share_read_write_delete = 0x1 | 0x2 | 0x4
     open_existing = 3
     handle = create_file(
         str(path), generic_read, file_share_read, None, open_existing, 0, None
     )
-    assert handle != wintypes_invalid()
     temporary = ""
+    confirm = None
     try:
+        assert not _handle_is_invalid(handle), ctypes_last_error()
+        published = _win32_file_index(handle)
         ViewerBackend._reuse_published_upload(str(path), before, _sha256(before))
         descriptor, temporary = tempfile.mkstemp(
             prefix=".replace-", suffix=".tmp", dir=str(path.parent)
@@ -138,10 +214,25 @@ def test_shared_read_without_delete_keeps_the_published_inode(
             os.replace(temporary, path)
         again = backend.add_uploaded_file_bytes(_VALID_CIF, "shared.cif")
         assert Path(again.cif_path) == path
-        assert path.stat().st_ino == identity
+        if ino:
+            assert path.stat().st_ino == ino
+        confirm = create_file(
+            str(path),
+            generic_read,
+            file_share_read_write_delete,
+            None,
+            open_existing,
+            0,
+            None,
+        )
+        assert not _handle_is_invalid(confirm), ctypes_last_error()
+        assert _win32_file_index(confirm) == published
         assert path.read_bytes() == before
     finally:
-        close_handle(handle)
+        if confirm is not None and not _handle_is_invalid(confirm):
+            close_handle(confirm)
+        if not _handle_is_invalid(handle):
+            close_handle(handle)
         try:
             os.unlink(temporary)
         except OSError:
@@ -154,7 +245,7 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def wintypes_invalid():
+def ctypes_last_error() -> int:
     import ctypes
 
-    return ctypes.c_void_p(-1).value
+    return int(ctypes.get_last_error())

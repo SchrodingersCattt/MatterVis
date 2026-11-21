@@ -147,6 +147,10 @@ owner-writable before deletion. A deletion error does not replace the
 original write failure. Windows can then remove the same files POSIX would
 remove.
 
+The read-only deletion case and the Win32 `CreateFileW` share-mode cases
+run in CI on `windows-latest`. A result that skips those cases does not
+meet this contract.
+
 ## Documentation of the render interface
 
 Atomaestro is a pure render interface. Stable docs describe geometry, bond
