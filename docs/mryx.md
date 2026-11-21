@@ -3,9 +3,11 @@
 Atomaestro imports `.mryx` using **MolCrysKit `read_mryx_atoms`**. The viewer has
 no Mercury XML parser, element-code table or chemistry decoder of its own. The
 required upstream revision is
-`a54a922eb2d11dca3fafac2d63a19c603541ca4d`, the reviewed head of open
-MolCrysKit PR 234. It includes Mercury `read_mryx` `0702ed8d` and the
-lightweight CIF reader `a4080132`. It is not MolCrysKit main. `pyproject.toml`
+`2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6`, the reviewed commit of open
+MolCrysKit PR 234 authorized for this pin. It is not a later tip of that
+branch. It includes Mercury `read_mryx` `0702ed8d`, the
+lightweight CIF reader `a4080132`, and the MRYX bounds on this commit.
+It is not MolCrysKit main. `pyproject.toml`
 requests the `desktop` extra of that commit. Core MolCrysKit is NumPy,
 NetworkX, and Click. The desktop extra supplies ASE, pymatgen, SciPy, spglib,
 and defusedxml, and `read_mryx` imports defusedxml from that extra.
@@ -23,11 +25,16 @@ The unified Python APIs `load_atomistic_input`, `iter_atomistic_frames`,
 `count_structure_frames`, and `load_structure_input` recognize `.mryx` (or
 `input_format="mryx"` / `"mercury"`). Each stored structure is a frame in document
 order. The load APIs accept negative indices. `iter_atomistic_frames` still
-requires pre-resolved non-negative indices, but MRYX is not a bounded-memory
-stream: the adapter calls `read_mryx_atoms(index=":")`, so every stored
-structure and its provenance are parsed before the first frame is yielded.
-Selecting one frame does not make that read lazy. Stored structures are
-document indices, not a physical time trajectory.
+requires pre-resolved non-negative indices. The adapter calls
+`read_mryx_atoms(index=":")`. That call validates every structure and
+builds the full list before the first frame is yielded, so selecting one
+frame does not make the adapter lazy. A direct upstream call with one
+index validates every structure and then keeps ASE atoms for that
+structure only. Stored structures are document indices, not a physical
+time trajectory. Upstream also rejects a label longer than 128
+characters, a document with more than 4,096 structures, and a structure
+with more than 100,000 stored sites. Those `ValueError`s propagate.
+They are synthetic bounds, not a certification of Mercury files.
 
 Browser upload and `build_loaded_crystal` show the first stored structure and
 do not start a playback clock. CLI and TUI selection uses `--frame`, which is
@@ -47,8 +54,9 @@ multi-structure document does not create a tab for every structure.
 
 This is read-only **stored-site geometry** import, not Mercury session
 restoration and not a certification of Mercury files. Public tests use
-synthetic documents only. The adapter reads the document eagerly:
-`read_mryx_atoms(index=":")` materializes every stored structure before
+synthetic documents only. No Mercury export was compared with this
+reader. The adapter reads the document eagerly:
+`read_mryx_atoms(index=":")` builds every stored structure before
 the first frame is yielded, including when the caller asks for one index.
 Upstream warnings are emitted and retained in
 `bundle.frame_info["mryx"]["diagnostics"]`; source metadata also appears in

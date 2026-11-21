@@ -1,8 +1,14 @@
 """The shared MolCrysKit pin keeps both parent surfaces.
 
-``a54a922eb2d11dca3fafac2d63a19c603541ca4d`` is the reviewed head of open
-MolCrysKit PR 234. It includes Mercury ``read_mryx`` commit ``0702ed8d``
-and lightweight CIF commit ``a4080132``. It is not MolCrysKit main.
+``2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6`` is the reviewed commit of open
+MolCrysKit PR 234 authorized for this pin. It is not a later tip of that
+branch. It includes Mercury ``read_mryx`` ``0702ed8d``,
+lightweight CIF / phone-site ``a4080132``, and the MRYX bounds on this
+commit: a single index validates every structure and keeps only that
+structure; ``index=":"`` builds the full list before returning. Labels
+are at most 128 characters, a document at most 4,096 structures, and a
+structure at most 100,000 stored sites. Synthetic documents exercise
+those bounds. They do not certify Mercury. It is not MolCrysKit main.
 ``read_mryx`` imports ``defusedxml`` from the desktop extra, so a core-only
 install of this commit fails here.
 """

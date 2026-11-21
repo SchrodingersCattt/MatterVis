@@ -139,6 +139,18 @@ def test_display_scene_keeps_import_diagnostics(mryx_path):
     assert scene["draw_atoms"][0]["label"] == "He47"
 
 
+def test_overlong_synthetic_label_is_rejected(tmp_path):
+    xml = synthetic_mryx_xml().replace("He47", "He" + ("X" * 130))
+    path = tmp_path / "long-label.mryx"
+    path.write_bytes(gzip.compress(xml.encode(), mtime=0))
+    with pytest.raises(ValueError, match="label exceeds"):
+        read_mryx_frames(path)
+
+
+def synthetic_mryx_xml():
+    return gzip.decompress(synthetic_mryx()).decode()
+
+
 def test_iteration_parses_the_whole_document(monkeypatch, mryx_path):
     import molcrys_kit.io as io
 

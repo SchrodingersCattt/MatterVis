@@ -10,10 +10,12 @@ from __future__ import annotations
 def read_mryx_frames(path):
     """Return every stored structure.
 
-    MolCrysKit ``read_mryx_atoms(index=':')`` parses the whole document and
-    retains every structure before this returns. A later frame selection does
-    not make the read lazy. A missing reader becomes an actionable dependency
-    error rather than a second parser.
+    MolCrysKit ``read_mryx_atoms(index=':')`` validates every structure and
+    builds the full list before this returns. A later frame selection does
+    not make this adapter lazy. A direct upstream call with one index keeps
+    only that structure after validation; this adapter does not use that
+    path. A missing reader becomes an actionable dependency error rather
+    than a second parser.
     """
     try:
         from molcrys_kit.io import read_mryx_atoms

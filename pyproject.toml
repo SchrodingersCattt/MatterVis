@@ -28,19 +28,24 @@ dependencies = [
     "matplotlib",
     "pillow",
     "ase",
-    # Pin MolCrysKit a54a922eb2d11dca3fafac2d63a19c603541ca4d, the reviewed
-    # head of open PR 234. It includes Mercury read_mryx 0702ed8d and
-    # lightweight CIF / phone-site a4080132, plus BondRecord.role,
-    # connectivity, and disorder. It is not MolCrysKit main. Do not retarget
-    # this URL to a later branch tip, and do not invent a PyPI version.
+    # MolCrysKit 2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6 is the reviewed
+    # commit of open PR 234 authorized for this pin. It is not a later
+    # tip of that branch and it is not MolCrysKit main. It includes Mercury
+    # read_mryx 0702ed8d, lightweight CIF / phone-site a4080132, and the
+    # MRYX bounds on this commit: a single index validates every structure
+    # and keeps only that structure; index=":" builds the full list before
+    # returning. Labels are at most 128 characters, a document at most
+    # 4,096 structures, and a structure at most 100,000 stored sites.
+    # Synthetic documents exercise those bounds. They do not certify
+    # Mercury. Do not retarget this URL to a later branch tip.
     # The desktop extra supplies ASE, pymatgen, SciPy, spglib, and
     # defusedxml. Core MolCrysKit is NumPy, NetworkX, and Click. read_mryx
-    # imports defusedxml from the desktop extra, so this dependency requests
-    # that extra. requirements/ci-constraints.txt names this same commit URL
-    # without the extra marker: pip 26 rejects extras in a constraint.
-    # identify_molecules defaults to as_refined; shell construction defaults
-    # to major. Exclusive shell selection keeps whole orientations.
-    "molcrys-kit[desktop] @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@a54a922eb2d11dca3fafac2d63a19c603541ca4d",
+    # imports defusedxml from the desktop extra. pyproject.toml requests
+    # the extra; requirements/ci-constraints.txt repeats the same commit
+    # URL without the extra marker because pip 26 rejects extras in
+    # constraints. identify_molecules defaults to as_refined; shell
+    # construction defaults to major.
+    "molcrys-kit[desktop] @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6",
 ]
 
 [project.scripts]

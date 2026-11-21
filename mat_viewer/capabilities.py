@@ -31,16 +31,23 @@ MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 # runtime requirements; released installs stay on this range once the
 # role/regime API is published.
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
-# Development pin shared by Mercury import and the phone snapshot.
-# a54a922 is the reviewed head of open MolCrysKit PR 234, not MolCrysKit
-# main. It includes Mercury read_mryx 0702ed8d and lightweight CIF /
-# phone-site a4080132. Do not retarget this URL to a later branch tip.
+# Development pin shared by the phone snapshot and Mercury import.
+# 2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6 is the reviewed commit of open
+# MolCrysKit PR 234 authorized for this pin. It is not a later tip of
+# that branch and it is not MolCrysKit main. It includes Mercury read_mryx
+# 0702ed8d, lightweight CIF / phone-site a4080132, and the MRYX bounds on
+# this commit: a single index validates every structure and keeps only
+# that structure; index=":" builds the full list before returning. Labels
+# are at most 128 characters, a document at most 4,096 structures, and a
+# structure at most 100,000 stored sites. Synthetic documents exercise
+# those bounds. They do not certify Mercury. Do not retarget this URL to
+# a later branch tip.
 # The desktop extra supplies ASE, pymatgen, SciPy, spglib, and defusedxml;
 # read_mryx imports defusedxml from that extra. pyproject.toml must name
 # this same requirement. The constraint file repeats the commit URL without
 # the extra marker because pip 26 rejects extras in constraints.
 # Restore a release range once those APIs are on PyPI.
-MOLCRYSKIT_SOURCE_COMMIT = "a54a922eb2d11dca3fafac2d63a19c603541ca4d"
+MOLCRYSKIT_SOURCE_COMMIT = "2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6"
 MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
     "molcrys-kit[desktop] @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
     f"{MOLCRYSKIT_SOURCE_COMMIT}"
