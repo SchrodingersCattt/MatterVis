@@ -862,7 +862,15 @@ def topology_results_markdown(topology_data: dict | None) -> str:
     label = shape.get("primary_label")
     modifier = shape.get("label_modifier")
     cshm_value = shape.get("cshm_value")
-    if label:
+    if shape.get("degenerate"):
+        lines.append(
+            shape.get("error")
+            or (
+                "Ligand positions do not span a 3D polyhedron "
+                "(coplanar or collinear). No faces were generated."
+            )
+        )
+    elif label:
         modifier_text = f"{modifier} " if modifier else ""
         cshm_text = f"  (CShM = {cshm_value:.2f})" if cshm_value is not None else ""
         lines.append(f"Shape: {modifier_text}{label}{cshm_text}")

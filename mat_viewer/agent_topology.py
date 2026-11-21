@@ -305,10 +305,11 @@ def _polyhedron_shell_error(
 
     policy = spec.get("disorder_policy") or DEFAULT_DISORDER_POLICY
     points = int(shell_points)
+    detail = f"{points} coplanar or collinear ligand positions; no faces generated" if points >= 4 else f"{points} ligand point(s); need at least 4 non-coplanar points"
     message = (
         f"polyhedron {spec['id']} ({spec['center_species']} -> "
         f"{spec['ligand_species']}, disorder_policy={policy}) has no drawable "
-        f"non-coplanar shell ({points} ligand point(s); need at least 4)"
+        f"3D polyhedron ({detail})"
     )
     return PolyhedronShellError(
         message,

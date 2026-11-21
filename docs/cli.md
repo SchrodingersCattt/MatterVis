@@ -581,7 +581,14 @@ draws one shell per full orientation. If the
 chosen policy still cannot produce at
 least four non-coplanar ligand points, `mat-vis render` exits with
 `mattervis.polyhedron-shell-error/v1` (nested in `mattervis.error/v1` under
-`--json`). The command does not invent ligand coordinates.
+`--json`). The command does not invent ligand coordinates. The same error
+is returned when four or more ligands are coplanar or collinear: Qhull
+cannot build a volume, and the command does not invent faces. The topology
+query keeps the reported coordination number and ligand coordinates, with
+empty hull simplices. `gap_info.rejection_reason` is `not_a_3d_polyhedron`
+when the ligand affine rank is below 3, and `qhull_numerical_failure` when
+the points span 3D and Qhull still cannot build the simplex. Non-finite
+coordinates use `qhull_numerical_failure` as well.
 
 `--cell-overlays` and `--bond-scale` require the general renderer. An explicit batch request fails instead of silently dropping either option.
 

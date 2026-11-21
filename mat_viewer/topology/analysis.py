@@ -32,6 +32,7 @@ from .disorder_policy import (
     invoke_find_polyhedra,
     normalize_disorder_policy,
 )
+from .hull_payload import note_degenerate_hull, rejected_hull_card, render_hull_payload
 from .mck_record import _mck_polyhedron_record
 
 # Dropdown and persisted rows may still carry the historical "(auto)" token.
@@ -256,7 +257,7 @@ def extract_atom_coordination_shells(
             "distances": [
                 float(value) for value in record.get("shell_distances") or []
             ],
-            "source_hull": convex_hull_payload(shell_coords),
+            "source_hull": render_hull_payload(shell_coords),
         }
     return shells
 
@@ -377,7 +378,7 @@ def _extract_coordination_shell_static(
         source_center = np.array(center_fragment["center"], dtype=float)
         source_shell_coords = np.zeros((0, 3), dtype=float)
         shell_distances: list[float] = []
-        hull = convex_hull_payload(source_shell_coords)
+        hull = render_hull_payload(source_shell_coords)
         cn = 0
         # Empty-shell fallback: report the search radius MV asked for so
         # the analysis card can still render "search_cutoff: 10 Å, no
@@ -403,7 +404,7 @@ def _extract_coordination_shell_static(
         if source_shell_coords.size == 0:
             source_shell_coords = np.zeros((0, 3), dtype=float)
         shell_distances = [float(x) for x in record.get("shell_distances") or []]
-        hull = convex_hull_payload(source_shell_coords)
+        hull = render_hull_payload(source_shell_coords)
         cn = int(record.get("coordination_number", len(shell_distances)))
         # MCK PR #32 split the radial knobs at molecule level:
         # * ``record["search_cutoff"]`` is the candidate search radius
@@ -429,6 +430,7 @@ def _extract_coordination_shell_static(
             "disorder_policy": disorder_policy,
             "rejection_reason": record.get("rejection_reason"),
         }
+        note_degenerate_hull(gap_info, hull)
         extra_shells = []
         for extra in record.get("extra_shells") or []:
             coords = np.asarray(extra.get("shell_coords") or [], dtype=float)
@@ -443,7 +445,7 @@ def _extract_coordination_shell_static(
                     "distances": [
                         float(value) for value in extra.get("shell_distances") or []
                     ],
-                    "source_hull": convex_hull_payload(coords),
+                    "source_hull": render_hull_payload(coords),
                 }
             )
     # MolCrysKit reports shell members by source molecule index.  The
@@ -674,7 +676,13 @@ def _analyze_topology_uncached(
     classify_shell_payload_impl = getattr(
         public_module, "_classify_shell_payload", _classify_shell_payload
     )
-    shape = classify_shell_payload_impl(shell_coords, center)
+    hull = shell.get("hull") or shell.get("source_hull") or {}
+    if hull.get("degenerate"):
+        # A flat shell is not an octahedron with a large CShM. Skip the
+        # 3D catalogue so the card does not invent a polyhedron label.
+        shape = _degenerate_shape_payload(len(np.asarray(shell_coords)), hull.get("reason"))
+    else:
+        shape = classify_shell_payload_impl(shell_coords, center)
     # The diagnostics panel also asks MolCrysKit for a best planar subset;
     # that helper enumerates C(N, 5) combinations. Reuse the same bounded
     # nearest-neighbour cage for oversized periodic shells so the complete
@@ -811,6 +819,18 @@ def _sanitize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
             if key not in _SHAPE_DROP_KEYS
         }
     return cleaned
+
+
+def _degenerate_shape_payload(
+    coordination_number: int,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Shape card when the renderer did not build hull faces."""
+    payload = _empty_shape_payload()
+    payload["coordination_number"] = int(coordination_number)
+    payload["degenerate"] = True
+    payload["hull_reason"], payload["error"] = rejected_hull_card(reason)
+    return payload
 
 
 def _empty_shape_payload() -> dict[str, Any]:

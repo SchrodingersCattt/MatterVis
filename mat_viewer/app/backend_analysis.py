@@ -251,8 +251,21 @@ class _AnalysisBackendMixin:
         )
         warnings = list(geometry.get("warnings") or [])
         if drawable_specs == 0 and spec_results:
-            warnings.insert(0, "No spec produced drawable polyhedra "
-                              "(need ≥4 non-coplanar ligand points per centre).")
+            flat_shell = any(
+                len(overlay.get("shell_coords") or []) >= 4
+                and not (overlay.get("hull") or {}).get("simplices")
+                for spec_result in spec_results
+                for overlay in (spec_result.get("overlays") or [])
+            )
+            if flat_shell:
+                warnings.insert(
+                    0,
+                    "No spec produced a 3D polyhedron. Ligand positions are "
+                    "coplanar or collinear, so no faces were generated.",
+                )
+            else:
+                warnings.insert(0, "No spec produced drawable polyhedra "
+                                  "(need ≥4 non-coplanar ligand points per centre).")
 
         return {
             "geometry": geometry,
