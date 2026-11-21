@@ -37,3 +37,11 @@ backend. Plotly preserves the RenderPlan target, view direction, screen-up, and
 deterministic ranges; its API cannot reproduce the CPU near/far planes or field
 of view exactly, and the result warning records that limitation. For ordinary
 static output, use `--backend cpu` instead.
+
+`mat-vis render --backend plotly` uses the `prepare_render` mesh. Cube
+geometry is Taubin-smoothed only with `--isosurface-smooth`. It does not evaluate `--surface-material`:
+`hard_plastic`, `metal_like`, and `glass_like` are rejected on `--backend plotly` and `gpu`.
+`build_cube_figure` / `build_figure` / `orbital_mesh_traces` rebuild
+isosurfaces with raw `marching_cubes` and flat Mesh3d lighting. That preview
+is not publication quality. Journal cube figures use
+`mat-vis render --backend cpu`.

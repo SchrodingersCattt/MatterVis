@@ -149,6 +149,28 @@ def _build_render_parser(
         ),
     )
 
+    def _surface_material_argument(value: str) -> str:
+        from .surface_material import get_surface_material
+
+        try:
+            return get_surface_material(value).id
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from exc
+
+    p.add_argument(
+        "--surface-material",
+        default=None,
+        metavar="PRESET",
+        type=_surface_material_argument,
+        help=(
+            "CPU Blinn-Phong preset: matte, hard_plastic, metal_like, or glass_like. "
+            "Not --shading smooth|flat, which is the mesh/flat draw technique. "
+            "metal and glass are rejected. Specular presets and glass_like with "
+            "--backend plotly or gpu are rejected. "
+            "--renderer batch with those presets errors; auto uses general."
+        ),
+    )
+
     # Projection
     proj = p.add_mutually_exclusive_group()
     proj.add_argument(

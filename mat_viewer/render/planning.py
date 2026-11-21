@@ -43,6 +43,7 @@ from .property_planning import prepare_render_property, property_color_for_atom,
 from ..style.disorder import bond_effective_opacity
 from .lighting import note_plan_lighting
 from .radius import atom_visual_radius, clamp_displacement_radius, hydrogen_radius_floor
+from .surface_material import attach_surface_material
 
 
 def prepare_render(
@@ -559,9 +560,8 @@ def prepare_render(
     isosurface_primitives, isosurface_warnings = _isosurface_primitives(scene, render_spec=render_spec)
     primitives.extend(isosurface_primitives)
     warnings.extend(isosurface_warnings)
-    primitives.extend(
-        vector_primitives(scene.get("vector_overlays"), lattice=scene.get("matrix"))
-    )
+    primitives.extend(vector_primitives(scene.get("vector_overlays"), lattice=scene.get("matrix")))
+    primitives = attach_surface_material(primitives, render_spec.surface_material)
     if render_spec.shading == "flat":
         primitives = [
             (

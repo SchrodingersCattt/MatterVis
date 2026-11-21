@@ -7,13 +7,12 @@ positive and negative isosurface meshes to the backend-neutral scene.
 
 ```mermaid
 flowchart LR
-    CUBE[".cube file"] --> IO["read_cube<br/>CubeData"]
-    IO --> MCK["MolCrysKit<br/>sites, PBC bonds, rings"]
-    IO --> MC["marching cubes<br/>isosurface meshes"]
-    MCK --> SCENE["canonical scene"]
-    MC --> SCENE
-    SCENE --> CPU["CPU PNG / PDF / SVG"]
-    SCENE --> PLOTLY["optional Plotly HTML"]
+    CUBE[".cube file"] --> IO["read_cube"]
+    IO --> PLAN["prepare_render<br/>ensure_cube_isosurfaces"]
+    IO --> FIG["build_cube_figure / build_figure<br/>isosurface_overlay_traces"]
+    PLAN --> CPU["mat-vis --backend cpu<br/>journal export"]
+    PLAN --> ADAPT["mat-vis --backend plotly<br/>smoothed mesh, no Blinn-Phong preset"]
+    FIG --> RAW["raw marching cubes<br/>preview only"]
 ```
 
 ## Installation boundary
@@ -49,9 +48,12 @@ mat-vis render density.cube -o density.svg --backend cpu --json
 
 `--check` resolves `[cube]` without loading the file or creating output.
 
-For the optional Plotly frontend, `build_cube_figure(path, ...)` is the public
-bridge. It still obtains atoms, bonds, image shifts, and display fragments from
-the canonical loader before adding the isosurface overlay.
+`build_cube_figure(path, ...)` is the Plotly figure helper. It still obtains
+atoms, bonds, image shifts, and display fragments from the canonical loader,
+then `build_figure` adds `isosurface_overlay_traces`. That overlay reruns
+`skimage.measure.marching_cubes`. It does not call `ensure_cube_isosurfaces`,
+does not Taubin-smooth, and uses Mesh3d lighting ambient 1, diffuse 0,
+specular 0. It is a preview, not a journal figure.
 
 ## Stable data surface
 
@@ -68,16 +70,66 @@ the canonical loader before adding the isosurface overlay.
   scikit-image and returns backend-neutral vertices, triangles, normals,
   colour, opacity, and ambient/diffuse material coefficients. Pass
   `color_cube` to attach per-vertex RGB sampled from a second `CubeData`.
-- `ensure_cube_isosurfaces(structure)` attaches those meshes to the canonical
-  scene consumed by CPU or Plotly renderers. Prepared meshes are kept only
-  while the source grid, isovalue, stride, material, and color-cube settings
-  are unchanged.
+  Positive and negative phases stay separate meshes.
+- `prepare_render` calls `ensure_cube_isosurfaces`. Taubin filtering
+  (λ = 0.5, μ = −0.53, 15 iterations) runs only when `isosurface_smooth`
+  is true. The default is the historical raw mesh at stride 2.
+  `mat-vis render --backend cpu --isosurface-stride 1 --isosurface-smooth`
+  draws the fine publication mesh.
+  `mat-vis render --backend plotly` draws the same prepared geometry through
+  `render.plotly`. Smoothing is a visual filter: it does not change which
+  voxels are inside the surface. Vertices on the cube-box boundary stay
+  pinned, and any vertex the μ step carries past the data box is placed
+  back on that face before normals and colors are computed. Normals are the
+  scalar-field gradient, sampled with central differences and mapped by
+  `(J^{-1})^T`. A vertex with a tiny gradient, or one outside the grid,
+  keeps the area-weighted mesh normal. The gradient field is flipped
+  together when it disagrees with that marching-cubes winding.
+  Omitting `--isosurface-smooth` keeps the raw marching-cubes mesh. A second
+  cube's colors are resampled at the vertices that are drawn.
+  `render.plotly` does not pass `surface_material` into Mesh3d lighting, so
+  `hard_plastic`, `metal_like`, and `glass_like` are rejected on
+  `--backend plotly` and `--backend gpu` instead of being attached and ignored.
+- `build_cube_figure` and `build_figure` do not use those meshes.
+  `isosurface_overlay_traces` and `orbital_mesh_traces` rerun raw
+  `skimage.measure.marching_cubes` and ignore `scene["isosurfaces"]`.
+  Their Mesh3d lighting is ambient 1, diffuse 0, specular 0. That path is
+  an interactive preview, not publication quality. Journal figures use
+  `mat-vis render --backend cpu`.
+- `ensure_cube_isosurfaces(structure)` stores the prepared CPU meshes.
+  They are kept only while the source grid, isovalue, stride, smoothing,
+  material, and color-cube settings still match. The preparation token
+  defaults to the same raw-mesh contract as that function. Those meshes
+  are what `prepare_render` consumes. `build_figure` does not.
+- CPU, CLI, and the builtin style default to `isosurface_stride=2` and
+  `isosurface_smooth=False`. `--isosurface-stride 1 --isosurface-smooth`
+  is the fine publication mesh.
 
-The static CPU renderer accepts `--isosurface-ambient` and
-`--isosurface-diffuse` coefficients. Their sum must not exceed one. Defaults
-(`0.68` and `0.32`) preserve the standard material; lower ambient and higher
-diffuse values increase directional contrast without introducing white
-specular highlights.
+`--isosurface-ambient` and `--isosurface-diffuse` are the historical Lambert
+pair used when no specular preset is selected. `RenderSpec` still requires
+that pair's sum to be at most 1. The defaults 0.68 and 0.32 reproduce that
+Lambert response and do not add a specular highlight.
+
+`surface_material` is a separate CPU record. Its ambient and diffuse need
+not sum to 1. `matte` keeps the historical response. `hard_plastic` and
+`metal_like` add specular highlights on the smoothed CPU vertex normals.
+On a translucent isosurface the CPU PNG compositor adds that specular
+without multiplying it by the surface opacity. `glass_like` also clears the
+face-on center and thickens the silhouette; opaque atoms and bonds stay
+opaque. They do not recolor the phase. Plotly Mesh3d lighting does not
+evaluate them, including on a Taubin mesh from `mat-vis render --backend plotly`.
+`hard_plastic`, `metal_like`, and `glass_like` are rejected on `--backend plotly`
+and `--backend gpu`. Opacity stays 0.55 unless `--isosurface-opacity` is set,
+and that value still scales the glass rim. Historical 0.68 and 0.32 do not
+conflict with `matte`. `metal` and `glass` are rejected. See
+[`surface_material.md`](surface_material.md). `build_cube_figure` does not
+evaluate these presets.
+
+```bash
+mat-vis render orbital.cube -o raw.png --backend cpu --renderer general
+mat-vis render orbital.cube -o smooth.png --backend cpu --renderer general \
+  --isosurface-stride 1 --isosurface-smooth
+```
 
 ## Isosurface color
 

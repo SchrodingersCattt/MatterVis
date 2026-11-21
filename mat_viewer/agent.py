@@ -215,6 +215,7 @@ def prepare_render(
             positive_color=effective_spec.isosurface_positive_color,
             negative_color=effective_spec.isosurface_negative_color,
             stride=effective_spec.isosurface_stride,
+            smooth=effective_spec.isosurface_smooth,
             ambient=effective_spec.isosurface_ambient,
             diffuse=effective_spec.isosurface_diffuse,
             color_cube=color_cube,

@@ -188,10 +188,10 @@ def orbital_mesh_traces(
 ) -> list[go.Mesh3d]:
     """Build positive/negative orbital surfaces as ``go.Mesh3d`` traces.
 
-    Uses ``skimage.measure.marching_cubes`` to extract the iso-mesh, which
-    renders reliably both interactively and via kaleido static export
-    (unlike ``go.Isosurface`` whose volume ray-marching can drop out under
-    Kaleido). This is the recommended path for publication-quality figures.
+    Uses ``skimage.measure.marching_cubes`` and does not Taubin-smooth the
+    result. These traces are an interactive or Kaleido preview. The CPU
+    publication mesh is opt-in: ``mat-vis render --backend cpu
+    --isosurface-stride 1 --isosurface-smooth``.
     """
     try:
         from skimage.measure import marching_cubes
@@ -658,8 +658,9 @@ def _legacy_build_orbital_panel_figure(
 ) -> go.Figure:
     """Build a legacy Plotly panel from explicit canonical chemistry.
 
-    Useful for publication-quality side-by-side rendering of HOCO/LUCO,
-    spin-up/spin-down, or any pair/triplet of orbitals.
+    Legacy Plotly preview for side-by-side HOCO/LUCO, spin-up/spin-down, or
+    other orbital pairs. The meshes are raw marching cubes, not the smoothed
+    CPU publication export.
 
     .. deprecated::
         This standalone rendering path uses its own color/material system.

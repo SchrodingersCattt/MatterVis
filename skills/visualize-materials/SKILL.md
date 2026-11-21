@@ -48,7 +48,8 @@ see [installation](./references/installation.md). Read [input formats](./referen
 - If rendering starts later or is delegated, that agent loads this skill before
   choosing a command; parent summaries and guessed flags are not a substitute.
 - Render directly; do not run a separate analysis or installation preflight.
-- Use one backend and one representation. CPU is the default static path. `--lighting` defaults to `studio_soft`; `hard_plastic` and `metal_like` do not select `studio_three_point`, and flat or `fast_rendering` is not `unlit`.
+- Use one backend and one representation. CPU is the default. `--lighting` defaults to `studio_soft` and is not selected by a surface preset. `--surface-material` is `matte`, `hard_plastic`, `metal_like`, or `glass_like` (not `--shading`); except `matte`, `plotly`/`gpu` reject them.
+- Journal cubes that want the fine mesh pass `--isosurface-stride 1 --isosurface-smooth` on `mat-vis render --backend cpu`. The default stays stride 2 without Taubin. `--backend plotly` can draw a prepared mesh without the preset. `build_cube_figure` is raw marching cubes; see [cube isosurfaces](./references/cube-isosurface-panels.md).
 - Memory pressure may change renderer detail, never the model: do not delete H,
   downsample atoms, shrink the structure, or switch away from `mat-vis`.
 - Comparison renders use the same orientation, canvas, and orthographic scale.

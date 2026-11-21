@@ -83,6 +83,13 @@ def validate_style_schema(style: dict) -> dict:
         if not normalized.get("ortep_hydrogen_radius"):
             normalized["ortep_hydrogen_radius"] = 0.15
 
+    # surface_material is the Blinn–Phong preset. material stays mesh/flat.
+    # Historical ambient 0.68 / diffuse 0.32 do not conflict with a preset.
+    if "surface_material" in normalized and normalized.get("surface_material") is not None:
+        from ..surface_material import apply_surface_material
+
+        normalized = apply_surface_material(normalized, normalized["surface_material"])
+
     return normalized
 
 

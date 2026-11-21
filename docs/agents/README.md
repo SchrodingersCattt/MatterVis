@@ -60,6 +60,7 @@ The same routing as a quick table:
 | Render project-independent 3-D mesh or implicit geometry entities with real depth | [`scene_api.md`](scene_api.md) |
 | Match a dense coordination-polyhedron publication layout | [`static_publication.md`](static_publication.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
+| Choose a Blinn–Phong surface preset (`matte`, `hard_plastic`, `metal_like`, `glass_like`) for CPU atoms, bonds, and isosurfaces | [`surface_material.md`](surface_material.md) |
 | Render cube isosurfaces as complete triangulated wireframes | [`cube_api.md`](cube_api.md#isosurface-wireframe) |
 | Color a cube isosurface from a second scalar cube | [`cube_api.md`](cube_api.md#isosurface-color) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |

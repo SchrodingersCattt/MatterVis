@@ -261,6 +261,14 @@ def _validate_render_options(args: argparse.Namespace) -> None:
         bond_thresholds_from_args(args)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"--bond-threshold is invalid: {exc}") from exc
+    from .surface_material import CPU_ONLY_SURFACE_MATERIALS
+
+    preset = getattr(args, "surface_material", None)
+    if preset in CPU_ONLY_SURFACE_MATERIALS and args.backend in {"plotly", "gpu"}:
+        raise ValueError(
+            f"--surface-material {preset} is drawn only by the CPU renderer; "
+            f"--backend {args.backend} would not show the highlight"
+        )
     unsupported: list[str] = []
     if args.monochrome:
         unsupported.append("--monochrome")
@@ -510,8 +518,27 @@ def add_isosurface_arguments(parser: argparse.ArgumentParser) -> None:
         "--isosurface-stride",
         type=int,
         default=2,
-        help="Cube grid stride for isosurface extraction.",
+        help=(
+            "Cube grid stride for marching cubes (default: 2). "
+            "Pass 1 with --isosurface-smooth for the fine publication mesh."
+        ),
     )
+    parser.add_argument(
+        "--isosurface-smooth",
+        dest="isosurface_smooth",
+        action="store_true",
+        help=(
+            "Taubin-smooth CPU isosurface meshes after marching cubes. "
+            "Off by default. Does not change the isovalue."
+        ),
+    )
+    parser.add_argument(
+        "--no-isosurface-smooth",
+        dest="isosurface_smooth",
+        action="store_false",
+        help="Keep the raw marching-cubes mesh, without Taubin smoothing.",
+    )
+    parser.set_defaults(isosurface_smooth=False)
     parser.add_argument(
         "--isosurface-ambient",
         type=float,
@@ -575,6 +602,7 @@ def isosurface_render_fields(args: argparse.Namespace) -> dict[str, object]:
         "isosurface_positive_color": args.isosurface_positive_color,
         "isosurface_negative_color": args.isosurface_negative_color,
         "isosurface_stride": args.isosurface_stride,
+        "isosurface_smooth": bool(args.isosurface_smooth),
         "isosurface_ambient": args.isosurface_ambient,
         "isosurface_diffuse": args.isosurface_diffuse,
         "isosurface_color_cube": args.isosurface_color_cube,

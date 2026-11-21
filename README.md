@@ -38,7 +38,7 @@ can use the revision/write APIs directly without adopting the catalog.
 - **Bundled Agent Skills** — `mat-vis skills list|show|tree` exposes progressive, read-only access to the shipped skill entrypoints and references
 - **Browser Viewer** — Drag-and-drop CIF upload and interactive 3D display with `Mesh3d` atoms and bonds. `Scatter3d` fast rendering is used only when explicitly selected; atom count never changes the representation
 - **Coordination Topology** — Automatic coordination-number detection via the nearest-neighbour gap, continuous shape measure (CShM) classification against 12 ideal polyhedra (CN 4–12), planarity RMS, and prism/antiprism twist analysis
-- **Publication Export** — The base CPU backend renders PNG with per-pixel depth handling and emits true-vector PDF/SVG from the same backend-neutral geometry
+- **Publication Export** — The base CPU backend renders PNG with per-pixel depth handling and emits true-vector PDF/SVG from the same backend-neutral geometry. Cube journal figures use that CPU export: Taubin-smoothed isosurfaces at stride 1. `build_cube_figure` is a raw marching-cubes preview, not that publication mesh
 - **Multi-Panel Figures** — `uniform_viewport(scenes)` stamps a shared world-cube on any list of scenes so every `build_figure` call emits at the same physical length per pixel
 - **Composable 3-D geometry**: validated Cartesian meshes, lattice/HKL-aligned through-cylinders, and bounded implicit surfaces use the depth-tested Mesh3d path.
 - **Automation API** — REST + WebSocket endpoints on the same Flask server; drive the viewer from notebooks, agents, or subprocesses
@@ -122,6 +122,10 @@ printf '%s\n' '{"action":"observe"}' '{"action":"close"}' | \
 mat-vis inspect structure.cif --json
 mat-vis render structure.cif -o figure.png --backend cpu --check --json
 mat-vis render structure.cif -o figure.png --backend cpu --json
+
+# CPU-only surface preset. metal and glass are rejected. Plotly and GPU reject non-matte presets.
+mat-vis render structure.cif -o plastic.png --backend cpu \
+  --surface-material hard_plastic --renderer general
 
 # Optional native offscreen GPU PNG (explicit; no CPU fallback)
 python -m pip install "matter-vis[gpu]"

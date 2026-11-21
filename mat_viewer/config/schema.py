@@ -126,6 +126,7 @@ BUILTIN_STYLE: dict[str, Any] = {
     "isosurface_positive_color": "#D55E00",
     "isosurface_negative_color": "#0072B2",
     "isosurface_stride": 2,
+    "isosurface_smooth": False,
     "isosurface_ambient": 0.68,
     "isosurface_diffuse": 0.32,
     "isosurface_color_cube": None,

@@ -10,6 +10,7 @@ scalar controls and repeatable selector rules for mixed styles.
 | Unit-cell boundary replicas | `--include-boundary-replicas` / `--no-boundary-replicas` |
 | Camera axis, direction, position, target, up, projection, fit distance, FOV, orthographic scale, camera fit, and clipping | `--camera-axis`, `--view-direction`, `--camera-position`, `--camera-target`, `--camera-up`, `--orthogonal` / `--perspective`, `--camera-distance`, `--field-of-view`, `--ortho-scale`, `--camera-fit`, `--camera-clip` |
 | Representation, shading, backend, canvas, background, atom/bond scale, visibility, cell, labels, rings, and ORTEP | Direct `mat-vis render` flags |
+| Blinn–Phong surface preset for CPU atoms, bonds, and isosurfaces | `--surface-material matte\|hard_plastic\|metal_like\|glass_like` |
 | Cube isosurface mode, phase colors, stride, material, and a second scalar cube sampled in physical coordinates | `--isosurface-mode`, `--isosurface-color-cube`, `--isosurface-color-range`, `--isosurface-color-center`, `--isosurface-colormap`, and the other `--isosurface-*` flags |
 | Sphere and cylinder mesh quality | `--sphere-detail`, `--cylinder-sides` |
 | CPU lighting rig (`studio_soft`, `unlit`; `studio_three_point` is rejected on CPU) | `--lighting` |
