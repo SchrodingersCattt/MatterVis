@@ -54,6 +54,7 @@ The same routing as a quick table:
 | Control a local terminal view, select stable atom IDs, or run a stateful Python/JSONL agent session | [`tui_api.md`](tui_api.md) |
 | Select an external terminal frame renderer without forking Atomaestro | [`tui_renderer_api.md`](tui_renderer_api.md) |
 | Read terminal pictures with element symbols, molecule silhouettes, text depth bands, crossing-bond gaps, layer slicing, and optional rotation parallax | [`tui_api.md`](tui_api.md) |
+| Import Mercury MRYX stored sites through MolCrysKit (read-only, explicit limitations) | [`../mryx.md`](../mryx.md) |
 | Render CIF, Cube, VASP, XYZ, ASE trajectory, or LAMMPS files from the CLI | [`../cli.md`](../cli.md) |
 | Choose `vdw` (MolCrysKit/Bondi radii) or `flat_illustration` without changing the default ball-and-stick look | [`../cli.md`](../cli.md) and [`scene_api.md`](scene_api.md) |
 | Label trajectory frames with physical simulation time while keeping playback FPS independent | [`../cli.md`](../cli.md#frames-and-animations) |

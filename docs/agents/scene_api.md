@@ -614,3 +614,15 @@ For UI/browser mutations, prefer `/api/v2/intent` or
 `ViewerBackend.apply_intent()` over writing multiple Dash stores
 directly; the reducer gives each client an ordered mutation stream and
 keeps tab, camera, and style edits from racing one another.
+
+
+## Mercury stored-site input
+
+The unified loader APIs accept `.mryx` via MolCrysKit IO, with each stored
+structure treated as a document-index frame, not a simulation-time sample.
+`iter_atomistic_frames` yields those frames in document order, but the read is
+eager: MolCrysKit materializes the whole document before the first yield.
+`build_loaded_crystal` accepts the same suffix but
+selects only the first structure. Source labels, raw metadata and import
+diagnostics remain on the bundle. This does not expand symmetry or
+restore Mercury UI state; see [MRYX contract](../mryx.md).

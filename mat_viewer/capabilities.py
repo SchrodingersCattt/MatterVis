@@ -31,11 +31,25 @@ MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 # runtime requirements; released installs stay on this range once the
 # role/regime API is published.
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
-# Development pin for find_polyhedra disorder_policy. pyproject.toml must
-# name this same commit. Restore a release range once the API is on PyPI.
-MOLCRYSKIT_SOURCE_COMMIT = "ee45c7e7c9e44f50b0b55ed46ee5dca306550541"
+# Development pin shared by the phone snapshot and Mercury import.
+# 2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6 is the reviewed commit of open
+# MolCrysKit PR 234 authorized for this pin. It is not a later tip of
+# that branch and it is not MolCrysKit main. It includes Mercury read_mryx
+# 0702ed8d, lightweight CIF / phone-site a4080132, and the MRYX bounds on
+# this commit: a single index validates every structure and keeps only
+# that structure; index=":" builds the full list before returning. Labels
+# are at most 128 characters, a document at most 4,096 structures, and a
+# structure at most 100,000 stored sites. Synthetic documents exercise
+# those bounds. They do not certify Mercury. Do not retarget this URL to
+# a later branch tip.
+# The desktop extra supplies ASE, pymatgen, SciPy, spglib, and defusedxml;
+# read_mryx imports defusedxml from that extra. pyproject.toml must name
+# this same requirement. The constraint file repeats the commit URL without
+# the extra marker because pip 26 rejects extras in constraints.
+# Restore a release range once those APIs are on PyPI.
+MOLCRYSKIT_SOURCE_COMMIT = "2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6"
 MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
+    "molcrys-kit[desktop] @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
     f"{MOLCRYSKIT_SOURCE_COMMIT}"
 )
 # Backward-compatible names retained for callers of the pre-0.7 helpers.
@@ -287,7 +301,9 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
             "Requires BondRecord.role and "
             "MolecularCrystal.get_connectivity_report(). "
             f"The published window is {MOLCRYSKIT_REQUIREMENT} once that "
-            "API is on PyPI. This checkout pins the commit in pyproject.toml; "
+            "API is on PyPI. This checkout pins the desktop extra of the "
+            "commit in pyproject.toml. That extra supplies ASE, pymatgen, "
+            "SciPy, spglib, and defusedxml; core MolCrysKit does not. "
             "PyPI 0.8.0 does not provide those fields."
         ),
     ),

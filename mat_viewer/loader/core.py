@@ -608,6 +608,9 @@ def build_bundle_scene(
             molcrys_analysis=bundle.molcrys_analysis,
         )
         base_scene["cif_path"] = bundle.cif_path
+        for key in ("input_format", "input_diagnostics", "source_structure_count"):
+            if key in bundle.scene:
+                base_scene[key] = copy.deepcopy(bundle.scene[key])
         base_scene["view_direction"] = view_dir
         base_scene["up"] = up
         base_scene["unwrap_overflow"] = copy.deepcopy(bundle.unwrap_overflow)
@@ -794,7 +797,15 @@ def build_loaded_crystal(
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | dict[str, float] | None = None,
 ) -> LoadedCrystal:
-    """Parse a CIF and enter the shared canonical structure pipeline."""
+    """Parse CIF (or the first stored MRYX structure) into the shared pipeline."""
+    if str(cif_path).lower().endswith(".mryx"):
+        from .mryx_adapter import build_mryx_bundle
+
+        return build_mryx_bundle(
+            path=cif_path, name=name, title=title, preset=preset, source=source,
+            view_weights=view_weights, bond_scale=bond_scale,
+            bond_thresholds=bond_thresholds,
+        )
     ops = scene_ops()
     with perf_log.time_block(
         "loader:parse_asu",

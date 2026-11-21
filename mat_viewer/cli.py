@@ -213,7 +213,7 @@ def _build_tui_parser(
     p.add_argument(
         "FILE",
         help=(
-            "Atomistic input: CIF, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, "
+            "Atomistic input: CIF, MRYX, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, "
             "ASE .traj, or LAMMPS dump/data."
         ),
     )

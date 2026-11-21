@@ -174,6 +174,32 @@
     throw new Error("Timed out while processing " + file.name);
   }
 
+  async function importDiagnosticsNote(structureNames) {
+    const notes = [];
+    for (let i = 0; i < structureNames.length; i += 1) {
+      const name = structureNames[i];
+      try {
+        const response = await fetch(
+          "/api/v2/scene/" + encodeURIComponent(name),
+          { cache: "no-store" }
+        );
+        if (!response.ok) continue;
+        const payload = await response.json();
+        const scene = (payload && payload.scene) || {};
+        const diagnostics = scene.input_diagnostics || [];
+        if (!diagnostics.length) continue;
+        const count = Number(scene.source_structure_count || 0);
+        const scope = count > 1
+          ? " (" + count + " stored structures; showing the first)"
+          : "";
+        notes.push(String(diagnostics[0]) + scope);
+      } catch (_err) {
+        // A missing scene payload must not hide the completed upload.
+      }
+    }
+    return notes.length ? "\n" + notes.join("\n") : "";
+  }
+
   async function waitForSceneAndSwitch(uploadedNames, sceneId) {
     if (!uploadedNames || !uploadedNames.length) return;
     const ownedScene = sceneId ? String(sceneId) : "";
@@ -198,7 +224,8 @@
             names: uploadedNames,
             scene_id: ownedScene,
           });
-          setStatus("Loaded: " + uploadedNames.join(", "), "success");
+          const note = await importDiagnosticsNote(uploadedNames);
+          setStatus("Loaded: " + uploadedNames.join(", ") + note, "success");
           return;
         }
       } catch (_err) {
@@ -280,7 +307,7 @@
         if (meta && meta.scene_id) sceneId = String(meta.scene_id);
         setStatus("Processing complete: " + names.join(", "), "success");
       }
-      setStatus("Uploaded CIF(s): " + names.join(", ") + ". Updating scene...", "success");
+      setStatus("Uploaded structure(s): " + names.join(", ") + ". Updating scene...", "success");
       // Wait for the scene store to expose every completed upload, then
       // switch exactly once to the scene this upload owns. Awaiting this
       // sequence prevents a stale tab value, or the other browser's active

@@ -146,7 +146,7 @@ def build_left_panel(
                     "color": "#444444",
                 },
             ),
-            html.Label("Upload CIF", className="panel-section-label"),
+            html.Label("Upload CIF / MRYX", className="panel-section-label"),
             html.Div(
                 [
                     dcc.Input(
@@ -156,11 +156,11 @@ def build_left_panel(
                         style={"display": "none"},
                     ),
                     html.Div(
-                        "Drag and drop CIF, or click to upload",
+                        "Drag and drop CIF or MRYX, or click to upload",
                         id="scene-cif-upload",
                         role="button",
                         tabIndex=0,
-                        **{"aria-label": "Upload CIF"},
+                        **{"aria-label": "Upload CIF / MRYX"},
                         className="upload-dropzone",
                     ),
                 ],

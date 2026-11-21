@@ -28,14 +28,24 @@ dependencies = [
     "matplotlib",
     "pillow",
     "ase",
-    # PyPI 0.8.0 does not include BondRecord.role,
-    # MolecularCrystal.get_connectivity_report(), or find_polyhedra
-    # disorder_policy (major / exclusive / as_refined). Track post-merge main
-    # commit ee45c7e7 until those APIs are published, then restore a version range.
-    # Do not invent a PyPI version for this commit.
-    # identify_molecules defaults to as_refined; only shell construction
-    # defaults to major. Exclusive shell selection keeps whole orientations.
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@ee45c7e7c9e44f50b0b55ed46ee5dca306550541",
+    # MolCrysKit 2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6 is the reviewed
+    # commit of open PR 234 authorized for this pin. It is not a later
+    # tip of that branch and it is not MolCrysKit main. It includes Mercury
+    # read_mryx 0702ed8d, lightweight CIF / phone-site a4080132, and the
+    # MRYX bounds on this commit: a single index validates every structure
+    # and keeps only that structure; index=":" builds the full list before
+    # returning. Labels are at most 128 characters, a document at most
+    # 4,096 structures, and a structure at most 100,000 stored sites.
+    # Synthetic documents exercise those bounds. They do not certify
+    # Mercury. Do not retarget this URL to a later branch tip.
+    # The desktop extra supplies ASE, pymatgen, SciPy, spglib, and
+    # defusedxml. Core MolCrysKit is NumPy, NetworkX, and Click. read_mryx
+    # imports defusedxml from the desktop extra. pyproject.toml requests
+    # the extra; requirements/ci-constraints.txt repeats the same commit
+    # URL without the extra marker because pip 26 rejects extras in
+    # constraints. identify_molecules defaults to as_refined; shell
+    # construction defaults to major.
+    "molcrys-kit[desktop] @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@2a3ee11e4c708b64691181cc2cbc4b2a3625f0c6",
 ]
 
 [project.scripts]

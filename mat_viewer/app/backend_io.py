@@ -152,7 +152,7 @@ class _IOBackendMixin:
         leading_underscores = re.match(r"^_+", raw_basename)
         if leading_underscores and not safe.startswith("_"):
             safe = f"{leading_underscores.group(0)}{safe}"
-        if not safe.lower().endswith(".cif"):
+        if not safe.lower().endswith((".cif", ".mryx")):
             safe = f"{safe}.cif"
         storage_name = f"{digest[:16]}_{safe}"
         path = os.path.realpath(os.path.join(upload_dir, storage_name))
