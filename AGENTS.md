@@ -55,7 +55,9 @@ paper/                 figure-generation scripts for publications
 - Example regressions: run the relevant `python scripts/<n>_*.py` and
   inspect the generated artifact under `scripts/_outputs/`.
 - `pytest.ini` sets `timeout = 60` with `timeout_method = thread` for
-  C-extension-safe timeout handling.
+  C-extension-safe timeout handling. `tests/_pytest_worker_guard.py`
+  exits a wedged worker without taking pytest's terminal lock, does not
+  replace that worker, and ends the controller if reports stop.
 
 ---
 

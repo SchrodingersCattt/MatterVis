@@ -239,6 +239,27 @@ upstream API has grown the exact hook.
     not move this geometry math into Textual event handlers.
 
 
+### Pytest worker stalls
+
+`tests/_pytest_worker_guard.py` is the xdist controller bound for a wedged
+worker. Thread-mode `pytest-timeout` calls `os._exit`, which xdist reports
+as `node down: Not properly terminated`. With `--dist loadfile` the whole
+file is queued again. Replacing the worker on the Python 3.12 full run left
+the controller blocked until the job's six-hour limit, with the other
+workers still alive and no report after 98%.
+
+The guard's timer dumps `faulthandler` stacks and exits without pytest's
+terminal lock, so cancel-versus-dump cannot deadlock. A crashed worker is
+not restarted (`--max-worker-restart` stays 0 unless the command sets it).
+The controller thread exits if an in-flight test outlives its own timeout
+plus the grace bound, or if no test reports arrive for the silence bound.
+A test still inside that timeout counts as progress, so the silence bound
+starts when its state file goes away rather than when the test started.
+The second case is interpreter shutdown joining a non-daemon thread: the
+per-test timer is already cancelled. `MATTERVIS_PYTEST_STALL_SILENCE`,
+`MATTERVIS_PYTEST_STALL_GRACE`, and `MATTERVIS_PYTEST_STALL_COLLECTION`
+shorten those bounds in tests.
+
 ### Arbitrary 3-D geometry and occlusion
 
 - scene["geometry_entities"] stores caller-owned Cartesian meshes. Keep vertices
