@@ -417,15 +417,15 @@ def register_state_callbacks(app, backend):
                     active = wanted
                 else:
                     active = browser_scene if browser_scene in backend.scene_store.scenes else backend.active_scene_id()
-                return backend.scene_tabs(), [], active or no_update
+                return backend.scene_tabs(), backend.scene_tab_close_row(), active or no_update
 
         if not native_upload and isinstance(_scene_event, dict) and _scene_event.get("source") == "scene_catalog":
             decision, selected = backend.scene_catalog_selection(_scene_event, browser_scene)
             if decision in {"stale", "empty"}:
                 return no_update, no_update, no_update
             if decision == "keep":
-                return backend.scene_tabs(), [], no_update
-            return backend.scene_tabs(), [], selected
+                return backend.scene_tabs(), backend.scene_tab_close_row(), no_update
+            return backend.scene_tabs(), backend.scene_tab_close_row(), selected
 
         options = backend.scene_options()
         if not options:
@@ -441,7 +441,7 @@ def register_state_callbacks(app, backend):
                 active_id = wanted
         # Explicit event paths (CRUD / upload) own the active id and are the
         # only paths allowed to rebuild the tab subtree.
-        return backend.scene_tabs(), [], active_id
+        return backend.scene_tabs(), backend.scene_tab_close_row(), active_id
 
     @app.callback(
         Output("status-banner", "children", allow_duplicate=True),

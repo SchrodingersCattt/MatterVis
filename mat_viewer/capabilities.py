@@ -328,6 +328,13 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
         packages=("plotly", "dash", "flask-sock", "flask-compress"),
         imports=("plotly", "dash", "flask_sock", "flask_compress"),
         includes=("plotly",),
+        note=(
+            "Requires dash>=2.18.2. Dash 4.0.0 is the first stable release "
+            "that accepts a component in dcc.Tab.label; those releases put "
+            "the close control inside the tab label. Dash 2.18.2 through 3.x "
+            "keep a string label and render that close control in the scene "
+            "tab close row."
+        ),
     ),
     "tui": CapabilitySpec(
         name="tui",

@@ -524,6 +524,23 @@ configure Python `requests` with `session.trust_env = False` (or
 `proxies={"http": None, "https": None}`) when calling
 `http://127.0.0.1:<port>/api/v2`.
 
+## Dash version
+
+The web extra requires Dash 2.18.2 or newer. Scene selection is always
+`scene-tabs`. Dash 4.0.0 is the first stable release that accepts a
+component as `dcc.Tab.label`. On that release and later, the per-tab
+close control is inside that label (`scene-tab-label-{id}` and
+`scene-tab-close-{id}`). On Dash 2.18.2 through 3.x the label is the
+scene name string, and the same close control is a child of
+`scene-tab-close-row`. The scene catalog message is the only label
+source (`MatterVisSceneLabels`). HTML projections carry
+`data-scene-id` and `data-display-name` on the component label or the
+close-row span. `dcc.Tab` is not given those attributes, and the
+adapter does not extend its private wildcard list. Tab text is not
+read back as the scene name. Passing a component label to Dash 2.18.2
+through 3.x raises `TypeError` while the layout is built and the page
+falls back to the error screen.
+
 ## Stable UI element IDs
 
 Use these when scripting through Selenium / Playwright / Dash testing
@@ -566,7 +583,7 @@ The full list (authoritative; the diagram only groups them):
 
 - `scene-tabs`: scene tab row
 - `scene-tab-{id}`: individual scene tab
-- `scene-tab-close-{id}`: per-tab close button when rendered
+- `scene-tab-close-{id}`: per-tab close button. Inside the tab label when Dash accepts a component label; otherwise in `scene-tab-close-row`
 - `scene-new-tab-btn`: duplicate/new scene button
 - `scene-tab-rename-input`: active scene rename input
 - `scene-cif-upload`: upload zone
