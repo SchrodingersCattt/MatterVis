@@ -141,6 +141,14 @@ def isosurface_primitives(
             color = entry.get("color", "#D55E00" if index == 0 else "#0072B2")
             vertex_colors = entry.get("vertex_colors")
             opacity = float(entry.get("opacity", 0.55))
+            record = entry.get("metadata")
+            if isinstance(record, Mapping):
+                material_record = record.get("material")
+                if (
+                    isinstance(material_record, Mapping)
+                    and material_record.get("opacity") is not None
+                ):
+                    opacity = float(material_record["opacity"])
             metadata = {
                 "kind": "isosurface",
                 "name": name,

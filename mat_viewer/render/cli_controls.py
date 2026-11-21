@@ -540,16 +540,43 @@ def add_isosurface_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.set_defaults(isosurface_smooth=False)
     parser.add_argument(
+        "--isosurface-material",
+        default=None,
+        help=(
+            "Surface-material id copied onto the isosurface from the "
+            "surface-material library. Do not combine with the individual "
+            "light coefficients. Opacity stays a separate flag."
+        ),
+    )
+    parser.add_argument(
         "--isosurface-ambient",
         type=float,
-        default=0.68,
-        help="Cube isosurface ambient-light coefficient (default: 0.68).",
+        default=None,
+        help=(
+            "Cube isosurface ambient weight (default: 0.68). Independent of "
+            "diffuse; the sum is not required to be 1."
+        ),
     )
     parser.add_argument(
         "--isosurface-diffuse",
         type=float,
-        default=0.32,
-        help="Cube isosurface diffuse-light coefficient (default: 0.32).",
+        default=None,
+        help=(
+            "Cube isosurface diffuse weight (default: 0.32). Independent of "
+            "ambient."
+        ),
+    )
+    parser.add_argument(
+        "--isosurface-specular",
+        type=float,
+        default=None,
+        help="Cube isosurface specular weight (default: 0).",
+    )
+    parser.add_argument(
+        "--isosurface-shininess",
+        type=float,
+        default=None,
+        help="Cube isosurface specular exponent, at least 1 (default: 32).",
     )
     parser.add_argument(
         "--isosurface-color-cube",
@@ -590,21 +617,44 @@ def add_isosurface_arguments(parser: argparse.ArgumentParser) -> None:
 
 def isosurface_render_fields(args: argparse.Namespace) -> dict[str, object]:
     """Return the RenderSpec isosurface fields stored on ``args``."""
+    from .isosurface_material import resolve_isosurface_material
+
     color_range = args.isosurface_color_range
+    preset = args.isosurface_material
+    resolved = resolve_isosurface_material(
+        preset,
+        ambient=args.isosurface_ambient,
+        diffuse=args.isosurface_diffuse,
+        specular=args.isosurface_specular,
+        shininess=args.isosurface_shininess,
+        opacity=(
+            args.isosurface_opacity if args.isosurface_opacity is not None else 0.55
+        ),
+    )
+    # A preset owns the light coefficients. Passing the resolved numbers
+    # back into RenderSpec would look like an explicit second request.
+    coefficients = (
+        {}
+        if preset is not None
+        else {
+            "isosurface_ambient": resolved.ambient,
+            "isosurface_diffuse": resolved.diffuse,
+            "isosurface_specular": resolved.specular,
+            "isosurface_shininess": resolved.shininess,
+        }
+    )
     return {
         "isosurface_mode": args.isosurface_mode,
         "isosurface_wireframe_width": args.isosurface_wireframe_width,
         "isosurface_wireframe_opacity": args.isosurface_wireframe_opacity,
         "isosurface_isovalue": args.isovalue,
-        "isosurface_opacity": (
-            args.isosurface_opacity if args.isosurface_opacity is not None else 0.55
-        ),
+        "isosurface_opacity": resolved.opacity,
         "isosurface_positive_color": args.isosurface_positive_color,
         "isosurface_negative_color": args.isosurface_negative_color,
         "isosurface_stride": args.isosurface_stride,
         "isosurface_smooth": bool(args.isosurface_smooth),
-        "isosurface_ambient": args.isosurface_ambient,
-        "isosurface_diffuse": args.isosurface_diffuse,
+        **coefficients,
+        "isosurface_material": preset,
         "isosurface_color_cube": args.isosurface_color_cube,
         "isosurface_color_range": (
             None if color_range is None else (float(color_range[0]), float(color_range[1]))

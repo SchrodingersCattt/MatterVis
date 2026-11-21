@@ -20,6 +20,7 @@ from .contracts import (
     TextPrimitive,
     TriangleMeshPrimitive,
 )
+from .isosurface_material import material_from_record, plotly_surface_kwargs
 from .trace_ids import plotly_trace_uid
 
 
@@ -82,6 +83,15 @@ def _primitive_trace(primitive, *, scene: str):
             "showscale": False,
             "scene": scene,
         }
+        if primitive.metadata.get("kind") == "isosurface":
+            payload.update(
+                plotly_surface_kwargs(
+                    material_from_record(
+                        primitive.metadata.get("material"),
+                        opacity=float(primitive.rgba[3]),
+                    )
+                )
+            )
         if primitive.vertex_colors is None:
             payload["color"] = _rgba((*primitive.rgba[:3], 1.0))
         else:

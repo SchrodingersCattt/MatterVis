@@ -342,6 +342,7 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
         return []
 
     from ..cube.core import default_isovalue
+    from .isosurface_material import material_from_style, plotly_surface_kwargs
 
     try:
         from skimage.measure import marching_cubes
@@ -357,7 +358,6 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
     # Read style parameters
     isovalue = style.get("isosurface_isovalue")
     percentile = float(style.get("isosurface_percentile", 98.5))
-    opacity = float(style.get("isosurface_opacity", 0.55))
     mode = str(style.get("isosurface_mode", "surface"))
     wireframe_width = float(style.get("isosurface_wireframe_width", 1.0))
     wireframe_opacity = float(style.get("isosurface_wireframe_opacity", 1.0))
@@ -365,6 +365,13 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
         raise ValueError(
             f"Unsupported isosurface_mode={mode!r}; expected 'surface' or 'wireframe'"
         )
+    surface_material = material_from_style(style)
+    opacity = surface_material.opacity
+    # Wireframe lines are unlit. Surface traces carry the shared material.
+    # A coefficient Plotly cannot store fails here, before marching cubes.
+    surface_shading = (
+        plotly_surface_kwargs(surface_material) if mode == "surface" else {}
+    )
     positive_color = str(style.get("isosurface_positive_color", "#D55E00"))
     negative_color = str(style.get("isosurface_negative_color", "#0072B2"))
     stride = max(1, int(style.get("isosurface_stride", 2)))
@@ -492,14 +499,7 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
             "color": color,
             "opacity": opacity,
             "flatshading": False,
-            "lighting": {
-                "ambient": 1.0,
-                "diffuse": 0.0,
-                "specular": 0.0,
-                "roughness": 1.0,
-                "fresnel": 0.0,
-            },
-            "lightposition": {"x": 200, "y": 200, "z": 200},
+            **surface_shading,
             "name": name,
             "hoverinfo": "name",
             "showlegend": False,

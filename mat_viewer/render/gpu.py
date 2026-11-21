@@ -370,6 +370,14 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
         for primitive in viewport.primitives:
             semantic_id = str(getattr(primitive, "semantic_id", ""))
             if isinstance(primitive, TriangleMeshPrimitive):
+                if primitive.metadata.get("kind") == "isosurface":
+                    raise GPUUnsupportedError(
+                        "GPU backend does not evaluate the shared cube "
+                        "isosurface material (ambient, diffuse, specular, "
+                        "shininess, light scale, two-sided scalar color) for "
+                        f"{semantic_id!r} and would otherwise draw a flat color. "
+                        "Use the CPU or Plotly backend."
+                    )
                 if primitive.vertex_colors is not None:
                     raise GPUUnsupportedError(
                         "GPU MVP does not render per-vertex colors "

@@ -21,9 +21,10 @@ from ..contracts import (
     ViewportPlan,
 )
 from ..compass_overlay import draw_matplotlib_compass
+from ..isosurface_material import cpu_surface_from_metadata
 from ..lighting import STUDIO_SOFT_DIRECTION, lighting_id_for_cpu
 from ..property_colorbar import draw_matplotlib_colorbar
-from ..surface_material import material_from_metadata, shade_blinn_phong
+from ..surface_material import shade_blinn_phong
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
 from .raster_lines import _clipped_endpoint_rgb, endpoint_screen_weight
 from .visibility import anchor_occluded, projected_polygon_depth
@@ -327,7 +328,7 @@ def _mesh_polygons(
         material = primitive.metadata.get("material", {})
         ambient = float(material.get("ambient", 0.68))
         diffuse = float(material.get("diffuse", 0.32))
-        surface = material_from_metadata(primitive.metadata.get("surface_material"))
+        surface = cpu_surface_from_metadata(primitive.metadata)
         if surface is not None and surface.specular <= 0.0:
             ambient = float(surface.ambient)
             diffuse = float(surface.diffuse)

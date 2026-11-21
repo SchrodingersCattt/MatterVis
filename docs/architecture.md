@@ -94,6 +94,23 @@ text primitives before device submission, and never substitutes the CPU
 renderer when the optional dependency or device is unavailable. CPU PNG and
 true-vector PDF/SVG remain the reference paths.
 
+Cube isosurface meshes carry one shading record copied from the
+surface-material library: ambient, diffuse, specular, shininess, specular
+tint, and Fresnel when it is not neutral. Opacity is the object alpha and
+is not part of that record. Light strength stays on the lighting rig; a
+light scale on this record is rejected and is not folded into the
+coefficients. This adapter does not keep a private preset table. The CPU
+surface shader evaluates the copied record, including Fresnel and a base
+specular tint. `shade_albedo`, Matplotlib, and Plotly reject a non-neutral
+Fresnel record or a non-white specular tint instead of rewriting it.
+Plotly mesh and volume traces receive in-range coefficients unchanged.
+Plotly's shader clamps the Lambert sum and uses Cook-Torrance highlights,
+so those pixels are not identical to the CPU where the sum exceeds 1. A
+coefficient outside the interval Plotly can store is rejected rather than
+clamped. The GPU backend rejects the mesh instead of drawing a flat color.
+The material does not add a scalar field or a colormap; a second color cube
+remains the albedo.
+
 `mat-vis capabilities` and `mat-vis render --check` are the authoritative
 dependency resolver. No skill or installer maintains a second dependency
 table.

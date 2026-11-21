@@ -19,9 +19,9 @@ from ..contracts import (
     TriangleMeshPrimitive,
     ViewportPlan,
 )
+from ..isosurface_material import cpu_surface_from_metadata
 from ..lighting import STUDIO_SOFT_DIRECTION, lighting_id_for_cpu
 from ..surface_material import (
-    material_from_metadata,
     preserves_legacy_cylinder_shade,
     shade_blinn_phong,
 )
@@ -390,7 +390,7 @@ def _rasterize_sphere(
     # to request a directional light without introducing a backend-specific
     # style option.
     metadata = primitive.metadata
-    surface = material_from_metadata(metadata.get("surface_material"))
+    surface = cpu_surface_from_metadata(metadata)
     unlit = lighting == "unlit"
     if not unlit and uses_split_composite(surface, primitive.rgba[3]):
         view = (
@@ -653,7 +653,7 @@ def _rasterize_cylinder(
     if not np.any(inside):
         return
     base_rgb = np.asarray(primitive.rgba[:3], dtype=float)
-    surface = material_from_metadata(primitive.metadata.get("surface_material"))
+    surface = cpu_surface_from_metadata(primitive.metadata)
     unlit = lighting == "unlit"
     if not unlit and uses_split_composite(surface, primitive.rgba[3]):
         offset_x = (grid_x - closest_x) / half_width
@@ -738,7 +738,7 @@ def _rasterize_mesh(
     material = primitive.metadata.get("material", {})
     ambient = float(material.get("ambient", 0.68))
     diffuse = float(material.get("diffuse", 0.32))
-    surface = material_from_metadata(primitive.metadata.get("surface_material"))
+    surface = cpu_surface_from_metadata(primitive.metadata)
     split_response = (not unlit) and uses_split_composite(surface, primitive.rgba[3])
     orthographic = transform.spec.projection == "orthographic"
     phong_mesh = (not unlit) and primitive.vertex_normals is not None and surface is not None and (
