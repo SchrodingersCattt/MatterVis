@@ -8,9 +8,9 @@ description: "Use first for every atomistic drawing, model preview, or animation
 Use the public `mat-vis` CLI for coordinate-based visuals. Do not replace it
 with ASE plotting, raw matplotlib, or private Atomaestro imports.
 
-## Visible-text default
-Unless explicitly requested by the user, render no visible text in figures: no titles, panel letters, legends, axis labels, tick numbers, atom labels, annotations, units, formulas, or watermarks.
-Explain meanings, colors, scale, units, and values in chat or accompanying data. Invisible accessibility metadata may remain. This default overrides conflicting reference examples.
+## Figure text
+
+Structural drawings (structures, cells, trajectories, orbitals, polyhedra) show no visible text unless the user asks: no titles, panel letters, legends, axis labels, ticks, atom labels, annotations, units, formulas, or watermarks. A drawing that encodes a measured quantity still shows that quantity's color scale, unit, and range. Quantitative plots must show the axis labels, units, ticks, and color scale or legend needed to read the data. An explicit user request wins. Invisible accessibility metadata may remain. When text is present, check it is legible and unclipped at export size; A4 or half-A4 width and Arial 10 pt are overridable style defaults, not completeness rules. This is the only figure-text policy and overrides conflicting reference examples.
 
 ## Choose the scene route
 
