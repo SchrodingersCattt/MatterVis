@@ -228,6 +228,24 @@ Cluster mode is intentionally direct:
 - `mat_viewer/scene/core.py:519-520` passes `cell=None` to bond detection only
   for `display_mode == "cluster"`.
 
+Unit-cell boundary replicas are repeated drawings of source sites. The
+structure-summary card and the canvas atom count use
+`(source_site_id, image_shift, instance_kind)`: source-site counts are
+unique canonical ids and drawing counts are instances. Copies whose
+`instance_kind` is `boundary`, `bonded_image`, or `framework_context`
+are not added to a source-site total. Switching display mode rebuilds
+the drawing list and stamps unstamped home atoms as `source`, so a
+previous replica kind does not survive the wrap. The private flags
+`_is_boundary_replica`, `_is_framework_context_replica`, and
+`_is_bonded_image_replica` remain assembly stamps. They fill
+`instance_kind` only when a drawing has none, and the more specific
+flag wins: framework context, then bonded image, then boundary. The
+rebuild writes that kind onto the drawing, so later counts do not
+read the flags. The disorder line also keeps the drawn
+subset separate
+from loader disorder flags on the canonical source atoms, so an ordered
+formula-unit cluster does not describe the loaded structure as ordered.
+
 Unit-cell boundary replicas are implemented by `_expand_boundary_replicas`:
 
 - `mat_viewer/scene/core.py:264-290` defines the per-axis canonical shift sets

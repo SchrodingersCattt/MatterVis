@@ -405,7 +405,28 @@ Notes for callers:
 - `GET /scene/{name}`
   Returns the base scene JSON and fragment table. Add
   `?after_transforms=true` to return the current transform-applied draw
-  atoms / bonds / fragment table for that structure.
+  atoms / bonds / fragment table for that structure. `summary` is the
+  same disorder line as the structure-summary card for that scene. It
+  names the drawn subset and, when the scene carries canonical source
+  atoms, the loaded structure separately. A drawn subset with no
+  disorder does not say the loaded structure is ordered. Site,
+  minor-atom, and minor-bond counts use each drawing's
+  `(source_site_id, image_shift, instance_kind)`. Source-site counts
+  are unique `source_site_id` values on drawings whose `instance_kind`
+  is `source`. A blank id is not shared with another blank id. Repeated
+  labels do not merge sites. `image_shift` distinguishes drawings of one
+  site. Drawing counts are instances. Any other `instance_kind` is a
+  repeated visual copy and is not added as a source site. The private
+  flags `_is_boundary_replica`, `_is_framework_context_replica`, and
+  `_is_bonded_image_replica` remain assembly stamps. They supply
+  `instance_kind` only when that field is absent. The more specific
+  flag wins: framework context, then bonded image, then boundary. A
+  framework copy also carries the boundary flag, so boundary is not
+  read first. A display-mode rebuild writes that resolved kind onto
+  the drawing and stamps unstamped home atoms as `source`. Later
+  counts read `instance_kind`. The line reads
+  loader disorder flags (`is_disordered`, `_is_minor`,
+  `disorder_resolved`). It does not infer disorder from occupancy.
 - `POST /topology`
   JSON body: `{"structure": "SY", "center_index": 0, "cutoff": 10.0}`.
   `center_index` is the fragment-table `index` returned by
@@ -630,11 +651,27 @@ The full list (authoritative; the diagram only groups them):
 - `crystal-graph`
 - `topology-histogram`
 - `topology-results`
-- `atom-list`: short sample of the displayed atoms in the Analysis pane
+- `structure-summary`: disorder line for the display scope currently
+  drawn. See `GET /scene/{name}` for the same `summary` contract,
+  including the split between the drawn subset and the loaded
+  structure and the exclusion of visual copies from source-site counts.
+  Those counts use `(source_site_id, image_shift, instance_kind)`. The
+  private replica flags remain assembly stamps and are not a second
+  provenance standard.
+  A display-scope change updates this card from the scene being drawn.
+  It does not wait for the Plotly frame.
+- `atom-list`: short sample of the displayed atoms in the Analysis pane.
+  When the sample's scene contains visual copies, the list says how
+  many displayed atoms are repeated drawings rather than extra source
+  sites.
 - `mv-status-bar`, `mv-status-structure`, `mv-status-scope`,
   `mv-status-counts`, `mv-status-busy`: canvas status bar and the
   working/rendering indicator. Counts follow the scene drawn for the
-  current display mode and transforms.
+  current display mode and transforms. Counts use
+  `(source_site_id, image_shift, instance_kind)`. When that scene
+  repeats visual copies of source sites, the count separates source
+  sites from those copies. The private replica flags remain assembly
+  stamps and are not a second provenance standard.
 - `perf-log-level`: server-log level filter (`debug` shows all,
   `info` hides fast callbacks, `warn` and `error` are stricter)
 - `save-preset-btn`
