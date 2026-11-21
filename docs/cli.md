@@ -343,6 +343,7 @@ substitutes one frame backend for another.
 | --isosurface-color-center VALUE | none | Value placed at the middle of the colormap |
 | --isosurface-colormap NAME | bgr | `bgr` or a Matplotlib colormap name |
 | --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
+| --lighting RIG | studio_soft | CPU rig: `studio_soft` (default, not retuned), `unlit`, or `studio_three_point` (CPU error, not a silent substitute). See [Lighting](#lighting) |
 
 Static exports omit browser-only picking traces. Interactive HTML retains them.
 For comparable cube panels, pass the same explicit `--isovalue` rather than
@@ -423,6 +424,28 @@ coordinates, bond identity, or the stored periodic shifts.
 | `--scale` | 2 | 1–4 | Supersampling factor (effective DPI = 72 × scale) |
 | `--sphere-detail LAT LON` | 12 20 | LAT >= 2, LON >= 3 | Sphere and ellipsoid mesh resolution |
 | `--cylinder-sides N` | 12 | N >= 3 | Bond-cylinder mesh resolution |
+
+### Lighting
+
+`--lighting` chooses the CPU rig. The default is `studio_soft`, the current
+camera-space direction `(-0.32, 0.42, 1.0)`. Omitting the flag is the same
+image. `unlit` turns shading off on the general CPU renderer (atoms, bonds,
+and isosurfaces). `studio_three_point` is a named multi-light contract: the
+CPU renderer raises and does not substitute `studio_soft`. Naming a rig
+without this flag does not change the picture.
+
+`studio_soft` is the publication default for ball-and-stick, orbitals,
+density, and Hirshfeld surfaces. `unlit` is for color-critical NCI/IRI plots,
+not the journal default for orbitals, density, or Hirshfeld.
+`--surface-material hard_plastic` or `metal_like` does not switch the rig.
+`--publication-style` stays rejected; it is not a lighting alias. Details:
+[`agents/lighting.md`](agents/lighting.md).
+
+```bash
+mat-vis render structure.cif -o soft.png --backend cpu --renderer general
+mat-vis render structure.cif -o flat.png --backend cpu --renderer general \
+  --lighting unlit
+```
 
 ### Selector-based mixed styles
 

@@ -48,7 +48,7 @@ see [installation](./references/installation.md). Read [input formats](./referen
 - If rendering starts later or is delegated, that agent loads this skill before
   choosing a command; parent summaries and guessed flags are not a substitute.
 - Render directly; do not run a separate analysis or installation preflight.
-- Use one backend and one representation. CPU is the default static path.
+- Use one backend and one representation. CPU is the default static path. `--lighting` defaults to `studio_soft`; `hard_plastic` and `metal_like` do not select `studio_three_point`, and flat or `fast_rendering` is not `unlit`.
 - Memory pressure may change renderer detail, never the model: do not delete H,
   downsample atoms, shrink the structure, or switch away from `mat-vis`.
 - Comparison renders use the same orientation, canvas, and orthographic scale.

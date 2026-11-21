@@ -41,6 +41,7 @@ from .mesh_overlays import isosurface_primitives as _isosurface_primitives
 from .mesh_overlays import polyhedron_primitives as _polyhedron_primitives
 from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
 from ..style.disorder import bond_effective_opacity
+from .lighting import note_plan_lighting
 from .radius import atom_visual_radius, clamp_displacement_radius, hydrogen_radius_floor
 
 
@@ -606,6 +607,9 @@ def prepare_render(
         "bond_groups": [dict(group) for group in (bond_groups or ())],
         "atom_property_color": property_metadata_payload,
     }
+    note_plan_lighting(
+        metadata, backend=render_spec.backend, lighting=render_spec.lighting
+    )
     if render_spec.show_axes:
         attach_lattice_compass_metadata(metadata, warnings, lattice)
     return RenderPlan(

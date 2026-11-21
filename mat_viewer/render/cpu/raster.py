@@ -11,6 +11,16 @@ from pathlib import Path
 import numpy as np
 
 from ..camera import CameraTransform, triangulate_polygon
+from ..lighting import (
+    cpu_shader_id,
+    cylinder_rgb,
+    flat_or_surface_rgb,
+    keeps_legacy_response,
+    lighting_id_for_cpu,
+    mesh_face_rgb,
+    mesh_vertex_rgb,
+    read_surface_response,
+)
 from ..contracts import (
     CameraSpec, LinePrimitive, Primitive,
     RENDER_RESULT_SCHEMA,
@@ -86,6 +96,7 @@ def render_rgba(plan: RenderPlan, *, scale: int = 1) -> np.ndarray:
     if int(scale) <= 0:
         raise ValueError("scale must be positive")
     scale = int(scale)
+    lighting = lighting_id_for_cpu(plan.metadata)
     width, height = int(plan.width) * scale, int(plan.height) * scale
     background = np.asarray(plan.background, dtype=float)
     canvas = np.empty((height, width, 4), dtype=float)
@@ -101,6 +112,7 @@ def render_rgba(plan: RenderPlan, *, scale: int = 1) -> np.ndarray:
             local_height,
             background,
             line_scale=scale,
+            lighting=lighting,
         )
         depth_buffers[viewport.semantic_id] = z_buffer
         canvas[top:bottom, left:right] = local[: bottom - top, : right - left]
@@ -127,6 +139,7 @@ def _render_viewport(
     line_scale: int,
     initial_color: np.ndarray | None = None,
     initial_depth: np.ndarray | None = None,
+    lighting: str = "studio_soft",
 ) -> tuple[np.ndarray, np.ndarray]:
     transform = CameraTransform(viewport.camera, width, height)
     if initial_color is None:
@@ -163,6 +176,7 @@ def _render_viewport(
                     order_buffer,
                     fragments,
                     order,
+                    lighting=lighting,
                 )
             elif primitive.vertex_normals is not None and raster_shape == "cylinder":
                 _rasterize_cylinder(
@@ -173,6 +187,7 @@ def _render_viewport(
                     order_buffer,
                     fragments,
                     order,
+                    lighting=lighting,
                 )
             else:
                 _rasterize_mesh(
@@ -183,6 +198,7 @@ def _render_viewport(
                     order_buffer,
                     fragments,
                     order,
+                    lighting=lighting,
                 )
         elif isinstance(primitive, LinePrimitive):
             _rasterize_lines(
@@ -313,7 +329,10 @@ def _rasterize_sphere(
     order_buffer: np.ndarray,
     fragments: dict[int, list[_Fragment]],
     primitive_order: int,
+    *,
+    lighting: str = "studio_soft",
 ) -> None:
+    lighting = cpu_shader_id(lighting)
     center = np.asarray(primitive.metadata["_raster_center"], dtype=float)
     radius = float(primitive.metadata["_raster_radius"])
     offsets = np.asarray(primitive.vertices, dtype=float) - center[None, :]
@@ -337,6 +356,7 @@ def _rasterize_sphere(
             order_buffer,
             fragments,
             primitive_order,
+            lighting=lighting,
         )
         return
     camera_center = transform.world_to_camera(center[None, :])[0]
@@ -359,6 +379,7 @@ def _rasterize_sphere(
                 order_buffer,
                 fragments,
                 primitive_order,
+                lighting=lighting,
             )
             return
         focal = 1.0 / np.tan(np.radians(transform.spec.fov_y_deg) * 0.5)
@@ -425,39 +446,47 @@ def _rasterize_sphere(
     # to request a directional light without introducing a backend-specific
     # style option.
     metadata = primitive.metadata
-    light = np.asarray(
-        metadata.get("_raster_light", (-0.32, 0.42, 1.0)), dtype=float
+    rgb_values = flat_or_surface_rgb(
+        primitive.rgba[:3],
+        normals,
+        metadata,
+        lighting,
+        two_sided=bool(metadata.get("_raster_two_sided", True)),
     )
-    if light.shape != (3,) or not np.all(np.isfinite(light)):
-        light = np.asarray((-0.32, 0.42, 1.0), dtype=float)
-    light /= max(float(np.linalg.norm(light)), 1.0e-12)
-    ambient = float(metadata.get("_raster_ambient", 0.68))
-    diffuse = float(metadata.get("_raster_diffuse", 0.32))
-    ambient = float(np.clip(ambient, 0.0, 1.0))
-    diffuse = float(np.clip(diffuse, 0.0, 1.0))
-    total_light = ambient + diffuse
-    if total_light > 1.0:
-        ambient /= total_light
-        diffuse /= total_light
-    if bool(metadata.get("_raster_two_sided", True)):
-        cosine = np.abs(normals @ light)
-    else:
-        cosine = np.clip(normals @ light, 0.0, 1.0)
-    illumination = ambient + diffuse * cosine
-    base_rgb = np.asarray(primitive.rgba[:3])[None, None, :]
-    rgb_values = base_rgb * illumination[..., None]
-    # Optional native specular cue for geometric overlays.  This is evaluated
-    # in camera space, so a true analytic sphere gets a stable highlight that
-    # survives alpha compositing on white while retaining the exact circular
-    # silhouette.  Existing atom-marker spheres keep the zero default.
-    specular = float(np.clip(metadata.get("_raster_specular", 0.0), 0.0, 1.0))
-    if specular > 0.0:
-        shininess = float(np.clip(metadata.get("_raster_shininess", 32.0), 1.0, 256.0))
-        camera_view = np.array((0.0, 0.0, 1.0), dtype=float)
-        half_vector = light + camera_view
-        half_vector /= max(float(np.linalg.norm(half_vector)), 1.0e-12)
-        highlight = np.clip(normals @ half_vector, 0.0, 1.0) ** shininess
-        rgb_values = rgb_values + specular * highlight[..., None] * (1.0 - base_rgb)
+    if rgb_values is None:
+        light = np.asarray(
+            metadata.get("_raster_light", (-0.32, 0.42, 1.0)), dtype=float
+        )
+        if light.shape != (3,) or not np.all(np.isfinite(light)):
+            light = np.asarray((-0.32, 0.42, 1.0), dtype=float)
+        light /= max(float(np.linalg.norm(light)), 1.0e-12)
+        ambient = float(metadata.get("_raster_ambient", 0.68))
+        diffuse = float(metadata.get("_raster_diffuse", 0.32))
+        ambient = float(np.clip(ambient, 0.0, 1.0))
+        diffuse = float(np.clip(diffuse, 0.0, 1.0))
+        total_light = ambient + diffuse
+        if total_light > 1.0:
+            ambient /= total_light
+            diffuse /= total_light
+        if bool(metadata.get("_raster_two_sided", True)):
+            cosine = np.abs(normals @ light)
+        else:
+            cosine = np.clip(normals @ light, 0.0, 1.0)
+        illumination = ambient + diffuse * cosine
+        base_rgb = np.asarray(primitive.rgba[:3])[None, None, :]
+        rgb_values = base_rgb * illumination[..., None]
+        # Optional native specular cue for geometric overlays.  This is evaluated
+        # in camera space, so a true analytic sphere gets a stable highlight that
+        # survives alpha compositing on white while retaining the exact circular
+        # silhouette.  Existing atom-marker spheres keep the zero default.
+        specular = float(np.clip(metadata.get("_raster_specular", 0.0), 0.0, 1.0))
+        if specular > 0.0:
+            shininess = float(np.clip(metadata.get("_raster_shininess", 32.0), 1.0, 256.0))
+            camera_view = np.array((0.0, 0.0, 1.0), dtype=float)
+            half_vector = light + camera_view
+            half_vector /= max(float(np.linalg.norm(half_vector)), 1.0e-12)
+            highlight = np.clip(normals @ half_vector, 0.0, 1.0) ** shininess
+            rgb_values = rgb_values + specular * highlight[..., None] * (1.0 - base_rgb)
     # A front/back alpha profile gives a translucent sphere a readable near
     # surface and a receding far surface without changing its exact circular
     # silhouette. Factors multiply the primitive opacity and are clipped.
@@ -496,7 +525,10 @@ def _rasterize_cylinder(
     order_buffer: np.ndarray,
     fragments: dict[int, list[_Fragment]],
     primitive_order: int,
+    *,
+    lighting: str = "studio_soft",
 ) -> None:
+    lighting = cpu_shader_id(lighting)
     endpoints = np.asarray(
         [primitive.metadata["_raster_start"], primitive.metadata["_raster_end"]],
         dtype=float,
@@ -567,8 +599,17 @@ def _rasterize_cylinder(
     )
     if not np.any(inside):
         return
-    illumination = 0.72 + 0.28 * radial
-    rgb_values = np.asarray(primitive.rgba[:3])[None, None, :] * illumination[..., None]
+    rgb_values = cylinder_rgb(
+        primitive.rgba[:3],
+        radial,
+        grid_x,
+        grid_y,
+        closest_x,
+        closest_y,
+        half_width,
+        primitive.metadata,
+        lighting,
+    )
     local_y, local_x = np.nonzero(inside)
     _write_samples(
         pixel_x=local_x + minimum_x,
@@ -593,7 +634,10 @@ def _rasterize_mesh(
     order_buffer: np.ndarray,
     fragments: dict[int, list[_Fragment]],
     primitive_order: int,
+    *,
+    lighting: str = "studio_soft",
 ) -> None:
+    lighting = cpu_shader_id(lighting)
     camera_vertices = transform.world_to_camera(primitive.vertices)
     rotation = transform.view_matrix[:3, :3]
     light = np.asarray([-0.32, 0.42, 1.0], dtype=float)
@@ -623,13 +667,30 @@ def _rasterize_mesh(
     else:
         shaded_base = np.asarray(primitive.vertex_colors, dtype=float)[:, :3]
     vertex_rgb_all = None
+    surface = read_surface_response(primitive.metadata)
+    # Polyhedra keep their studio_soft face shade. Other explicit records
+    # are evaluated under the rig and are not replaced by matte coefficients.
+    apply_surface = (
+        surface is not None
+        and lighting != "unlit"
+        and primitive.metadata.get("kind") != "polyhedron"
+        and not keeps_legacy_response(surface)
+    )
     if primitive.vertex_normals is not None:
         camera_vertex_normals = primitive.vertex_normals @ rotation.T
         camera_vertex_normals /= np.maximum(
             np.linalg.norm(camera_vertex_normals, axis=1, keepdims=True), 1e-12
         )
-        vertex_illumination = ambient + diffuse * np.abs(camera_vertex_normals @ light)
-        vertex_rgb_all = shaded_base * vertex_illumination[:, None]
+        vertex_rgb_all = mesh_vertex_rgb(
+            shaded_base,
+            camera_vertex_normals,
+            lighting=lighting,
+            apply_surface=apply_surface,
+            surface=surface,
+            ambient=ambient,
+            diffuse=diffuse,
+            light=light,
+        )
     rgba = (*primitive.rgba[:3], float(primitive.rgba[3]))
     for triangle_index, indices in enumerate(primitive.triangles):
         if normal_lengths[triangle_index] < 1e-14:
@@ -639,7 +700,17 @@ def _rasterize_mesh(
             and float(camera_normals[triangle_index, 2]) <= 0.0
         ):
             continue
-        if vertex_rgb_all is None:
+        if vertex_rgb_all is None and (lighting == "unlit" or apply_surface):
+            triangle_rgb = mesh_face_rgb(
+                lighting=lighting,
+                surface=surface,
+                rgba=primitive.rgba,
+                shaded_base=shaded_base,
+                indices=indices,
+                face_normal=camera_normals[triangle_index],
+                per_vertex=primitive.vertex_colors is not None,
+            )
+        elif vertex_rgb_all is None:
             lambert = abs(float(camera_normals[triangle_index] @ light))
             if (
                 primitive.vertex_colors is None

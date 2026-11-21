@@ -126,6 +126,29 @@ def _build_render_parser(
         help="Surface shading for mesh geometry (default: smooth).",
     )
 
+    def _lighting_argument(value: str) -> str:
+        from .lighting import get_lighting_rig
+
+        try:
+            return get_lighting_rig(value).id
+        except (TypeError, ValueError) as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from exc
+
+    p.add_argument(
+        "--lighting",
+        default="studio_soft",
+        metavar="RIG",
+        type=_lighting_argument,
+        help=(
+            "CPU lighting rig (default: studio_soft). "
+            "studio_soft is the current camera-space light and is not retuned. "
+            "unlit disables CPU shading. "
+            "studio_three_point is rejected on CPU instead of substituting "
+            "studio_soft. A surface-material preset does not select this rig, "
+            "and this flag is not an alias of --publication-style."
+        ),
+    )
+
     # Projection
     proj = p.add_mutually_exclusive_group()
     proj.add_argument(

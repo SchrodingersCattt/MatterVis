@@ -12,6 +12,7 @@ scalar controls and repeatable selector rules for mixed styles.
 | Representation, shading, backend, canvas, background, atom/bond scale, visibility, cell, labels, rings, and ORTEP | Direct `mat-vis render` flags |
 | Cube isosurface mode, phase colors, stride, material, and a second scalar cube sampled in physical coordinates | `--isosurface-mode`, `--isosurface-color-cube`, `--isosurface-color-range`, `--isosurface-color-center`, `--isosurface-colormap`, and the other `--isosurface-*` flags |
 | Sphere and cylinder mesh quality | `--sphere-detail`, `--cylinder-sides` |
+| CPU lighting rig (`studio_soft`, `unlit`; `studio_three_point` is rejected on CPU) | `--lighting` |
 | Per-atom selector styles and materials | Repeatable `--atom-group` |
 | Per-bond selector styles and paint | Repeatable `--bond-group` |
 | World-space vectors | `--vector-overlays` |
