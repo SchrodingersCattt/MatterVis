@@ -1,0 +1,25 @@
+{
+  "purpose": "Synthetic public fixture for the visible-frame desktop retest. No unpublished structure is included.",
+  "base_sha": "23470b2baf98664360284ef843fb9c68c49fce26",
+  "docs": [
+    "docs/reliability-scene-delivery.md",
+    "docs/agents/view_updates_api.md"
+  ],
+  "initial_state": "Load two-atom.cif twice so two scenes show the same two atoms. Keep the first scene selected until both atoms are visible. The status line may show counts before the first frame is mounted; that interval is loading.",
+  "fixtures": [
+    {
+      "file": "two-atom.cif",
+      "atoms": ["C", "O"],
+      "role": "Public two-atom scene. Load it twice. The second copy is the scene whose atoms are hidden."
+    }
+  ],
+  "empty_scene": "The structure reader does not open a CIF with an empty atom site loop. The empty final intent is the second scene after every atom is hidden, not a separate zero-atom file.",
+  "steps": [
+    "Start from the extracted source archive. Do not clone.",
+    "Open two-atom.cif twice. Keep the first scene selected until both atoms are visible.",
+    "On the first scene, use Fit, Reset, and both projections. Both atoms stay visible. A blank before the first frame appears is loading; a blank after the atoms were already visible is a failure.",
+    "On the second scene, hide every atom and leave any enabled cell or overlay. The first scene's atoms do not remain. Switching back to the first scene shows both atoms again.",
+    "On the first scene, hide every atom, then show them again. The canvas matches each choice. A publication-image mode, when available, replaces the ball-and-stick figure with that image; invisible anchor markers do not keep the old atoms on screen.",
+    "Repeat one Fit and one scene switch immediately after an edit. The last selected scene and the last edit remain."
+  ]
+}
