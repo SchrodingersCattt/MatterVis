@@ -258,6 +258,22 @@ def _range_aspect_ratio(xr, yr, zr) -> dict | None:
     return {"x": float(scaled[0]), "y": float(scaled[1]), "z": float(scaled[2])}
 
 
+def scaled_scene_aspect(aspectratio, style: dict | None):
+    """Uniform Fit zoom. Reset and a missing scale leave the range aspect."""
+
+    if not isinstance(aspectratio, Mapping):
+        return None
+    if not style:
+        return {axis: float(aspectratio[axis]) for axis in ("x", "y", "z")}
+    try:
+        scale = float(style.get("camera_aspect_scale") or 1.0)
+    except (TypeError, ValueError):
+        scale = 1.0
+    if not math.isfinite(scale) or scale <= 0.0:
+        scale = 1.0
+    return {axis: float(aspectratio[axis]) * scale for axis in ("x", "y", "z")}
+
+
 def flat_projected_pixel_scale(scene: dict, style: dict, *, ranges=None) -> float:
     """Return rendered pixels per Cartesian data unit for flat primitives."""
     if ranges is None:
@@ -749,6 +765,10 @@ def _auto_camera_fit_ranges(
         "focal_point",
     }.issubset(explicit):
         return ranges
+    # An eye is the camera Plotly is painting. A dict that also still
+    # carries the legacy position and focal point must not grow the box.
+    if "eye" in explicit:
+        return ranges
 
     projection = explicit.get("projection")
     if isinstance(projection, dict):
@@ -921,13 +941,16 @@ def figure_axis_layout(
         xr, yr, zr = viewport.ranges
         aspect_kwargs = {"aspectmode": viewport.aspectmode}
         if viewport.aspectratio is not None:
-            aspect_kwargs["aspectratio"] = dict(viewport.aspectratio)
+            aspect_kwargs["aspectratio"] = scaled_scene_aspect(viewport.aspectratio, style)
     else:
         if xr is None or yr is None or zr is None:
             raise TypeError("figure_axis_layout requires ranges or a viewport")
         aspect = _range_aspect_ratio(xr, yr, zr)
         if aspect is not None:
-            aspect_kwargs = {"aspectmode": "manual", "aspectratio": aspect}
+            aspect_kwargs = {
+                "aspectmode": "manual",
+                "aspectratio": scaled_scene_aspect(aspect, style),
+            }
         else:
             aspect_kwargs = {"aspectmode": "data"}
 
@@ -944,6 +967,7 @@ def figure_axis_layout(
         "ticks": "",
         "zeroline": False,
         "zerolinewidth": 0,
+        "autorange": False,
         "title": {"text": ""},
     }
     return {

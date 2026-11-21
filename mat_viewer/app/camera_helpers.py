@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from .shared import *
+from .camera_fit import *  # noqa: F401,F403
 
 class StaleCameraWrite(Exception):
     """A drag camera lost the compare-and-set at the locked write."""
@@ -9,6 +10,7 @@ class StaleCameraWrite(Exception):
 
 # Sentinel for ``patch_state``: callers that omit the fence do not opt in.
 _CAMERA_FENCE_UNSET = object()
+
 
 
 def _camera_store_payload(
@@ -145,6 +147,12 @@ def _plotly_camera(camera: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
     if not camera:
         return None
     if "eye" in camera:
+        if "position" in camera or "focal_point" in camera:
+            return {
+                key: value
+                for key, value in camera.items()
+                if key not in ("position", "focal_point")
+            }
         return camera
     position = np.array(camera.get("position", [0.0, 0.0, 1.0]), dtype=float)
     focal = np.array(camera.get("focal_point", [0.0, 0.0, 0.0]), dtype=float)

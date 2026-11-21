@@ -69,6 +69,10 @@ must not change scene B, and a stale revision must not replace a newer one.
   outside the frustum, is still replaced by `refit_scene_camera` before
   that pose is what the store paints. Every writer of
   `camera-state-store` uses `allow_duplicate`.
+- A fitted ratio is restored after the frame when `glplot.getAspectratio()`
+  still has the previous ratio, even if `_fullLayout` already shows the
+  fitted ratio. The layout comparison alone leaves the previous ratio on
+  the gl scene.
 - A complete frame whose scene id differs from the mounted scene is followed
   by a relayout of that figure's camera, axis ranges, aspect mode, aspect
   ratio, and `uirevision`. `Plotly.react` writes those values onto the

@@ -43,6 +43,7 @@ The same routing as a quick table:
 | If you want to… | Read |
 |---|---|
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
+| Fit the camera to unit-cell corners or atom extents in either projection | [`dash_service.md`](dash_service.md) |
 | Update an already-open viewer from an external script without reloading the page | [`dash_service.md`](dash_service.md) |
 | Download the active loaded source structure as CIF | [`dash_service.md#rest-endpoints`](dash_service.md) |
 | Detect a running server whose code is older than the files on disk | [`dash_service.md`](dash_service.md) |
