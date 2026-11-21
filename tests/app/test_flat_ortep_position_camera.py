@@ -119,6 +119,15 @@ def test_plotly_scene_camera_drops_legacy_keys() -> None:
     )
     assert degenerate is not None
     assert np.allclose(_eye(degenerate), [0.0, 0.0, 1.8])
+    flat_up = _plotly_scene_camera(
+        {
+            "position": [0.0, 0.0, 2.0],
+            "focal_point": [0.0, 0.0, 0.0],
+            "up": [0.0, 0.0, 0.0],
+        }
+    )
+    assert flat_up is not None
+    assert (flat_up["up"]["x"], flat_up["up"]["y"], flat_up["up"]["z"]) == (0.0, 1.0, 0.0)
 
 
 def test_flat_ortep_accepts_stored_position_camera_and_keeps_other_modes(tmp_path: Path):
@@ -283,5 +292,26 @@ def test_nonfinite_position_camera_is_not_replaced() -> None:
                 "position": [float("nan"), 0.0, 1.0],
                 "focal_point": [0.0, 0.0, 0.0],
                 "up": [0.0, 1.0, 0.0],
+            }
+        )
+
+
+def test_plotly_scene_camera_accepts_array_vectors_and_rejects_nonfinite_ones() -> None:
+    converted = _plotly_scene_camera(
+        {
+            "position": np.array([0.0, 0.0, 3.0]),
+            "focal_point": np.array([0.0, 0.0, 0.0]),
+            "up": np.array([0.0, 0.0, 1.0]),
+        }
+    )
+    assert converted is not None
+    assert np.allclose(_eye(converted), [0.0, 0.0, 1.8])
+    assert (converted["up"]["x"], converted["up"]["y"], converted["up"]["z"]) == (0.0, 0.0, 1.0)
+    with pytest.raises(ValueError):
+        _plotly_scene_camera(
+            {
+                "eye": np.array([1.0, float("nan"), 0.0]),
+                "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "up": {"x": 0.0, "y": 1.0, "z": 0.0},
             }
         )
