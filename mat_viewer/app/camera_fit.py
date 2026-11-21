@@ -190,7 +190,6 @@ def fit_target_points(
 
     from ..render.radius import atom_visual_radius
     from ..render.screen_projection import FIT_ATOM_EXTENT_A
-    from ..render.traces_atoms import _coordination_ball_stick
     from ..render.traces_overlays import UNIT_CELL_TUBE_RADIUS_A
 
     mode = projection
@@ -233,6 +232,9 @@ def fit_target_points(
         try:
             # Mesh spheres are built with representation "ball" even when
             # the style is ball-and-stick. The 0.46 factor is not what is drawn.
+            # Coordination still follows the drawn ball-and-stick style: the
+            # site flag is stamped at scene build and is not a second radius.
+            drawn = str(style.get("style", "")).lower().replace("-", "_")
             radius = atom_visual_radius(
                 radius,
                 element=str(atom.get("elem") or "C"),
@@ -240,7 +242,9 @@ def fit_target_points(
                 atom_scale=float(style.get("atom_scale") or 1.0),
                 style=style,
                 bond_radius=style.get("bond_radius"),
-                coordination=_coordination_ball_stick(atom, style),
+                coordination=(
+                    drawn == "ball_stick" and bool(atom.get("_coordination_site"))
+                ),
             )
         except (TypeError, ValueError):
             pass
