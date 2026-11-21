@@ -34,6 +34,8 @@ function harness() {
         names: traces.map(trace => trace && trace.name || ''),
         visible: traces.map(trace => !trace || trace.visible !== false),
         xLengths: traces.map(trace => trace && trace.x ? trace.x.length : 0),
+        projection: figure.layout && figure.layout.scene && figure.layout.scene.camera
+          && figure.layout.scene.camera.projection && figure.layout.scene.camera.projection.type || '',
       });
       target.layout = clone(figure.layout || {});
       target.data = traces;
@@ -67,7 +69,8 @@ function harness() {
         meta: Object.assign({mattervis_render: Object.assign({}, expected, {scene_id: scene,
           render_revision: revision, camera_revision: revision, camera_version: revision})},
           extra.meta || {})};
-      Object.keys(extra).forEach(key => { if (key !== 'meta') layout[key] = extra[key]; });
+      if (extra.projection) layout.scene.camera.projection = {type: extra.projection};
+      Object.keys(extra).forEach(key => { if (key !== 'meta' && key !== 'projection') layout[key] = extra[key]; });
       return sandbox.window.Plotly.react(gd, {data: data, layout: layout});
     },
     submitUntyped(data) {
@@ -457,4 +460,47 @@ def test_inflight_same_revision_new_generation_remains_after_the_first_write():
   assert.equal(h.gd.data[0].name, 'restored');
   assert.equal(h.gd.layout.scene.uirevision, 'scene-a__name__1__viewport');
   assert.equal(h.gd.layout.meta.mattervis_render.scene_generation, 4);
+""")
+
+
+def test_out_of_order_empty_hidden_and_projection_scene_mounts_what_plotly_installed():
+    """An empty committed frame, hidden geometry, and a new projection scene.
+
+    The three arrive while a frame is still queued, and the obsolete figures
+    arrive on either side of the scene the user selected. Each call resolves.
+    The mounted identity is the frame Plotly installed, which is the new
+    scene and its projection.
+    """
+    _run_node(r"""
+  const h = harness();
+  await h.submit('scene-a', 1, h.trace());
+  let release;
+  const blocker = h.root.MatterVisRenderQueue.enqueue(h.gd,
+    () => new Promise(resolve => { release = resolve; }));
+  await spinUntil(() => typeof release === 'function');
+  h.expected.scene_id = 'scene-b';
+  h.expected.scene_generation = 3;
+  h.expected.render_revision = 1;
+  h.expected.camera_revision = 1;
+  h.commitExpectation();
+  const hiddenTrace = [{type: 'scatter3d', name: 'atom', x: [0], y: [0], z: [0], visible: false}];
+  const emptied = h.submit('scene-a', 8, []);
+  const projected = h.submit('scene-b', 1, h.trace(), {projection: 'orthographic'});
+  const hidden = h.submit('scene-a', 9, hiddenTrace);
+  release();
+  const settled = await Promise.allSettled([emptied, projected, hidden, blocker]);
+  assert.equal(settled.every(item => item.status === 'fulfilled'), true,
+    'an out-of-order frame rejected instead of resolving');
+  assert.deepEqual(h.frames.map(frame => [frame.scene, frame.generation, frame.revision, frame.traces, frame.projection]),
+    [['scene-a', 1, 1, 1, ''], ['scene-b', 3, 1, 1, 'orthographic']],
+    'an empty or hidden frame replaced the projection scene');
+  const mounted = h.frames.at(-1);
+  assert.equal(h.gd.layout.meta.mattervis_render.scene_id, mounted.scene);
+  assert.equal(h.gd.layout.meta.mattervis_render.scene_generation, mounted.generation);
+  assert.equal(h.gd.layout.meta.mattervis_render.render_revision, mounted.revision);
+  assert.equal(h.gd.layout.scene.camera.projection.type, mounted.projection);
+  assert.equal(h.gd.data.length, mounted.traces);
+  assert.equal(h.gd.data[0].visible, true);
+  assert.ok(String(h.gd.__mvDeliveredFrame).includes('scene-b'));
+  assert.ok(!String(h.gd.__mvDeliveredFrame).includes('scene-a'));
 """)
